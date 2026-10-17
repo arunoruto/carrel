@@ -19,6 +19,15 @@ install carrel-v*/carrel ~/.local/bin/
 
 Each archive comes with a `.sha256` checksum.
 
+## With bin
+
+[bin](https://github.com/marcosnils/bin) picks the right archive for your platform, unpacks it and keeps track of the version:
+
+```sh
+bin install github.com/arunoruto/carrel
+bin update carrel                          # later, to get a new release
+```
+
 ## Nix
 
 The repository is a flake:

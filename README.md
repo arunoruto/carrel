@@ -23,7 +23,7 @@ Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [release
 nix run github:arunoruto/carrel
 ```
 
-or with Cargo: `cargo install --git https://github.com/arunoruto/carrel`. Outside of Nix, text extraction needs [uv](https://docs.astral.sh/uv/).
+with [bin](https://github.com/marcosnils/bin): `bin install github.com/arunoruto/carrel`, or with Cargo: `cargo install --git https://github.com/arunoruto/carrel`. Outside of Nix, text extraction needs [uv](https://docs.astral.sh/uv/).
 
 ## Quick start
 
