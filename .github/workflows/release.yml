@@ -1,0 +1,63 @@
+name: Release
+
+# Conventional commits on main drive semantic versioning: release-please keeps a release PR with the
+# next version (fix: patch, feat: minor, feat!: major; minor while < 1.0) and the changelog. Merging it
+# tags the release, and the binaries below are attached to it.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  binaries:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TERM_COLOR: always
+      TARGET: ${{ matrix.target }}
+      TAG: ${{ needs.release-please.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked --target "$TARGET"
+      - run: target/"$TARGET"/release/carrel --version
+      - name: Package
+        run: |
+          name="carrel-$TAG-$TARGET"
+          mkdir "$name"
+          cp target/"$TARGET"/release/carrel README.md LICENSE-MIT LICENSE-APACHE "$name"/
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - run: gh release upload "$TAG" carrel-*.tar.gz carrel-*.tar.gz.sha256
+        env:
+          GH_TOKEN: ${{ github.token }}

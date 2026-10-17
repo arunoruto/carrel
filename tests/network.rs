@@ -1,0 +1,113 @@
+//! Tests against the real services: arXiv, doi.org, Crossref, Semantic Scholar. They need internet
+//! (and `uv` for the real extractor), so they are ignored by default, which keeps `cargo test` and
+//! sandboxed builds such as Nix offline. Run them with `cargo test -- --ignored`.
+//! Semantic Scholar rate-limits anonymous use; set S2_API_KEY if those tests fail with 429.
+
+mod common;
+
+use carrel::Library;
+use carrel::fetch::{self, Ids};
+use common::*;
+
+/// The services rate-limit: one test at a time.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A library using the real extractor.
+fn real_library(tmp: &Tmp) -> Library {
+    let mut lib = library(tmp);
+    lib.extractor = carrel::DEFAULT_EXTRACTOR.into();
+    lib
+}
+
+fn ids(doi: Option<&str>, arxiv: Option<&str>) -> Ids {
+    Ids { doi: doi.map(String::from), arxiv: arxiv.map(String::from) }
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn arxiv_paper_with_pdf_and_text() {
+    let _turn = one_at_a_time();
+    let tmp = Tmp::new("net-arxiv");
+    let lib = real_library(&tmp);
+    let (id, messages) = lib.add("https://arxiv.org/abs/1706.03762v7").unwrap();
+    assert_eq!(id, "vaswani2017attention", "{messages:?}");
+    let p = lib.get(&id).unwrap();
+    assert_eq!((p.bib.arxiv().as_deref(), p.bib.year()), (Some("1706.03762"), Some(2017)));
+    assert_eq!(p.bib.authors().len(), 8);
+    assert!(p.pdf().is_some() && p.fulltext().unwrap().contains("Transformer"));
+    assert!(p.figures().iter().any(|f| f.starts_with("page-")), "{:?}", p.figures());
+    assert!(lib.add("arXiv:1706.03762").unwrap_err().to_string().contains("already in the library"));
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn journal_metadata() {
+    let _turn = one_at_a_time();
+    let tmp = Tmp::new("net-doi");
+    let lib = library(&tmp);
+    let (id, _) = lib.add("https://doi.org/10.1038/nature14539").unwrap();
+    let b = lib.get(&id).unwrap().bib;
+    assert_eq!((id.as_str(), b.kind.as_str()), ("lecun2015deep", "article"));
+    assert_eq!((b.get("journal").as_deref(), b.get("pages").as_deref()), (Some("Nature"), Some("436--444")));
+
+    let aps = fetch::metadata(&ids(Some("10.1103/PhysRevLett.116.061102"), None)).unwrap();
+    assert_eq!(aps.get("pages").as_deref(), Some("061102"), "APS article numbers");
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn arxiv_specialities() {
+    let _turn = one_at_a_time();
+    let old = fetch::metadata(&ids(None, Some("hep-th/9711200"))).unwrap();
+    assert!(old.title().contains("Large N"), "{}", old.title());
+    assert_eq!(old.arxiv().as_deref(), Some("hep-th/9711200"));
+    let latex = fetch::metadata(&ids(None, Some("2609.13189"))).unwrap();
+    assert!(latex.to_bib("k").contains(r"$\mathbb R_{\mathcal Q}$"), "math stays LaTeX: {}", latex.to_bib("k"));
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn finding_by_title() {
+    let _turn = one_at_a_time();
+    let found = fetch::by_title("Denoising Diffusion Probabilistic Models").unwrap();
+    assert_eq!(found.arxiv.as_deref(), Some("2006.11239"));
+    let error = fetch::by_title("diffusion models survey").unwrap_err().to_string();
+    assert!(error.contains("no paper is titled exactly") && error.lines().count() > 2, "{error}");
+    assert!(!fetch::search("attention transformer translation").unwrap().is_empty());
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn preprint_becomes_published() {
+    let _turn = one_at_a_time();
+    let tmp = Tmp::new("net-update");
+    let lib = library(&tmp); // the fake extractor: only metadata matters here
+    let (id, _) = lib.add("1311.2524").unwrap();
+    assert_eq!(lib.get(&id).unwrap().bib.kind, "misc");
+    let changes = lib.update(&id, None).unwrap();
+    let b = lib.get(&id).unwrap().bib;
+    assert_eq!((b.kind.as_str(), b.doi().as_deref()), ("inproceedings", Some("10.1109/CVPR.2014.81")), "{changes:?}");
+    assert_eq!(b.arxiv().as_deref(), Some("1311.2524"), "keeps its arXiv id");
+    assert_eq!(lib.update(&id, None).unwrap(), ["already up to date"]);
+}
+
+#[test]
+#[ignore = "needs internet"]
+fn citation_graph() {
+    let _turn = one_at_a_time();
+    let tmp = Tmp::new("net-refs");
+    let lib = library(&tmp);
+    paper(&lib, "ddpm", "title = {Denoising Diffusion Probabilistic Models}, eprint = {2006.11239}");
+    paper(&lib, "attention", "title = {Attention Is All You Need}, eprint = {1706.03762}");
+    let references = lib.related("ddpm", false).unwrap();
+    assert!(references.len() > 30);
+    assert!(references.iter().any(|c| c.in_library.as_deref() == Some("attention")), "known papers are marked");
+    assert!(!lib.related("attention", true).unwrap().is_empty(), "cited by others");
+    assert!(
+        fetch::published_doi("1512.03385").unwrap().is_some_and(|doi| doi.to_lowercase() == "10.1109/cvpr.2016.90")
+    );
+}

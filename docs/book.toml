@@ -1,0 +1,17 @@
+[book]
+title = "carrel"
+description = "A research paper library for you and your AI"
+authors = ["Mirza Arnaut"]
+language = "en"
+
+[output.html]
+site-url = "/carrel/"
+git-repository-url = "https://github.com/arunoruto/carrel"
+edit-url-template = "https://github.com/arunoruto/carrel/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+additional-css = ["theme/carrel.css"]
+
+[output.html.fold]
+enable = true
+level = 1

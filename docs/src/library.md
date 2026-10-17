@@ -1,0 +1,40 @@
+# The library
+
+The library is a folder of plain files, by default `~/Documents/carrel` (see [Configuration](configuration.md)). carrel reads them fresh every time, so you can edit, sync or version them with any tool.
+
+```text
+~/Documents/carrel/
+  vaswani2017attention/
+    vaswani2017attention.bib   metadata and approved keywords; the key is the folder name
+    vaswani2017attention.pdf
+    fulltext.md                the extracted text
+    figures/                   the extracted figures, named by page
+    summary.md                 an approved summary
+    notes.md                   your notes, and approved AI notes
+    drafts/                    AI proposals waiting for review
+    supplementary/             extra files; PDFs among them get their text next to them
+  projects/
+    thesis.txt                 a project: one paper id per line
+```
+
+## Citation keys
+
+A paper's key names its folder, its `.bib` and PDF, and its BibTeX entry, so `\cite{vaswani2017attention}` and Typst's `@vaswani2017attention` work directly.
+
+By default a key is the first author's family name, the year and the first meaningful title word, in ASCII: `vaswani2017attention`, `muller2021uber`. A second paper with the same key gets `b`, `c`, … appended. The format is a template you can change ([Configuration](configuration.md#citation-keys)).
+
+Keys never change on their own, so citations keep working. `carrel rename <id> [new]` changes one on purpose: folder, files, `.bib` key and project lists together.
+
+## The .bib files
+
+Each paper's metadata is a single BibTeX entry. carrel keeps values exactly as written, so hand edits and fields it doesn't know survive. Text from the web is escaped for LaTeX, while math such as `$\beta$` passes through untouched. Approved keywords go into the entry's `keywords` field.
+
+`carrel edit <id>` opens the `.bib` in `$VISUAL`/`$EDITOR` and checks it afterwards.
+
+## Search
+
+`carrel search` (and `/` in the TUI) ranks papers by where words appear: titles count most, then keywords, authors, abstracts and summaries, notes, and the full text including supplementary material. Words match while you type (`diffu` finds diffusion) and by stem (`network` finds networks). If no paper has every word, any word counts.
+
+Search a single field with `field:word`: `title`, `author`, `keyword`, `year`, `venue`, `doi`, `abstract`, `summary`, `notes`, `text`. Search a project with `project:name`.
+
+The index lives in SQLite in `~/.cache/carrel` and only mirrors the files; carrel updates it before each search and rebuilds it if it is ever damaged.
