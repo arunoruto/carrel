@@ -139,6 +139,12 @@ impl Paper {
     }
 }
 
+/// `$XDG_CONFIG_HOME`-style variables count on every platform, as command-line users expect (the
+/// `dirs` crate ignores them on macOS); otherwise `fallback`.
+fn xdg_dir(var: &str, fallback: Option<PathBuf>) -> Option<PathBuf> {
+    std::env::var_os(var).map(PathBuf::from).filter(|dir| dir.is_absolute()).or(fallback)
+}
+
 /// The default citation key: `vaswani2017attention`.
 pub const DEFAULT_KEY: &str = "{{ author | lower }}{{ year }}{{ word | lower }}";
 
@@ -156,8 +162,10 @@ pub struct Config {
 }
 
 impl Config {
+    /// `$XDG_CONFIG_HOME/carrel/config.toml`, by default `~/.config/carrel/config.toml`, on macOS too.
     pub fn path() -> Option<PathBuf> {
-        dirs::config_dir().map(|dir| dir.join("carrel").join("config.toml"))
+        let dir = xdg_dir("XDG_CONFIG_HOME", dirs::home_dir().map(|home| home.join(".config")));
+        dir.map(|dir| dir.join("carrel").join("config.toml"))
     }
 
     pub fn load() -> Result<Self> {
@@ -209,7 +217,7 @@ impl Library {
         let root = root.into();
         fs::create_dir_all(&root).with_context(|| format!("cannot create a library at {}", root.display()))?;
         let root = root.canonicalize()?;
-        let cache = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("carrel");
+        let cache = xdg_dir("XDG_CACHE_HOME", dirs::cache_dir()).unwrap_or_else(std::env::temp_dir).join("carrel");
         let mut hash = DefaultHasher::new();
         root.hash(&mut hash);
         let index = cache.join(format!("index-{:016x}.sqlite", hash.finish()));

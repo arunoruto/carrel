@@ -38,7 +38,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Offline tests only; the ones needing internet are #[ignore]d.
-      - run: cargo test --locked
+      - run: cargo test --locked --no-fail-fast
 
   nix:
     strategy:

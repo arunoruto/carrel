@@ -1,6 +1,6 @@
 # Configuration
 
-Settings live in `~/.config/carrel/config.toml` (on macOS `~/Library/Application Support/carrel/config.toml`); every one is optional. `carrel config` shows the paths in use.
+Settings live in `~/.config/carrel/config.toml` (or `$XDG_CONFIG_HOME/carrel/config.toml`), on Linux and macOS alike; every one is optional. `carrel config` shows the paths in use.
 
 ```toml
 library = "~/Documents/carrel"
