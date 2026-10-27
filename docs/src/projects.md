@@ -22,6 +22,16 @@ carrel bib vaswani2017attention ho2020denoising    # just these
 carrel bib                                         # the whole library
 ```
 
+### JabRef and other reference managers
+
+JabRef (or any tool that reads BibTeX) can browse the library through one generated file. `--files` adds each PDF's path in JabRef's `file` field, so it opens the PDFs too:
+
+```sh
+carrel bib --files > ~/Documents/carrel.bib
+```
+
+carrel's own files stay the source: regenerate the file after changes, and edit metadata with `carrel edit`, since JabRef's edits stay in the generated file. Don't commit it to a [shared library](sharing.md): the paths are absolute.
+
 ## Keeping a project in step with your writing
 
 ```sh
