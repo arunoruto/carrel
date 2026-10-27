@@ -29,7 +29,7 @@ Everything an assistant writes (a summary, keywords, notes) becomes a draft in t
 ```sh
 carrel drafts
 carrel approve ho2020denoising summary             # replaces the summary
-carrel approve ho2020denoising keywords            # replaces the .bib's keywords
+carrel approve ho2020denoising keywords            # adds to the .bib's keywords
 carrel approve ho2020denoising notes               # appended to your notes
 carrel approve ho2020denoising references          # adds references read from the full text
 carrel authors approve 1                           # a proposal that two spellings are one person

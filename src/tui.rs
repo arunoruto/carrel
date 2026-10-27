@@ -665,6 +665,7 @@ impl App {
         let heading = match field {
             Field::Notes => "Current notes (the draft is appended)",
             Field::References => "Current references (the draft adds those not in it)",
+            Field::Keywords => "Current keywords (the draft adds those not there yet)",
             _ => "Current version (the draft replaces it)",
         };
         lines.push(heading.bold().into());

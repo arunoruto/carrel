@@ -202,13 +202,13 @@ fn attaching_and_supplementary_files() {
 fn drafts() {
     let tmp = Tmp::new("drafts");
     let lib = library(&tmp);
-    paper(&lib, "p", "title = {P}, keywords = {old}");
+    paper(&lib, "p", "title = {P}, keywords = {old, graphs}");
     assert!(lib.propose("p", Field::Summary, " \n\t ").is_err(), "empty");
     assert!(lib.propose("nope", Field::Summary, "x").is_err());
     lib.propose("p", Field::Keywords, "- Graphs\n* graphs; Spectra,, ").unwrap();
     assert_eq!(lib.get("p").unwrap().draft(Field::Keywords).unwrap(), "Graphs\nSpectra\n");
     lib.approve("p", Field::Keywords).unwrap();
-    assert_eq!(lib.get("p").unwrap().bib.keywords(), ["Graphs", "Spectra"], "replaces the old keywords");
+    assert_eq!(lib.get("p").unwrap().bib.keywords(), ["old", "graphs", "Spectra"], "added; your tags stay, no doubles");
     assert!(lib.approve("p", Field::Keywords).is_err(), "nothing left to approve");
     assert!(lib.reject("p", Field::Summary).is_err());
 
@@ -410,4 +410,106 @@ fn trees_and_people() {
     fs::write(lib.root.join("people/broken.json"), "{").unwrap();
     assert!(lib.doctor().iter().any(|i| i.check == "people"));
     assert!(lib.graph().is_err(), "a broken decision is not silently ignored");
+}
+
+/// A tiny I, Librarian data folder: its database with only what the import reads, and one PDF.
+#[test]
+fn moving_from_ilibrarian() {
+    let tmp = Tmp::new("ilibrarian");
+    let lib = library(&tmp);
+    tmp.write("ilib/pdfs/000/000/000000001.pdf", FAKE_PDF);
+    fs::create_dir_all(tmp.path("ilib/database")).unwrap();
+    let db = rusqlite::Connection::open(tmp.path("ilib/database/main.db")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT);
+        CREATE TABLE items (id INTEGER PRIMARY KEY, title TEXT, primary_title_id INTEGER, secondary_title_id INTEGER,
+            tertiary_title_id INTEGER, publication_date TEXT, volume TEXT, issue TEXT, pages TEXT, abstract TEXT,
+            publisher TEXT, place_published TEXT, reference_type TEXT, bibtex_id TEXT, bibtex_type TEXT, urls TEXT);
+        CREATE TABLE primary_titles (id INTEGER PRIMARY KEY, primary_title TEXT);
+        CREATE TABLE secondary_titles (id INTEGER PRIMARY KEY, secondary_title TEXT);
+        CREATE TABLE tertiary_titles (id INTEGER PRIMARY KEY, tertiary_title TEXT);
+        CREATE TABLE authors (id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT);
+        CREATE TABLE items_authors (item_id INTEGER, author_id INTEGER, position INTEGER);
+        CREATE TABLE editors (id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT);
+        CREATE TABLE items_editors (item_id INTEGER, editor_id INTEGER, position INTEGER);
+        CREATE TABLE uids (id INTEGER PRIMARY KEY, uid_type TEXT, uid TEXT, item_id INTEGER);
+        CREATE TABLE keywords (id INTEGER PRIMARY KEY, keyword TEXT);
+        CREATE TABLE items_keywords (item_id INTEGER, keyword_id INTEGER);
+        CREATE TABLE tags (id INTEGER PRIMARY KEY, tag TEXT);
+        CREATE TABLE items_tags (item_id INTEGER, tag_id INTEGER);
+        CREATE TABLE projects (id INTEGER PRIMARY KEY, user_id INTEGER, project TEXT);
+        CREATE TABLE projects_items (project_id INTEGER, item_id INTEGER, added_time TEXT);
+        CREATE TABLE item_notes (id INTEGER PRIMARY KEY, user_id INTEGER, item_id INTEGER, note TEXT);
+        CREATE TABLE markers (id INTEGER PRIMARY KEY, user_id INTEGER, item_id INTEGER, page INTEGER,
+            marker_position INTEGER, marker_top INTEGER, marker_color TEXT, marker_text TEXT);
+        CREATE TABLE annotations (id INTEGER PRIMARY KEY, user_id INTEGER, item_id INTEGER, page INTEGER, annotation TEXT);
+
+        INSERT INTO users VALUES (1, 'mar');
+        INSERT INTO primary_titles VALUES (1, 'JQSRT');
+        INSERT INTO secondary_titles VALUES (1, 'Journal of Quantitative Spectroscopy and Radiative Transfer');
+        INSERT INTO items VALUES (1, 'CELES: CUDA-accelerated simulation of
+            electromagnetic scattering', 1, 1, NULL, '2017-06-06', '199', NULL, '1-12', 'Uses 10<sup>5</sup> spheres',
+            NULL, NULL, 'article', 'Egel-2017-ID1', 'article', 'https://doi.org/10.1016%2Fj.jqsrt.2017.05.010');
+        INSERT INTO items VALUES (2, 'Celes: CUDA-accelerated simulation of electromagnetic scattering', NULL, NULL,
+            NULL, '2017', NULL, NULL, NULL, NULL, NULL, NULL, 'article', 'Egel-2017-ID2', 'article', NULL);
+        INSERT INTO items VALUES (3, 'Introduction to Mineralogy', NULL, NULL, NULL, '2000-01-01', NULL, NULL, NULL,
+            NULL, 'Oxford University Press', 'New York', 'book', 'Nesse-2000-ID3', 'book', NULL);
+        INSERT INTO authors VALUES (1, 'Amos', 'Egel'), (2, 'Uli', 'Lemmer'), (3, 'William D.', 'Nesse');
+        INSERT INTO items_authors VALUES (1, 2, 2), (1, 1, 1), (2, 1, 1), (3, 3, 1);
+        INSERT INTO uids VALUES (1, 'DOI', '10.1016/j.jqsrt.2017.05.010', 1), (2, 'ARXIV', '1706.02145v1', 1),
+            (3, 'NASAADS', '2017JQSRT.199..103E', 1), (4, 'ISBN', '9780195346268', 3);
+        INSERT INTO keywords VALUES (1, 'T-matrix');
+        INSERT INTO items_keywords VALUES (1, 1);
+        INSERT INTO tags VALUES (1, 'Scattering'), (2, 'CUDA'), (3, 'Mineral');
+        INSERT INTO items_tags VALUES (1, 1), (1, 2), (3, 3);
+        INSERT INTO projects VALUES (1, 1, '2025 Space Weathering'), (2, 1, 'Empty');
+        INSERT INTO projects_items VALUES (1, 3, '2024'), (1, 2, '2025');
+        INSERT INTO item_notes VALUES (1, 1, 3, '<p>Source for the <a href=\"http://x.org/a\">olivine data.</a></p>');
+        INSERT INTO markers VALUES (1, 1, 1, 3, 43, 159, 'Y', 'Equations'), (2, 1, 1, 3, 44, 159, 'Y', 'form'),
+            (3, 1, 1, 3, 52, 174, 'Y', 'a system.'), (4, 1, 1, 3, 53, 174, 'R', 'Another'), (5, 1, 1, 4, 1, 10, 'Y', 'Next page');
+        INSERT INTO annotations VALUES (1, 1, 1, 3, 'H(x'')');",
+    )
+    .unwrap();
+
+    let imported = lib.import_ilibrarian(&tmp.path("ilib")).unwrap();
+    assert_eq!(imported.papers[&1], "egel2017celes");
+    assert_eq!(imported.papers[&2], "egel2017celes", "the same paper twice in I, Librarian: one paper");
+    assert!(
+        imported.messages.iter().any(|m| m.contains("already in the library as egel2017celes")),
+        "{:?}",
+        imported.messages
+    );
+    assert!(imported.messages.iter().any(|m| m.contains("\"2025 Space Weathering\" is now 2025-Space-Weathering")));
+
+    let p = lib.get("egel2017celes").unwrap();
+    assert_eq!(p.bib.title(), "CELES: CUDA-accelerated simulation of electromagnetic scattering", "one line");
+    assert_eq!(p.bib.authors(), ["Egel, Amos", "Lemmer, Uli"], "in their order");
+    assert_eq!(p.bib.venue().as_deref(), Some("Journal of Quantitative Spectroscopy and Radiative Transfer"));
+    assert_eq!((p.bib.year(), p.bib.arxiv().as_deref()), (Some(2017), Some("1706.02145")));
+    assert_eq!(p.bib.keywords(), ["CUDA", "Scattering", "T-matrix"], "tags, then the publisher's keywords");
+    assert_eq!(p.bib.get("ids").as_deref(), Some("Egel-2017-ID1"), "old citations keep working");
+    assert_eq!(p.bib.get("pages").as_deref(), Some("1--12"));
+    assert!(p.bib.raw("abstract").unwrap().contains("10$^{5}$"));
+    assert!(
+        p.bib.raw("adsurl").unwrap().contains("2017JQSRT.199..103E") && p.bib.get("url").is_none(),
+        "a doi.org URL is not kept"
+    );
+    assert!(p.pdf().is_some());
+    let notes = p.get(Field::Notes).unwrap();
+    assert!(notes.contains("- p. 3: \u{201c}Equations form a system.\u{201d}"), "one passage over two lines: {notes}");
+    assert!(
+        notes.contains("- p. 3: \u{201c}Another\u{201d}") && notes.contains("- p. 4: \u{201c}Next page\u{201d}"),
+        "{notes}"
+    );
+    assert!(notes.contains("- p. 3, margin note: H(x')") && !notes.contains("(mar)"), "{notes}");
+
+    let book = lib.get("nesse2000introduction").unwrap();
+    assert_eq!((book.bib.kind.as_str(), book.bib.get("isbn").as_deref()), ("book", Some("9780195346268")));
+    assert_eq!(book.get(Field::Notes).unwrap(), "Source for the [olivine data.](http://x.org/a)\n");
+    assert_eq!(lib.project("2025-Space-Weathering").unwrap(), ["nesse2000introduction", "egel2017celes"]);
+    assert!(lib.projects().len() == 1, "empty projects are left out");
+
+    let again = lib.import_ilibrarian(&tmp.path("ilib")).unwrap();
+    assert_eq!(lib.papers().0.len(), 2, "importing again adds nothing");
+    assert_eq!(again.papers.len(), 3);
 }

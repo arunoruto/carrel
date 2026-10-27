@@ -60,6 +60,10 @@ enum Cmd {
         #[arg(long)]
         pdfs: bool,
     },
+    /// Move an I, Librarian library over: its data folder (with database/main.db and pdfs/). Tags join the
+    /// keywords, notes and highlights go into notes.md, projects stay projects, old citation keys stay usable
+    #[command(name = "import-ilibrarian")]
+    ImportIlibrarian { data: PathBuf },
     /// Papers a paper cites (looked up once, then kept), or with --cited-by the papers citing it
     Refs {
         #[arg(required_unless_present = "all")]
@@ -257,6 +261,14 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Doctor { json, all } => doctor(&lib, json, all)?,
+        Cmd::ImportIlibrarian { data } => {
+            let imported = lib.import_ilibrarian(&data)?;
+            imported.messages.iter().for_each(|m| println!("{m}"));
+            let ids: std::collections::BTreeSet<&String> = imported.papers.values().collect();
+            let with_pdf = ids.iter().filter(|id| lib.get(id).is_ok_and(|p| p.pdf().is_some())).count();
+            println!("{} papers, {with_pdf} with a PDF", ids.len());
+            println!("next: `carrel extract --all` for their text, `carrel refs --all` for their references");
+        }
         Cmd::Import { bib, project, pdfs } => {
             let (ids, messages) = lib.import_bib(&bib, pdfs)?;
             messages.iter().for_each(|m| println!("{m}"));

@@ -9,6 +9,7 @@ Run `carrel <command> --help` for every option.
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |
 | `import <file.bib> [-p project] [--pdfs]` | import a `.bib`, keeping its keys |
+| `import-ilibrarian <data folder>` | move an [I, Librarian](adding-papers.md#moving-from-i-librarian) library over |
 | `list [-p project] [--json]` | all papers, or a project's |
 | `search <query>…` | full-text search, with `field:` and `project:` filters |
 | `show <id> [--json]` | a paper's details |

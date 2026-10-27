@@ -30,7 +30,7 @@ Keys never change on their own, so citations keep working. `carrel rename <id> [
 
 ## The .bib files
 
-Each paper's metadata is a single BibTeX entry. carrel keeps values exactly as written, so hand edits and fields it doesn't know survive. Text from the web is escaped for LaTeX, while math such as `$\beta$` passes through untouched. Approved keywords go into the entry's `keywords` field.
+Each paper's metadata is a single BibTeX entry. carrel keeps values exactly as written, so hand edits and fields it doesn't know survive. Text from the web is escaped for LaTeX, while math such as `$\beta$` passes through untouched. Keywords, your tags and those an AI proposed and you approved, live in the entry's `keywords` field; approving more adds to them.
 
 `carrel edit <id>` opens the `.bib` in `$VISUAL`/`$EDITOR` and checks it afterwards.
 

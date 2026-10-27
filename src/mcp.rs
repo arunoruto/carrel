@@ -69,7 +69,7 @@ struct FigureArgs {
 struct ProposeArgs {
     /// Paper id.
     id: String,
-    /// What to write: summary (Markdown), keywords (one per line or comma-separated), notes (Markdown, appended
+    /// What to write: summary (Markdown), keywords (one per line or comma-separated, added to its existing ones once approved), notes (Markdown, appended
     /// to existing notes once approved) or references (a JSON array of {title, authors (full names), year,
     /// venue, doi, arxiv}, read from the paper's reference list; those not known yet are added once approved).
     field: Field,

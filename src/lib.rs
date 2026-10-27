@@ -19,6 +19,7 @@ pub mod bib;
 mod doctor;
 pub mod fetch;
 pub mod graph;
+mod ilibrarian;
 mod index;
 mod projects;
 pub mod refs;
@@ -575,8 +576,7 @@ impl Library {
         papers.flat_map(|p| p.drafts().into_iter().map(move |f| (p.clone(), f))).collect()
     }
 
-    /// Accept a draft: a summary replaces the current one, keywords replace those in the .bib, notes are
-    /// appended, and references not known yet are added.
+    /// Accept a draft: a summary replaces the current one; keywords, notes and references not there yet are added.
     pub fn approve(&self, id: &str, field: Field) -> Result<()> {
         let mut p = self.get(id)?;
         let draft = p.dir.join("drafts").join(field.file());
@@ -584,7 +584,13 @@ impl Library {
         match field {
             Field::Summary => fs::rename(&draft, p.dir.join(field.file()))?,
             Field::Keywords => {
-                p.bib.set("keywords", Some(&text.lines().collect::<Vec<_>>().join(", ")));
+                let mut keywords = p.bib.keywords();
+                for k in text.lines().map(str::trim).filter(|k| !k.is_empty()) {
+                    if !keywords.iter().any(|old| old.eq_ignore_ascii_case(k)) {
+                        keywords.push(k.to_string());
+                    }
+                }
+                p.bib.set("keywords", Some(&keywords.join(", ")));
                 p.save()?;
                 fs::remove_file(&draft)?;
             }

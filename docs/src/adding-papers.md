@@ -44,6 +44,25 @@ carrel import ~/thesis/refs.bib -p thesis --pdfs
 
 Every entry becomes a paper with its key unchanged, so your documents' citations keep working. Entries already in the library are matched instead, `@string` macros are expanded, keys that can't name a folder get a new one (reported), and with `--pdfs` entries with an arXiv id get their PDF.
 
+## Moving from I, Librarian
+
+[I, Librarian](https://github.com/mkucej/i-librarian-free) keeps its library in a data folder: an SQLite database (`database/main.db`) and the PDFs (`pdfs/`). carrel reads it directly, which keeps more than a BibTeX export would:
+
+```sh
+carrel import-ilibrarian ~/backup/i-librarian/data   # copy the folder out first; carrel only reads it
+carrel extract --all                                 # then the text and figures
+carrel refs --all                                    # and the references
+```
+
+- Every item becomes a paper with a carrel key. Its old key (`Egel-2017-ID1`) stays in the `ids` field, which biber accepts as an alias, so documents citing it still compile.
+- Tags join the publisher's keywords in `keywords`, the field JabRef and Zotero use for tags too.
+- Notes, highlights (joined back into passages, with their page) and margin notes go into `notes.md`.
+- Projects become projects; spaces in their names become `-`.
+- Items I, Librarian holds twice become one paper. Importing again adds nothing new.
+- HTML in titles and abstracts becomes LaTeX: `M<sup>3</sup>` turns into `M$^{3}$`.
+
+With I, Librarian in Docker, the data folder is the volume mounted at `/app/data`; `docker cp <container>:/app/data ./ilibrarian-data` copies it out.
+
 ## When there is no identifier
 
 A PDF without DOI or arXiv id whose title isn't found still gets added, with its title from the PDF. Tell carrel which paper it is later:
