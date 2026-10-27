@@ -10,8 +10,10 @@ What `carrel mcp` offers an assistant. Paper ids are citation keys. The assistan
 | `get_paper` | `id` | metadata, abstract, summary, keywords, notes, figure and supplementary lists, pending drafts, file paths |
 | `read_paper` | `id`, `offset`, `length`, `file` | the full text (or a supplementary text file) in chunks, headed by where to continue |
 | `get_figure` | `id`, `name` | a figure as an image |
-| `related` | `id`, `cited_by` | the papers it cites, or that cite it, marked when in the library, with the id to add each by |
-| `propose` | `id`, `field`, `content` | stores a summary, keywords or notes as a draft for you to review |
+| `related` | `id`, `cited_by` | the papers it cites (each with its source), or that cite it, marked when in the library, with the id to add each by |
+| `neighbors` | `id` | the library papers it cites, that cite it and that share authors with it, and its references missing from the library |
+| `suggest` | `project`, `limit` | papers the library (or a project) cites most but doesn't have, with who cites them |
+| `propose` | `id`, `field`, `content` | stores a summary, keywords, notes or references (read from the full text) as a draft for you to review |
 | `bibtex` | `ids` or `project` | BibTeX entries |
 | `doctor` | | the library's problems, each with the command that fixes it |
 

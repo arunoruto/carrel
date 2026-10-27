@@ -72,8 +72,7 @@ impl Library {
                 }
             }
 
-            let keys = [b.doi().map(|d| d.to_lowercase()), b.arxiv(), Some(fetch::title_key(&b.title()))];
-            let keys: Vec<String> = keys.into_iter().flatten().filter(|k| !k.is_empty()).collect();
+            let keys = fetch::paper_keys(&fetch::Ids { doi: b.doi(), arxiv: b.arxiv() }, &b.title());
             if let Some(other) = keys.iter().find_map(|k| seen.get(k)) {
                 let message = format!("the same paper as {other}; keep one (`carrel rm`) after moving over its notes");
                 report("warning", "duplicate", id, message, None);

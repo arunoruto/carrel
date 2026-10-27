@@ -7,6 +7,7 @@
 //!   fulltext.md                extracted text
 //!   figures/                   extracted figures
 //!   summary.md  notes.md
+//!   references.json            what it cites, each with its source (graph.rs)
 //!   drafts/                    AI proposals waiting for review
 //! ```
 //!
@@ -16,8 +17,10 @@
 pub mod bib;
 mod doctor;
 pub mod fetch;
+pub mod graph;
 mod index;
 mod projects;
+pub mod refs;
 mod update;
 
 pub use doctor::Issue;
@@ -39,25 +42,28 @@ pub enum Field {
     Summary,
     Keywords,
     Notes,
+    References,
 }
 
 impl Field {
-    pub const ALL: [Field; 3] = [Field::Summary, Field::Keywords, Field::Notes];
+    pub const ALL: [Field; 4] = [Field::Summary, Field::Keywords, Field::Notes, Field::References];
 
     pub fn name(self) -> &'static str {
         match self {
             Field::Summary => "summary",
             Field::Keywords => "keywords",
             Field::Notes => "notes",
+            Field::References => "references",
         }
     }
 
-    /// File name of its draft; summary and notes keep that name once approved, keywords go into the .bib.
+    /// File name of its draft; all but keywords (which go into the .bib) keep that name once approved.
     pub fn file(self) -> &'static str {
         match self {
             Field::Summary => "summary.md",
             Field::Keywords => "keywords.txt",
             Field::Notes => "notes.md",
+            Field::References => graph::FILE,
         }
     }
 }
@@ -350,6 +356,13 @@ impl Library {
             messages.push("attached the PDF to the existing entry".into());
             return Ok((old.id, messages));
         }
+        let known = fetch::Ids { doi: bib.doi(), arxiv: bib.arxiv() };
+        if !known.is_empty() {
+            match graph::look_up(&refs::sources(), &known, &bib.title()) {
+                Ok(found) => graph::write(&tmp.0, &found)?,
+                Err(e) => messages.push(format!("references: {e:#}")),
+            }
+        }
         let id = self.unique_id(&citekey(&self.key, &bib)?);
         fs::write(tmp.0.join(format!("{id}.bib")), bib.to_bib(&id))?;
         if has_pdf {
@@ -441,10 +454,14 @@ impl Library {
         }
     }
 
-    /// The papers a paper cites, or with `cited_by` the papers citing it (Semantic Scholar).
+    /// The papers a paper cites (its [references](Library::references)), or with `cited_by` the papers
+    /// citing it (Semantic Scholar).
     pub fn related(&self, id: &str, cited_by: bool) -> Result<Vec<fetch::Candidate>> {
+        if !cited_by {
+            return Ok(self.references(id, false)?.into_iter().map(|(r, found)| r.candidate(found)).collect());
+        }
         let bib = self.get(id)?.bib;
-        let mut found = fetch::related(&fetch::Ids { doi: bib.doi(), arxiv: bib.arxiv() }, cited_by)?;
+        let mut found = fetch::related(&fetch::Ids { doi: bib.doi(), arxiv: bib.arxiv() }, true)?;
         self.mark_known(&mut found);
         Ok(found)
     }
@@ -538,6 +555,7 @@ impl Library {
         let p = self.get(id)?;
         let content = match field {
             Field::Keywords => normalize_keywords(content),
+            Field::References => graph::ai_draft(content)?,
             _ => content.trim().to_string(),
         };
         if content.is_empty() {
@@ -554,7 +572,8 @@ impl Library {
         papers.flat_map(|p| p.drafts().into_iter().map(move |f| (p.clone(), f))).collect()
     }
 
-    /// Accept a draft: a summary replaces the current one, keywords replace those in the .bib, notes are appended.
+    /// Accept a draft: a summary replaces the current one, keywords replace those in the .bib, notes are
+    /// appended, and references not known yet are added.
     pub fn approve(&self, id: &str, field: Field) -> Result<()> {
         let mut p = self.get(id)?;
         let draft = p.dir.join("drafts").join(field.file());
@@ -570,6 +589,11 @@ impl Library {
                 let old = p.get(Field::Notes).filter(|n| !n.trim().is_empty());
                 let notes = old.map_or(text.clone(), |old| format!("{}\n\n{text}", old.trim_end()));
                 fs::write(p.dir.join(field.file()), notes)?;
+                fs::remove_file(&draft)?;
+            }
+            Field::References => {
+                let drafted: Vec<graph::Reference> = serde_json::from_str(&text)?;
+                graph::write(&p.dir, &graph::merge(graph::read(&p.dir)?.unwrap_or_default(), drafted))?;
                 fs::remove_file(&draft)?;
             }
         }

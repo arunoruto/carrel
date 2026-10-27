@@ -125,10 +125,12 @@ fn tools() {
             "get_paper",
             "list_papers",
             "list_projects",
+            "neighbors",
             "propose",
             "read_paper",
             "related",
-            "search"
+            "search",
+            "suggest"
         ]
     );
     for t in tools.as_array().unwrap() {
@@ -155,6 +157,18 @@ fn tools() {
     assert!(paper["summary"].as_str().unwrap().contains("recurrence"));
     assert!(ai.error("get_paper", json!({"id": "../../etc"})).contains("invalid paper id"));
     assert!(ai.error("get_paper", json!({"id": "nope"})).contains("no paper"));
+
+    tmp.write(
+        "lib/vaswani2017attention/references.json",
+        r#"[{"title": "Denoising diffusion probabilistic models", "source": "ads"}]"#,
+    );
+    assert_eq!(ai.json("neighbors", json!({"id": "ho2020denoising"}))["cited_by"], json!(["vaswani2017attention"]));
+    let refs = ai.json("related", json!({"id": "vaswani2017attention"}));
+    assert_eq!((refs[0]["source"].clone(), refs[0]["in_library"].clone()), (json!("ads"), json!("ho2020denoising")));
+    assert_eq!(ai.json("suggest", json!({})), json!([]), "everything it cites is in the library");
+    assert!(ai.error("related", json!({"id": "ho2020denoising"})).contains("no source has its references"));
+    ai.text("propose", json!({"id": "ho2020denoising", "field": "references", "content": "[{\"title\": \"Gone\"}]"}));
+    assert_eq!(ai.json("suggest", json!({})), json!([]), "a draft counts only once approved");
 }
 
 #[test]

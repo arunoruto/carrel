@@ -31,6 +31,7 @@ carrel drafts
 carrel approve ho2020denoising summary             # replaces the summary
 carrel approve ho2020denoising keywords            # replaces the .bib's keywords
 carrel approve ho2020denoising notes               # appended to your notes
+carrel approve ho2020denoising references          # adds references read from the full text
 carrel reject ho2020denoising summary
 ```
 
@@ -40,5 +41,7 @@ In the TUI, `d` shows each draft next to the current version: `a` approves, `r` 
 
 - *"Read the papers in my thesis project that have no summary yet and propose summaries and keywords."*
 - *"Which papers cited by ho2020denoising am I missing?"*
+- *"What should I read next for my thesis project?"* (`suggest`, see [the citation graph](citations.md))
+- *"hiesinger2011ages has no known references; read them from its full text."*
 - *"Find what my library says about classifier-free guidance, with page references."*
 - *"Write the related-work paragraph for these five papers and give me their BibTeX."*

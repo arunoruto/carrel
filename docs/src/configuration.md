@@ -50,4 +50,6 @@ The default runs pymupdf4llm through uv; the Nix package uses pymupdf4llm from n
 | `CARREL_HOME` | the library folder |
 | `CARREL_EXTRACTOR` | the extractor command |
 | `S2_API_KEY` | a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key); without one, references, citations and some lookups are often rate-limited |
+| `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
+| `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |

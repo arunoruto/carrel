@@ -19,7 +19,10 @@ BibTeX citation keys. The user groups papers into projects (`list_projects`). Fi
 `search` (or `list_papers`), then `get_paper`: read its summary and \
 keywords before loading the full text with `read_paper`, which returns it in chunks. View figures with \
 `get_figure`. When you have read a paper that has no summary or keywords yet, write them with `propose`; \
-they become drafts the user reviews. Use `bibtex` for citations.";
+they become drafts the user reviews. Use `bibtex` for citations. To find what else to read, `neighbors` \
+shows how a paper connects to the library (citations both ways, shared authors) and `suggest` lists the \
+papers the library cites most but doesn't have. Each reference says where it came from; when no source \
+knows a paper's references, read the reference list in its full text and `propose` them as `references`.";
 
 #[derive(Clone)]
 struct Server {
@@ -66,9 +69,19 @@ struct FigureArgs {
 struct ProposeArgs {
     /// Paper id.
     id: String,
-    /// What to write: summary (Markdown), keywords (one per line or comma-separated) or notes (Markdown, appended to existing notes once approved).
+    /// What to write: summary (Markdown), keywords (one per line or comma-separated), notes (Markdown, appended
+    /// to existing notes once approved) or references (a JSON array of {title, authors (family names), year,
+    /// venue, doi, arxiv}, read from the paper's reference list; those not known yet are added once approved).
     field: Field,
     content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SuggestArgs {
+    /// Only what this project's papers cite.
+    project: Option<String>,
+    /// Maximum number of papers (default 20).
+    limit: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -219,10 +232,20 @@ impl Server {
     }
 
     #[tool(
-        description = "The papers a paper cites, or (cited_by) the papers citing it, from Semantic Scholar. Each says whether it is in the library; suggest missing ones to the user with their `add_with` value (`carrel add <add_with>`)."
+        description = "The papers a paper cites, each with where that reference came from (openalex, semantic-scholar, ads, or ai: read from the full text and approved by the user), or (cited_by) the papers citing it, from Semantic Scholar. Each says whether it is in the library; suggest missing ones to the user with their `add_with` value (`carrel add <add_with>`)."
     )]
     async fn related(&self, Parameters(a): Parameters<RelatedArgs>) -> Result<CallToolResult, ErrorData> {
-        reply(self.lib.related(&a.id, a.cited_by).map(|found| {
+        if !a.cited_by {
+            return reply(self.lib.references(&a.id, false).map(|found| {
+                let refs = found.iter().map(|(r, in_library)| {
+                    let mut r = json!(r);
+                    r["in_library"] = json!(in_library);
+                    r
+                });
+                pretty(refs.collect())
+            }));
+        }
+        reply(self.lib.related(&a.id, true).map(|found| {
             let papers = found.iter().map(|c| {
                 json!({
                     "title": c.title,
@@ -234,6 +257,24 @@ impl Server {
                 })
             });
             pretty(papers.collect())
+        }))
+    }
+
+    #[tool(
+        description = "How a paper connects to the library: the library papers it cites and that cite it, those sharing authors with it, and its references that are not in the library. references_known is false when its references were never looked up (`related` looks them up)."
+    )]
+    async fn neighbors(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
+        reply(self.lib.graph().neighbors(&a.id).map(|n| pretty(json!(n))))
+    }
+
+    #[tool(
+        description = "Papers missing from the library that its papers (or a project's) cite most, each with the library papers citing it: what to read next. Only papers whose references are known count."
+    )]
+    async fn suggest(&self, Parameters(a): Parameters<SuggestArgs>) -> Result<CallToolResult, ErrorData> {
+        let within = a.project.as_deref().map(|name| self.lib.project(name)).transpose();
+        reply(within.map(|within| {
+            let found = self.lib.graph().suggestions(within.as_deref());
+            pretty(json!(found.into_iter().take(a.limit.unwrap_or(20)).collect::<Vec<_>>()))
         }))
     }
 

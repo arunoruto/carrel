@@ -24,6 +24,8 @@ impl Carrel {
             .env("CARREL_EXTRACTOR", fake_extractor("Plain text without a heading or identifier."))
             .env("VISUAL", "true")
             .env_remove("S2_API_KEY")
+            .env_remove("ADS_API_TOKEN")
+            .env_remove("ADS_DEV_KEY")
             .stdin(Stdio::null());
         cmd
     }
@@ -208,4 +210,31 @@ fn quiet_on_a_closed_pipe() {
     assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"), "{}", String::from_utf8_lossy(&out.stderr));
     use std::os::unix::process::ExitStatusExt;
     assert_eq!(out.status.signal(), Some(13), "ended by SIGPIPE");
+}
+
+#[test]
+fn graph() {
+    let c = Carrel::new("cli-graph");
+    c.tmp.write("lib/a/a.bib", "@misc{a, title = {A}, author = {Smith, Jane}}"); // no ids: refs --all stays offline
+    c.tmp.write("lib/b/b.bib", "@misc{b, title = {B}, author = {J. Smith}}");
+    c.tmp.write(
+        "lib/b/references.json",
+        r#"[{"title": "A", "source": "openalex"}, {"title": "Outside", "year": 2000, "source": "openalex"}]"#,
+    );
+    let refs = c.ok(&["refs", "b"]);
+    assert!(refs.contains("[openalex]  [in library: a]") && refs.contains("Outside (2000)"), "{refs}");
+    let neighbors = c.ok(&["graph", "a"]);
+    assert!(neighbors.contains("cited by:  b") && neighbors.contains("authors:   b (Smith, Jane)"), "{neighbors}");
+    assert!(c.ok(&["graph", "b"]).contains("1 of its references are not in the library"));
+    assert!(c.ok(&["graph"]).starts_with("  1× Outside (2000)"));
+    let json: serde_json::Value = serde_json::from_str(&c.ok(&["graph", "--json"])).unwrap();
+    assert_eq!(json[0]["cited_by"], serde_json::json!(["b"]));
+    assert!(c.ok(&["graph", "--dot"]).contains("\"b\" -> \"a\";"));
+    c.tmp.write("lib/c/c.bib", "@misc{c, title = {C}}");
+    let err = c.fails(&["refs", "c"]);
+    assert!(err.contains("openalex: needs a DOI") && err.contains("an AI can read them"), "offline, no ids: {err}");
+    let all = c.ok(&["refs", "--all"]);
+    assert!(all.contains("c: no source") && !all.contains("b:"), "b has its references already: {all}");
+    assert_eq!(c.run(&["refs"]).status.code(), Some(2), "an id or --all");
+    assert_eq!(c.run(&["graph", "a", "--dot"]).status.code(), Some(2));
 }

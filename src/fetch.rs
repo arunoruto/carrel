@@ -92,7 +92,7 @@ const OLD_ARCHIVES: [&str; 34] = [
 ];
 
 /// The arXiv id at the start of `s` (lowercase), without its version: `2101.00001` or `hep-th/9711200`.
-fn arxiv_id(s: &str) -> Option<String> {
+pub(crate) fn arxiv_id(s: &str) -> Option<String> {
     let b = s.as_bytes();
     let digits = |from: usize| b[from.min(b.len())..].iter().take_while(|c| c.is_ascii_digit()).count();
     let num = digits(5);
@@ -145,12 +145,18 @@ pub fn same_title(a: &str, b: &str) -> bool {
     !a.is_empty() && a == title_key(b)
 }
 
+/// What identifies a paper: its DOI (lowercased), arXiv id and title key. Two papers sharing any key are the same.
+pub fn paper_keys(ids: &Ids, title: &str) -> Vec<String> {
+    let keys = [ids.doi.as_ref().map(|d| d.to_lowercase()), ids.arxiv.clone(), Some(title_key(title))];
+    keys.into_iter().flatten().filter(|k| !k.is_empty()).collect()
+}
+
 /// A title's letters and digits, lowercased: equal for titles that [`same_title`] matches.
 pub fn title_key(title: &str) -> String {
     deunicode::deunicode(title).chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_lowercase()
 }
 
-fn agent() -> ureq::Agent {
+pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION"), " (personal paper library)"))
         .timeout_global(Some(Duration::from_secs(60)))
@@ -259,7 +265,7 @@ fn from_csl(v: &Value, doi: &str, arxiv: Option<&str>, preprint: bool) -> Entry 
 }
 
 /// Crossref titles and abstracts carry JATS/HTML tags.
-fn strip_tags(s: &str) -> String {
+pub(crate) fn strip_tags(s: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
     for c in s.chars() {
@@ -427,7 +433,7 @@ pub fn related(ids: &Ids, cited_by: bool) -> Result<Vec<Candidate>> {
     let (endpoint, field) = if cited_by { ("citations", "citingPaper") } else { ("references", "citedPaper") };
     let fields = [("fields", "title,year,venue,authors,externalIds"), ("limit", "500")];
     let v = semantic_scholar(&format!("paper/{paper}/{endpoint}"), &fields, 4)?;
-    Ok(v["data"].as_array().into_iter().flatten().filter_map(|d| scholar_candidate(&d[field])).collect())
+    Ok(v["data"].as_array().into_iter().flatten().filter_map(|d| scholar_paper(&d[field])).collect())
 }
 
 /// A Semantic Scholar Graph API call, waiting out its rate limit up to `retries` times (1, 2, 4, 8 s).
@@ -511,18 +517,23 @@ fn arxiv_entry(entry: &str) -> Option<Candidate> {
     })
 }
 
+/// A search result needs an id to be added by.
 fn scholar_candidate(p: &Value) -> Option<Candidate> {
+    scholar_paper(p).filter(|c| !c.ids.is_empty())
+}
+
+/// A paper as Semantic Scholar describes it; references without ids still link by title.
+fn scholar_paper(p: &Value) -> Option<Candidate> {
     let id = |key: &str| p["externalIds"][key].as_str().map(String::from);
     let names = p["authors"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str());
-    let candidate = Candidate {
+    Some(Candidate {
         title: p["title"].as_str()?.to_string(),
         authors: names.map(|n| bib::family(n).to_string()).collect(),
         year: p["year"].as_i64(),
         venue: p["venue"].as_str().unwrap_or("").to_string(),
         ids: Ids { doi: id("DOI"), arxiv: id("ArXiv") },
         in_library: None,
-    };
-    (!candidate.ids.is_empty()).then_some(candidate)
+    })
 }
 
 #[cfg(test)]

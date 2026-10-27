@@ -292,3 +292,71 @@ fn chunks() {
     assert!(chunk(&text, 0, 0).contains("of 30; the end"), "0 means the default length");
     assert!(chunk("", 0, 10).starts_with("[characters 0-0 of 0; the end]"));
 }
+
+/// Three lunar papers: references from a source and from an approved AI draft link them.
+#[test]
+fn citation_graph() {
+    let tmp = Tmp::new("graph");
+    let lib = library(&tmp);
+    paper(
+        &lib,
+        "pieters2009",
+        "title = {Character and Spatial Distribution of OH/H2O on the Surface of the Moon}, author = {Pieters, Carle M. and Goswami, J. N.}, year = 2009, doi = {10.1126/science.1178658}",
+    );
+    paper(
+        &lib,
+        "hiesinger2011",
+        "title = {Ages and stratigraphy of lunar mare basalts}, author = {Hiesinger, Harald and Head, James W.}, year = 2011",
+    );
+    paper(
+        &lib,
+        "head2010",
+        "title = {Global Distribution of Large Lunar Craters}, author = {James W. Head and Fassett, C. I.}, year = 2010, doi = {10.1126/science.1195050}",
+    );
+    fs::write(
+        lib.root.join("head2010/references.json"),
+        r#"[{"title": "Character and spatial distribution of OH/H2O", "doi": "10.1126/SCIENCE.1178658", "source": "openalex"},
+            {"title": "Lunar Sourcebook", "year": 1991, "source": "openalex"}]"#,
+    )
+    .unwrap();
+
+    // No source knows hiesinger2011's references: an AI reads them, the user approves.
+    let drafted = r#"[{"title": "Global distribution of large lunar craters", "authors": ["Head"], "source": "openalex"},
+                      {"title": "Lunar sourcebook!"}]"#;
+    lib.propose("hiesinger2011", Field::References, drafted).unwrap();
+    assert!(!lib.graph().neighbors("hiesinger2011").unwrap().references_known, "a draft doesn't count yet");
+    assert!(lib.propose("hiesinger2011", Field::References, "Head et al. 2010").is_err(), "not JSON");
+    lib.approve("hiesinger2011", Field::References).unwrap();
+
+    let g = lib.graph();
+    let n = g.neighbors("head2010").unwrap();
+    assert_eq!(
+        (n.cites.as_slice(), n.cited_by.as_slice()),
+        (&["pieters2009".to_string()][..], &["hiesinger2011".to_string()][..])
+    );
+    assert_eq!(n.shared_authors["hiesinger2011"], ["James W. Head"], "Head, James W. is the same person");
+    assert!(!n.shared_authors.contains_key("pieters2009"));
+    assert_eq!(n.not_in_library.len(), 1);
+    assert!(!g.neighbors("pieters2009").unwrap().references_known);
+    assert!(g.neighbors("nope").is_err());
+
+    let s = g.suggestions(None);
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert_eq!(
+        (s[0].reference.title.as_str(), s[0].cited_by.as_slice()),
+        ("Lunar Sourcebook", &["head2010".to_string(), "hiesinger2011".into()][..])
+    );
+    assert_eq!(g.suggestions(Some(&["head2010".into()]))[0].cited_by, ["head2010"]);
+    assert!(g.dot(None).contains("\"head2010\" -> \"pieters2009\";"));
+
+    let refs = lib.references("hiesinger2011", false).unwrap(); // already known: no lookup
+    assert_eq!(
+        (refs[0].0.source.as_str(), refs[0].1.as_deref()),
+        ("ai", Some("head2010")),
+        "an AI can't claim a source"
+    );
+
+    // Renaming keeps the links: references point at DOIs and titles, not keys.
+    lib.rename("head2010", Some("head2010craters")).unwrap();
+    assert_eq!(lib.graph().neighbors("pieters2009").unwrap().cited_by, ["head2010craters"]);
+}

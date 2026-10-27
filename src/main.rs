@@ -60,11 +60,35 @@ enum Cmd {
         #[arg(long)]
         pdfs: bool,
     },
-    /// Papers a paper cites (or cited by it, with --cited-by), marking those already in the library
+    /// Papers a paper cites (looked up once, then kept), or with --cited-by the papers citing it
     Refs {
-        id: String,
-        #[arg(long)]
+        #[arg(required_unless_present = "all")]
+        id: Option<String>,
+        #[arg(long, conflicts_with = "refresh")]
         cited_by: bool,
+        /// Look its references up again
+        #[arg(long)]
+        refresh: bool,
+        /// Look up the references of every paper that has none yet
+        #[arg(long, conflicts_with_all = ["id", "cited_by", "refresh"])]
+        all: bool,
+    },
+    /// How papers connect. With an id: what it cites, what cites it, who shares authors with it.
+    /// Without: the papers missing from the library that it cites most
+    Graph {
+        id: Option<String>,
+        /// Only this project's papers
+        #[arg(short, long, conflicts_with = "id")]
+        project: Option<String>,
+        /// The citations between papers, for Graphviz (`carrel graph --dot | dot -Tsvg > graph.svg`)
+        #[arg(long, conflicts_with = "id")]
+        dot: bool,
+        /// Machine-readable output
+        #[arg(long, conflicts_with = "dot")]
+        json: bool,
+        /// How many missing papers to show
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
     },
     /// List all papers, or a project's
     List {
@@ -196,10 +220,57 @@ fn main() -> Result<()> {
             }
             println!("{} entries imported or matched", ids.len());
         }
-        Cmd::Refs { id, cited_by } => {
-            for c in lib.related(&id, cited_by)? {
-                let known = c.in_library.as_ref().map_or(String::new(), |id| format!("  [in library: {id}]"));
-                println!("{c}{known}");
+        Cmd::Refs { all: true, .. } => {
+            let papers = lib.papers().0.into_iter().filter(|p| !p.dir.join(carrel::graph::FILE).exists());
+            for p in papers {
+                match lib.look_up_references(&p) {
+                    Ok(n) => println!("{}: {n} references", p.id),
+                    Err(e) => println!("{}: {e:#}", p.id),
+                }
+            }
+        }
+        Cmd::Refs { id: Some(id), cited_by: true, .. } => {
+            for c in lib.related(&id, true)? {
+                println!("{c}{}", in_library(&c.in_library));
+            }
+        }
+        Cmd::Refs { id: Some(id), refresh, .. } => {
+            for (r, found) in lib.references(&id, refresh)? {
+                println!("{r}{}", in_library(&found));
+            }
+        }
+        Cmd::Refs { id: None, .. } => unreachable!("clap requires an id without --all"),
+        Cmd::Graph { id: Some(id), json, .. } => {
+            let n = lib.graph().neighbors(&id)?;
+            if json {
+                return print_json(&n);
+            }
+            println!("cites:     {}", list(&n.cites));
+            println!("cited by:  {}", list(&n.cited_by));
+            for (other, authors) in &n.shared_authors {
+                println!("authors:   {other} ({})", authors.join("; "));
+            }
+            match n.references_known {
+                true => {
+                    println!("{} of its references are not in the library (`carrel refs {id}`)", n.not_in_library.len())
+                }
+                false => println!("its references are unknown; look them up with `carrel refs {id}`"),
+            }
+        }
+        Cmd::Graph { id: None, project, dot, json, limit } => {
+            let within = project.map(|name| lib.project(&name)).transpose()?;
+            let graph = lib.graph();
+            if dot {
+                print!("{}", graph.dot(within.as_deref()));
+                return Ok(());
+            }
+            let suggestions: Vec<_> = graph.suggestions(within.as_deref()).into_iter().take(limit).collect();
+            if json {
+                return print_json(&suggestions);
+            }
+            for s in suggestions {
+                println!("{:>3}× {}", s.cited_by.len(), s.reference.candidate(None));
+                println!("      cited by {}", s.cited_by.join(", "));
             }
         }
         Cmd::List { project, json } => {
@@ -320,6 +391,10 @@ fn project_papers(lib: &Library, name: &str) -> Result<Vec<Paper>> {
     let (papers, missing) = lib.project_papers(name)?;
     missing.iter().for_each(|id| eprintln!("warning: project {name} lists {id}, which is not in the library"));
     Ok(papers)
+}
+
+fn in_library(id: &Option<String>) -> String {
+    id.as_ref().map_or(String::new(), |id| format!("  [in library: {id}]"))
 }
 
 fn print_json(value: &impl serde::Serialize) -> Result<()> {

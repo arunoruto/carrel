@@ -16,11 +16,12 @@ Run `carrel <command> --help` for every option.
 | `edit <id>` | edit its `.bib` |
 | `rename <id> [new-id]` | change its key everywhere; without a new id, from the key template |
 | `update <id> [source]` / `update --all` | fetch metadata again |
-| `refs <id> [--cited-by]` | its references, or the papers citing it |
+| `refs <id> [--cited-by] [--refresh]` / `refs --all` | its [references](citations.md), or the papers citing it |
+| `graph [id] [-p project] [--dot] [--json]` | how a paper connects to the library, or what the library cites most but lacks |
 | `extract [ids…] [--all]` | run the text extraction again |
 | `drafts` | AI proposals waiting for review |
-| `approve <id> <summary\|keywords\|notes>` | accept a draft |
-| `reject <id> <summary\|keywords\|notes>` | discard a draft |
+| `approve <id> <summary\|keywords\|notes\|references>` | accept a draft |
+| `reject <id> <summary\|keywords\|notes\|references>` | discard a draft |
 | `project [list\|show\|add\|remove\|delete\|sync]` | [projects](projects.md) |
 | `bib [ids…] [-p project]` | BibTeX for papers, a project, or the library |
 | `doctor [--all] [--json]` | [check the library](maintenance.md) |

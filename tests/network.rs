@@ -111,3 +111,32 @@ fn citation_graph() {
         fetch::published_doi("1512.03385").unwrap().is_some_and(|doi| doi.to_lowercase() == "10.1109/cvpr.2016.90")
     );
 }
+
+/// Each reference source on a lunar paper, by itself: they are interchangeable behind `ReferenceSource`.
+#[test]
+#[ignore = "needs internet"]
+fn reference_sources() {
+    use carrel::refs::{Ads, Lookup, OpenAlex, ReferenceSource, SemanticScholar};
+    let _turn = one_at_a_time();
+    let paper = ids(Some("10.1029/2010JE003711"), None);
+    let lookup = Lookup { ids: &paper, title: "" };
+    let openalex = OpenAlex { api_key: std::env::var("OPENALEX_API_KEY").ok() }.references(&lookup).unwrap();
+    assert!(openalex.len() > 80, "{}", openalex.len());
+    assert!(openalex.iter().any(|c| c.ids.doi.is_some() && !c.authors.is_empty() && c.year.is_some()));
+    // Wiley hides that paper's references from Semantic Scholar ("elided by the publisher"); arXiv's are open.
+    match SemanticScholar.references(&Lookup { ids: &ids(None, Some("1706.03762")), title: "" }) {
+        Ok(found) => assert!(found.len() > 25, "{}", found.len()),
+        Err(e) => assert!(e.to_string().contains("rate-limiting"), "{e:#}"),
+    }
+    match std::env::var("ADS_API_TOKEN") {
+        Ok(token) => assert!(Ads { token }.references(&lookup).unwrap().len() > 80),
+        Err(_) => eprintln!("ADS skipped: no ADS_API_TOKEN"),
+    }
+
+    // Added by DOI, a paper comes with its references.
+    let tmp = Tmp::new("net-refs");
+    let lib = library(&tmp);
+    let (id, messages) = lib.add("10.1126/science.1178105").unwrap();
+    let refs = lib.references(&id, false).unwrap();
+    assert!(refs.len() >= 15 && !refs[0].0.source.is_empty(), "{messages:?}");
+}

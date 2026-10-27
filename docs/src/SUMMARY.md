@@ -9,6 +9,7 @@
 - [Adding papers](adding-papers.md)
 - [The library](library.md)
 - [Projects and bibliographies](projects.md)
+- [The citation graph](citations.md)
 - [Working with an AI](ai.md)
 - [The TUI](tui.md)
 - [Keeping the library healthy](maintenance.md)

@@ -11,6 +11,7 @@ The library is a folder of plain files, by default `~/Documents/carrel` (see [Co
     figures/                   the extracted figures, named by page
     summary.md                 an approved summary
     notes.md                   your notes, and approved AI notes
+    references.json            what it cites, each with its source (see The citation graph)
     drafts/                    AI proposals waiting for review
     supplementary/             extra files; PDFs among them get their text next to them
   projects/
