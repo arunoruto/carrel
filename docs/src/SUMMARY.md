@@ -12,6 +12,7 @@
 - [Working with an AI](ai.md)
 - [The TUI](tui.md)
 - [Keeping the library healthy](maintenance.md)
+- [Sharing a library](sharing.md)
 
 # Reference
 

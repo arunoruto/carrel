@@ -1,6 +1,6 @@
 # The library
 
-The library is a folder of plain files, by default `~/Documents/carrel` (see [Configuration](configuration.md)). carrel reads them fresh every time, so you can edit, sync or version them with any tool.
+The library is a folder of plain files, by default `~/Documents/carrel` (see [Configuration](configuration.md)). carrel reads them fresh every time, so you can edit, sync or version them with any tool ([Sharing a library](sharing.md)).
 
 ```text
 ~/Documents/carrel/
@@ -38,3 +38,19 @@ Each paper's metadata is a single BibTeX entry. carrel keeps values exactly as w
 Search a single field with `field:word`: `title`, `author`, `keyword`, `year`, `venue`, `doi`, `abstract`, `summary`, `notes`, `text`. Search a project with `project:name`.
 
 The index lives in SQLite in `~/.cache/carrel` and only mirrors the files; carrel updates it before each search and rebuilds it if it is ever damaged.
+
+## From scripts
+
+`carrel list --json` (or `-p project` for one project, `show <id> --json` for one paper) prints everything carrel knows about each paper, the same as the MCP tool `get_paper`: metadata, abstract, summary, keywords, notes, figures, projects and the paths of its files. A script can then read the extracted text directly, for example to build its own search index:
+
+```python
+import json, subprocess
+
+out = subprocess.run(["carrel", "list", "--json", "-p", "moon"], capture_output=True, text=True, check=True)
+for paper in json.loads(out.stdout):
+    if paper["files"]["fulltext"]:
+        text = open(paper["files"]["fulltext"], encoding="utf-8").read()
+        print(paper["id"], paper["doi"], len(text))
+```
+
+To share a library with others, see [Sharing a library](sharing.md).

@@ -9,9 +9,9 @@ Run `carrel <command> --help` for every option.
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |
 | `import <file.bib> [-p project] [--pdfs]` | import a `.bib`, keeping its keys |
-| `list` | all papers |
+| `list [-p project] [--json]` | all papers, or a project's |
 | `search <query>…` | full-text search, with `field:` and `project:` filters |
-| `show <id>` | a paper's details |
+| `show <id> [--json]` | a paper's details |
 | `open <id>` | open its PDF |
 | `edit <id>` | edit its `.bib` |
 | `rename <id> [new-id]` | change its key everywhere; without a new id, from the key template |
