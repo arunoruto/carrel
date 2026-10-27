@@ -76,7 +76,7 @@ fn papers() {
     assert!(c.ok(&["show", "graphtheory"]).contains("graph-theory"));
     assert!(c.ok(&["search", "plain", "text"]).contains("graphtheory"));
     assert!(c.ok(&["bib"]).starts_with("@misc{graphtheory,"));
-    let pdf_path = c.tmp.path("lib/graphtheory/graphtheory.pdf").display().to_string();
+    let pdf_path = c.tmp.path("lib/graphtheory/graphtheory.pdf").canonicalize().unwrap().display().to_string(); // /var is /private/var on macOS
     assert!(c.ok(&["bib", "--files"]).contains(&format!("{{:{pdf_path}:PDF}}")), "JabRef's file field");
     assert!(!c.ok(&["bib"]).contains("file ="), "only when asked");
     assert!(c.fails(&["show", "nope"]).contains("no paper"));
