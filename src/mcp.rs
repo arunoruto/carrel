@@ -20,8 +20,8 @@ BibTeX citation keys. The user groups papers into projects (`list_projects`). Fi
 keywords before loading the full text with `read_paper`, which returns it in chunks. View figures with \
 `get_figure`. When you have read a paper that has no summary or keywords yet, write them with `propose`; \
 they become drafts the user reviews. Use `bibtex` for citations. To find what else to read, `neighbors` \
-shows how a paper connects to the library (citations both ways, shared authors) and `suggest` lists the \
-papers the library cites most but doesn't have. Each reference says where it came from; when no source \
+shows how a paper connects to the library (citations both ways, shared authors), `suggest` lists the \
+papers the library cites most but doesn't have, and `authors` who wrote what and with whom. Each reference says where it came from; when no source \
 knows a paper's references, read the reference list in its full text and `propose` them as `references`.";
 
 #[derive(Clone)]
@@ -74,6 +74,12 @@ struct ProposeArgs {
     /// venue, doi, arxiv}, read from the paper's reference list; those not known yet are added once approved).
     field: Field,
     content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct AuthorsArgs {
+    /// Only people with a spelling containing this, e.g. a family name.
+    name: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -265,6 +271,13 @@ impl Server {
     )]
     async fn neighbors(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
         reply(self.lib.graph().neighbors(&a.id).map(|n| pretty(json!(n))))
+    }
+
+    #[tool(
+        description = "The people behind the library's papers: each with their spellings of their name, their library papers and the people they wrote with most. Spellings count as one person only when they share co-authors or a first name, so two people with the same initials stay apart. Use it to find a person's other papers or close collaborators."
+    )]
+    async fn authors(&self, Parameters(a): Parameters<AuthorsArgs>) -> Result<CallToolResult, ErrorData> {
+        reply(Ok(pretty(json!(self.lib.graph().authors.people(a.name.as_deref())))))
     }
 
     #[tool(

@@ -14,6 +14,7 @@
 //! The files are the source of truth; the search index in the cache directory is rebuilt from them.
 //! Every frontend (CLI, TUI, MCP) goes through [`Library`].
 
+pub mod authors;
 pub mod bib;
 mod doctor;
 pub mod fetch;

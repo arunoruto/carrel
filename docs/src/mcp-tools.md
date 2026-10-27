@@ -13,6 +13,7 @@ What `carrel mcp` offers an assistant. Paper ids are citation keys. The assistan
 | `related` | `id`, `cited_by` | the papers it cites (each with its source), or that cite it, marked when in the library, with the id to add each by |
 | `neighbors` | `id` | the library papers it cites, that cite it and that share authors with it, and its references missing from the library |
 | `suggest` | `project`, `limit` | papers the library (or a project) cites most but doesn't have, with who cites them |
+| `authors` | `name` | the people behind the papers: their spellings, library papers, closest co-authors, and who might be the same person |
 | `propose` | `id`, `field`, `content` | stores a summary, keywords, notes or references (read from the full text) as a draft for you to review |
 | `bibtex` | `ids` or `project` | BibTeX entries |
 | `doctor` | | the library's problems, each with the command that fixes it |

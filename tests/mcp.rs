@@ -119,6 +119,7 @@ fn tools() {
     assert_eq!(
         names,
         [
+            "authors",
             "bibtex",
             "doctor",
             "get_figure",

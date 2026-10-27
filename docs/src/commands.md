@@ -18,6 +18,7 @@ Run `carrel <command> --help` for every option.
 | `update <id> [source]` / `update --all` | fetch metadata again |
 | `refs <id> [--cited-by] [--refresh]` / `refs --all` | its [references](citations.md), or the papers citing it |
 | `graph [id] [-p project] [--dot] [--json]` | how a paper connects to the library, or what the library cites most but lacks |
+| `authors [name] [--json]` | the people behind the papers: spellings, papers, co-authors ([who is who](citations.md#who-is-who)) |
 | `extract [ids…] [--all]` | run the text extraction again |
 | `drafts` | AI proposals waiting for review |
 | `approve <id> <summary\|keywords\|notes\|references>` | accept a draft |

@@ -2,12 +2,13 @@
 //! [`crate::refs`] sources or read from the full text by an AI (as a draft a human approves). Every
 //! reference says where it came from. The links between papers are worked out from those files.
 
+use crate::authors::Authors;
 use crate::fetch::{self, Candidate, Ids};
 use crate::refs::{Lookup, ReferenceSource};
 use crate::{Library, Paper};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -150,6 +151,8 @@ pub struct Suggestion {
 // ponytail: rebuilt from the files on every call, fine for thousands of papers; move into the index if it gets slow.
 pub struct Graph {
     papers: Vec<Paper>,
+    /// Who is who, from the library's papers and their references.
+    pub authors: Authors,
     refs: BTreeMap<String, Vec<Reference>>,
     /// Paper keys (see [`fetch::paper_keys`]) to library ids.
     known: HashMap<String, String>,
@@ -167,7 +170,19 @@ impl Graph {
                 refs.insert(p.id.clone(), list);
             }
         }
-        Graph { papers, refs, known }
+        // Each paper's author list once: the library's, then the cited papers not in it.
+        let mut docs: Vec<(Option<String>, Vec<String>)> =
+            papers.iter().map(|p| (Some(p.id.clone()), p.bib.authors())).collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        for r in refs.values().flatten() {
+            let keys = r.keys();
+            let new = !keys.iter().any(|k| known.contains_key(k) || seen.contains(k));
+            seen.extend(keys);
+            if new && r.authors.len() > 1 {
+                docs.push((None, r.authors.clone()));
+            }
+        }
+        Graph { authors: Authors::new(&docs), papers, refs, known }
     }
 
     /// The library id of a referenced paper.
@@ -185,21 +200,11 @@ impl Graph {
     }
 
     pub fn neighbors(&self, id: &str) -> Result<Neighbors> {
-        let Some(paper) = self.papers.iter().find(|p| p.id == id) else { bail!("no paper {id}") };
-        let cited_by = self.refs.keys().filter(|&other| other != id && self.cites(other).iter().any(|c| c == id));
-        let authors: Vec<(String, String)> = paper.bib.authors().iter().map(|a| (author_key(a), a.clone())).collect();
-        let mut shared_authors = BTreeMap::new();
-        for other in self.papers.iter().filter(|p| p.id != id) {
-            let theirs: Vec<String> = other.bib.authors().iter().map(|a| author_key(a)).collect();
-            let shared: Vec<String> = authors
-                .iter()
-                .filter(|(key, _)| !key.is_empty() && theirs.contains(key))
-                .map(|(_, a)| a.clone())
-                .collect();
-            if !shared.is_empty() {
-                shared_authors.insert(other.id.clone(), shared);
-            }
+        if !self.papers.iter().any(|p| p.id == id) {
+            bail!("no paper {id}");
         }
+        let cited_by = self.refs.keys().filter(|&other| other != id && self.cites(other).iter().any(|c| c == id));
+        let shared_authors = self.authors.shared(id).into_iter().collect();
         let refs = self.refs.get(id);
         Ok(Neighbors {
             cites: self.cites(id),
@@ -243,27 +248,6 @@ impl Graph {
             }
         }
         out + "}\n"
-    }
-}
-
-/// An author as family name and first initial, ASCII-folded: `Hiesinger, Harald` and `H. Hiesinger` match.
-// ponytail: initials only; common names (Zhang, Y.) link unrelated people. An alias list fixes that if it matters.
-fn author_key(name: &str) -> String {
-    let name = deunicode::deunicode(name).to_lowercase();
-    let (family, given) = match name.split_once(',') {
-        Some((family, given)) => (family.trim().to_string(), given.trim().to_string()),
-        None => match name.trim().rsplit_once(' ') {
-            Some((given, family)) => (family.to_string(), given.to_string()),
-            None => (name.trim().to_string(), String::new()),
-        },
-    };
-    let family: String = family.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ' || *c == '-').collect();
-    if family.is_empty() || family == "others" {
-        return String::new();
-    }
-    match given.chars().find(char::is_ascii_alphabetic) {
-        Some(initial) => format!("{} {initial}", family.trim()),
-        None => family.trim().to_string(),
     }
 }
 
@@ -367,14 +351,5 @@ mod tests {
         assert_eq!((refs.len(), refs[0].source.as_str()), (1, AI), "an AI cannot claim to be a source");
         assert!(ai_draft("Smith 2020").unwrap_err().to_string().contains("JSON array"));
         assert!(ai_draft("[]").is_err());
-    }
-
-    #[test]
-    fn author_keys() {
-        assert_eq!(author_key("Hiesinger, Harald"), author_key("H. Hiesinger"));
-        assert_eq!(author_key("Müller, J."), "muller j");
-        assert_ne!(author_key("Smith, J."), author_key("Smith, K."));
-        assert_eq!(author_key("Head, J. W., III"), "head j");
-        assert_eq!(author_key("others"), "");
     }
 }

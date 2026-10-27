@@ -218,8 +218,8 @@ fn quiet_on_a_closed_pipe() {
 #[test]
 fn graph() {
     let c = Carrel::new("cli-graph");
-    c.tmp.write("lib/a/a.bib", "@misc{a, title = {A}, author = {Smith, Jane}}"); // no ids: refs --all stays offline
-    c.tmp.write("lib/b/b.bib", "@misc{b, title = {B}, author = {J. Smith}}");
+    c.tmp.write("lib/a/a.bib", "@misc{a, title = {A}, author = {Smith, Jane and Doe, John}}"); // no ids: refs --all stays offline
+    c.tmp.write("lib/b/b.bib", "@misc{b, title = {B}, author = {J. Smith and J. Doe}}");
     c.tmp.write(
         "lib/b/references.json",
         r#"[{"title": "A", "source": "openalex"}, {"title": "Outside", "year": 2000, "source": "openalex"}]"#,
@@ -227,8 +227,17 @@ fn graph() {
     let refs = c.ok(&["refs", "b"]);
     assert!(refs.contains("[openalex]  [in library: a]") && refs.contains("Outside (2000)"), "{refs}");
     let neighbors = c.ok(&["graph", "a"]);
-    assert!(neighbors.contains("cited by:  b") && neighbors.contains("authors:   b (Smith, Jane)"), "{neighbors}");
+    assert!(
+        neighbors.contains("cited by:  b") && neighbors.contains("authors:   b (Smith, Jane; Doe, John)"),
+        "{neighbors}"
+    );
     assert!(c.ok(&["graph", "b"]).contains("1 of its references are not in the library"));
+    let smith = c.ok(&["authors", "smith"]);
+    assert!(
+        smith.starts_with("Smith, Jane  (also J. Smith)\n  papers:     a, b\n  co-authors: Doe, John (2)"),
+        "{smith}"
+    );
+    assert_eq!(c.ok(&["authors", "nobody"]), "");
     assert!(c.ok(&["graph"]).starts_with("  1× Outside (2000)"));
     let json: serde_json::Value = serde_json::from_str(&c.ok(&["graph", "--json"])).unwrap();
     assert_eq!(json[0]["cited_by"], serde_json::json!(["b"]));

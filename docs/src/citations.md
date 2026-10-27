@@ -53,6 +53,25 @@ Once approved, those references are marked `ai`. Looking a paper up again later 
 
 ## How papers are matched
 
-A reference matches a library paper by DOI, arXiv id or title (ignoring case and punctuation), so renaming a paper keeps its links. Authors match by family name and first initial: *Head, James W.* and *J. W. Head* are the same person. Two different people with a common name and the same initial are linked too.
+A reference matches a library paper by DOI, arXiv id or title (ignoring case and punctuation), so renaming a paper keeps its links.
+
+## Who is who
+
+Names are written many ways: *Pieters, Carle M.*, *C. M. Pieters*, *Pieters, C.*. carrel counts two spellings as one person when their initials fit and there is evidence: a co-author in common, or the same first name. Without evidence they stay apart, so two different *Zhang, Y.* don't merge, and *James W. Head* never merges with a *John Head*. The author lists of the references count too, which gives far more co-authors than the library alone.
+
+```text
+$ carrel authors pieters
+Pieters, Carle M.  (also Pieters, C. M.; Carle M. Pieters)
+  papers:     mccord2011sources, pieters2009character
+  co-authors: Taylor, L. A. (6), McCord, T. B. (5), Boardman, Joseph W. (4), …
+
+$ carrel authors clark
+Clark, Roger N.
+  papers:     clark2009detection
+  co-authors: none
+  maybe also: Clark, R. N. (cited only); Clark, R. N. (mccord2011sources, pieters2009character)  [no co-author or first name in common]
+```
+
+*maybe also* lists names that fit but lack evidence, with their library papers or *cited only* for someone who appears only in references. Here Roger N. Clark wrote his paper alone and every reference spells him *R. N. Clark*, so carrel can't tell; you, or an assistant reading the papers, can. An assistant gets the same through the MCP tool `authors`.
 
 The references live in `<key>/references.json`, a plain JSON list, so they travel with the library when you [share it](sharing.md).

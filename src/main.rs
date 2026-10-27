@@ -90,6 +90,15 @@ enum Cmd {
         #[arg(short = 'n', long, default_value_t = 20)]
         limit: usize,
     },
+    /// The people behind the library's papers, with their spellings and co-authors. Spellings count as one
+    /// person when they share co-authors or a first name
+    Authors {
+        /// Only people with a spelling containing this
+        name: Option<String>,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// List all papers, or a project's
     List {
         #[arg(short, long)]
@@ -274,6 +283,24 @@ fn main() -> Result<()> {
             for s in suggestions {
                 println!("{:>3}× {}", s.cited_by.len(), s.reference.candidate(None));
                 println!("      cited by {}", s.cited_by.join(", "));
+            }
+        }
+        Cmd::Authors { name, json } => {
+            let graph = lib.graph();
+            let people = graph.authors.people(name.as_deref());
+            if json {
+                return print_json(&people);
+            }
+            for p in people {
+                let others: Vec<&str> = p.variants.iter().map(String::as_str).filter(|v| *v != p.name).collect();
+                let also = if others.is_empty() { String::new() } else { format!("  (also {})", others.join("; ")) };
+                println!("{}{also}", p.name);
+                println!("  papers:     {}", p.papers.join(", "));
+                let with: Vec<String> = p.coauthors.iter().map(|(name, n)| format!("{name} ({n})")).collect();
+                println!("  co-authors: {}", list(&with));
+                if !p.maybe.is_empty() {
+                    println!("  maybe also: {}  [no co-author or first name in common]", p.maybe.join("; "));
+                }
             }
         }
         Cmd::List { project, json } => {
