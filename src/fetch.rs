@@ -35,7 +35,7 @@ impl Ids {
 #[derive(Debug, Clone)]
 pub struct Candidate {
     pub title: String,
-    /// Family names.
+    /// Full names as the source writes them (`Carle M. Pieters`, `Pieters, C. M.`).
     pub authors: Vec<String>,
     pub year: Option<i64>,
     pub venue: String,
@@ -48,8 +48,8 @@ impl fmt::Display for Candidate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let authors = match self.authors.as_slice() {
             [] => String::new(),
-            [a] => a.clone(),
-            [a, ..] => format!("{a} et al."),
+            [a] => bib::family(a).to_string(),
+            [a, ..] => format!("{} et al.", bib::family(a)),
         };
         let year = self.year.map(|y| y.to_string()).unwrap_or_default();
         let details: Vec<&str> = [authors.as_str(), &year, &self.venue].into_iter().filter(|s| !s.is_empty()).collect();
@@ -392,8 +392,10 @@ fn crossref_candidates(v: &Value) -> Vec<Candidate> {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|a| a["family"].as_str())
-            .map(String::from)
+            .filter_map(|a| {
+                let family = a["family"].as_str()?;
+                Some(a["given"].as_str().map_or(family.to_string(), |given| format!("{family}, {given}")))
+            })
             .collect(),
         year: it["issued"]["date-parts"][0][0].as_i64(),
         venue: it["container-title"][0].as_str().unwrap_or("").to_string(),
@@ -509,7 +511,7 @@ fn arxiv_entry(entry: &str) -> Option<Candidate> {
     let id = arxiv_id(first("id")?.rsplit_once("/abs/")?.1)?;
     Some(Candidate {
         title: first("title")?,
-        authors: all("name").iter().map(|n| bib::family(n).to_string()).collect(),
+        authors: all("name"),
         year: first("published").and_then(|p| p.get(..4)?.parse().ok()),
         venue: "arXiv".into(),
         ids: Ids { doi: first("arxiv:doi"), arxiv: Some(id) },
@@ -528,7 +530,7 @@ fn scholar_paper(p: &Value) -> Option<Candidate> {
     let names = p["authors"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str());
     Some(Candidate {
         title: p["title"].as_str()?.to_string(),
-        authors: names.map(|n| bib::family(n).to_string()).collect(),
+        authors: names.map(String::from).collect(),
         year: p["year"].as_i64(),
         venue: p["venue"].as_str().unwrap_or("").to_string(),
         ids: Ids { doi: id("DOI"), arxiv: id("ArXiv") },
@@ -682,7 +684,7 @@ mod tests {
         assert_eq!(found[0].title, "Denoising Diffusion Probabilistic Models", "line breaks in titles");
         assert_eq!(
             (found[0].authors.clone(), found[0].year),
-            (vec!["Ho".to_string(), "Abbeel".to_string()], Some(2020))
+            (vec!["Jonathan Ho".to_string(), "Pieter Abbeel".to_string()], Some(2020))
         );
         assert_eq!(found[0].ids, Ids { doi: Some("10.1/published".into()), arxiv: Some("2006.11239".into()) });
         assert_eq!(

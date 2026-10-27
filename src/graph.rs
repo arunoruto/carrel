@@ -20,7 +20,7 @@ pub const AI: &str = "ai";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Reference {
     pub title: String,
-    /// Family names.
+    /// Full names as the source writes them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,19 +63,26 @@ impl fmt::Display for Reference {
     }
 }
 
-/// The references of a paper from the first source that has them.
+/// A paper's references from every source that has them. Each adds what the earlier ones lack; where two
+/// list the same paper, the earlier entry stays. Fallback sources are asked only when the rest found nothing.
 pub fn look_up(sources: &[Box<dyn ReferenceSource>], ids: &Ids, title: &str) -> Result<Vec<Reference>> {
-    let mut failed = vec![];
-    for source in sources {
+    let (mut found, mut failed) = (vec![], vec![]);
+    for source in sources.iter().filter(|s| !s.fallback()).chain(sources.iter().filter(|s| s.fallback())) {
+        if source.fallback() && !found.is_empty() {
+            break;
+        }
         match source.references(&Lookup { ids, title }) {
-            Ok(found) if !found.is_empty() => {
-                return Ok(found.into_iter().map(|c| Reference::new(c, source.name())).collect());
+            Ok(refs) if !refs.is_empty() => {
+                found = merge(found, refs.into_iter().map(|c| Reference::new(c, source.name())));
             }
             Ok(_) => failed.push(format!("{} has none", source.name())),
             Err(e) => failed.push(format!("{}: {e:#}", source.name())),
         }
     }
-    bail!("no source has its references ({}); an AI can read them from the full text", failed.join("; "))
+    if found.is_empty() {
+        bail!("no source has its references ({}); an AI can read them from the full text", failed.join("; "));
+    }
+    Ok(found)
 }
 
 /// `first`, then those of `more` that are not in it already.
@@ -294,7 +301,7 @@ impl Library {
 mod tests {
     use super::*;
 
-    struct Fake(&'static str, Result<Vec<&'static str>, &'static str>);
+    struct Fake(&'static str, Result<Vec<&'static str>, &'static str>, bool);
 
     impl ReferenceSource for Fake {
         fn name(&self) -> &'static str {
@@ -304,6 +311,10 @@ mod tests {
         fn references(&self, _: &Lookup) -> Result<Vec<Candidate>> {
             let titles = self.1.clone().map_err(|e| anyhow::anyhow!(e))?;
             Ok(titles.into_iter().map(|t| Reference { title: t.into(), ..reference("") }.candidate(None)).collect())
+        }
+
+        fn fallback(&self) -> bool {
+            self.2
         }
     }
 
@@ -320,24 +331,25 @@ mod tests {
     }
 
     #[test]
-    fn first_source_with_references_wins() {
+    fn sources_add_up_and_fallbacks_wait() {
         let ids = Ids::default();
         let sources: Vec<Box<dyn ReferenceSource>> = vec![
-            Box::new(Fake("down", Err("offline"))),
-            Box::new(Fake("empty", Ok(vec![]))),
-            Box::new(Fake("good", Ok(vec!["A"]))),
+            Box::new(Fake("spare", Ok(vec!["Z"]), true)),
+            Box::new(Fake("down", Err("offline"), false)),
+            Box::new(Fake("first", Ok(vec!["A", "B"]), false)),
+            Box::new(Fake("second", Ok(vec!["b", "C"]), false)),
         ];
         let found = look_up(&sources, &ids, "").unwrap();
+        let got: Vec<(&str, &str)> = found.iter().map(|r| (r.title.as_str(), r.source.as_str())).collect();
         assert_eq!(
-            (found[0].title.as_str(), found[0].source.as_str()),
-            ("A", "good"),
-            "its name goes with each reference"
+            got,
+            [("A", "first"), ("B", "first"), ("C", "second")],
+            "B once, from the earlier source; no fallback"
         );
-        let err = look_up(&sources[..2], &ids, "").unwrap_err().to_string();
-        assert!(
-            err.contains("down: offline") && err.contains("empty has none") && err.contains("an AI can read"),
-            "{err}"
-        );
+        let only_fallback = look_up(&sources[..2], &ids, "").unwrap();
+        assert_eq!(only_fallback[0].source, "spare", "asked when the others found nothing");
+        let err = look_up(&sources[1..2], &ids, "").unwrap_err().to_string();
+        assert!(err.contains("down: offline") && err.contains("an AI can read"), "{err}");
     }
 
     #[test]

@@ -28,13 +28,14 @@ An assistant gets the same through the MCP tools `neighbors` and `suggest`, so i
 
 `carrel add` looks up a paper's references when it has a DOI or arXiv id. For papers added another way, `carrel refs <id>` looks them up the first time, and `carrel refs --all` does it for every paper without references. `--refresh` looks them up again.
 
-carrel asks each source in turn and keeps the first answer:
+carrel asks every source in this order, and each adds the references the earlier ones lack. Where two list the same paper, the earlier entry stays, as its details are usually better:
 
 | Source | Covers | Needs |
 |---|---|---|
 | `ads` ([NASA ADS](https://ui.adsabs.harvard.edu)) | astronomy and planetary science, including conference abstracts without a DOI | a free token in `ADS_API_TOKEN`; skipped without one |
-| `openalex` ([OpenAlex](https://openalex.org)) | most journals across all fields | nothing; `OPENALEX_API_KEY` raises the shared daily budget |
-| `semantic-scholar` | computer science and preprints; some publishers (Wiley, for example) hide their references | nothing; `S2_API_KEY` against rate limits |
+| `openalex` ([OpenAlex](https://openalex.org)) | most journals across all fields, each reference matched to a record | nothing; `OPENALEX_API_KEY` raises the shared daily budget |
+| `crossref` ([Crossref](https://www.crossref.org)) | the reference lists publishers deposit, including what OpenAlex can't match: conference abstracts, theses, books. Some entries are only the citation as printed | a DOI |
+| `semantic-scholar` | computer science and preprints; asked only when the others find nothing, since some publishers (Wiley, for example) hide their references from it | nothing; `S2_API_KEY` against rate limits |
 | `ai` | anything with a reference list in its full text | an assistant, and your approval |
 
 Every reference records its source, so you can tell what came from a database and what an AI read.

@@ -1,7 +1,6 @@
 //! Where a paper's reference list comes from. Every source answers the same question through
 //! [`ReferenceSource`], so they are interchangeable; [`sources`] lists the available ones, best first.
 
-use crate::bib;
 use crate::fetch::{self, Candidate, Ids};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -17,15 +16,21 @@ pub trait ReferenceSource {
     fn name(&self) -> &'static str;
     /// The papers `paper` cites; empty when the source knows the paper but not its references.
     fn references(&self, paper: &Lookup) -> Result<Vec<Candidate>>;
+    /// Asked only when the other sources found nothing.
+    fn fallback(&self) -> bool {
+        false
+    }
 }
 
-/// The sources available here, best first: NASA ADS when there is a token, then OpenAlex and Semantic Scholar.
+/// The sources available here, best first: NASA ADS when there is a token, OpenAlex and Crossref, and
+/// Semantic Scholar as a fallback.
 pub fn sources() -> Vec<Box<dyn ReferenceSource>> {
     let mut all: Vec<Box<dyn ReferenceSource>> = vec![];
     if let Some(token) = env(&["ADS_API_TOKEN", "ADS_DEV_KEY"]) {
         all.push(Box::new(Ads { token }));
     }
     all.push(Box::new(OpenAlex { api_key: env(&["OPENALEX_API_KEY"]) }));
+    all.push(Box::new(Crossref));
     all.push(Box::new(SemanticScholar));
     all
 }
@@ -90,7 +95,7 @@ fn openalex_work(w: &Value) -> Option<Candidate> {
     let names = w["authorships"].as_array().into_iter().flatten().filter_map(|a| a["author"]["display_name"].as_str());
     Some(Candidate {
         title: fetch::strip_tags(w["title"].as_str().filter(|t| !t.is_empty())?),
-        authors: names.map(|n| bib::family(n).to_string()).collect(),
+        authors: names.map(String::from).collect(),
         year: w["publication_year"].as_i64(),
         venue: w["primary_location"]["source"]["display_name"].as_str().unwrap_or("").to_string(),
         ids: Ids { doi, arxiv },
@@ -98,7 +103,52 @@ fn openalex_work(w: &Value) -> Option<Candidate> {
     })
 }
 
-/// Semantic Scholar: good for computer science and preprints, but anonymous requests are often rate-limited.
+/// Crossref: the reference lists publishers deposit. OpenAlex is built from them but keeps only the references it
+/// can match to a record, so Crossref adds the rest: conference abstracts, books, reports. Some are just the
+/// citation as printed.
+pub struct Crossref;
+
+impl ReferenceSource for Crossref {
+    fn name(&self) -> &'static str {
+        "crossref"
+    }
+
+    fn references(&self, paper: &Lookup) -> Result<Vec<Candidate>> {
+        let Some(doi) = &paper.ids.doi else { bail!("needs a DOI") };
+        let work: Value = match fetch::agent().get(&format!("https://api.crossref.org/works/{doi}")).call() {
+            Err(ureq::Error::StatusCode(404)) => bail!("doesn't know this paper"),
+            response => response.context("Crossref")?.into_body().read_json()?,
+        };
+        Ok(work["message"]["reference"].as_array().into_iter().flatten().filter_map(crossref_reference).collect())
+    }
+}
+
+fn crossref_reference(r: &Value) -> Option<Candidate> {
+    let text = |key: &str| r[key].as_str().map(fetch::strip_tags).filter(|s| !s.is_empty());
+    // Some deposited DOIs carry the printed citation's punctuation: `10.1126/science.1178658)`.
+    let doi = text("DOI").and_then(|d| fetch::find_doi(&d));
+    let title = ["article-title", "volume-title", "series-title", "unstructured"].into_iter().find_map(text);
+    // Only the first author, often as `Clark R.`.
+    let author = text("author").map(|a| match a.rsplit_once(' ') {
+        Some((family, initials))
+            if !a.contains(',') && initials.chars().all(|c| c.is_uppercase() || ".-".contains(c)) =>
+        {
+            format!("{family}, {initials}")
+        }
+        _ => a,
+    });
+    Some(Candidate {
+        title: title.or_else(|| doi.clone())?,
+        authors: author.into_iter().collect(),
+        year: text("year").and_then(|y| y.get(..4)?.parse().ok()),
+        venue: text("journal-title").unwrap_or_default(),
+        ids: Ids { doi, arxiv: None },
+        in_library: None,
+    })
+}
+
+/// Semantic Scholar: good for computer science and preprints, but anonymous requests are often rate-limited and
+/// some publishers (Wiley) hide their references from it.
 pub struct SemanticScholar;
 
 impl ReferenceSource for SemanticScholar {
@@ -108,6 +158,10 @@ impl ReferenceSource for SemanticScholar {
 
     fn references(&self, paper: &Lookup) -> Result<Vec<Candidate>> {
         fetch::related(paper.ids, false)
+    }
+
+    fn fallback(&self) -> bool {
+        true
     }
 }
 
@@ -167,7 +221,7 @@ fn ads_paper(d: &Value) -> Option<Candidate> {
     let names = d["author"].as_array().into_iter().flatten().filter_map(Value::as_str);
     Some(Candidate {
         title: fetch::strip_tags(&first("title")?),
-        authors: names.map(|n| bib::family(n).to_string()).collect(),
+        authors: names.map(String::from).collect(),
         year: d["year"].as_str().and_then(|y| y.parse().ok()),
         venue: d["pub"].as_str().unwrap_or("").to_string(),
         ids: Ids { doi: first("doi"), arxiv },
@@ -192,11 +246,30 @@ mod tests {
         let c = openalex_work(&w).unwrap();
         assert_eq!(
             (c.title.as_str(), c.authors[0].as_str(), c.year),
-            ("Attention Is All You Need", "Vaswani", Some(2017))
+            ("Attention Is All You Need", "Ashish Vaswani", Some(2017))
         );
         assert_eq!(c.ids, Ids { doi: Some("10.48550/arxiv.1706.03762".into()), arxiv: Some("1706.03762".into()) });
         assert_eq!(c.venue, "");
         assert!(openalex_work(&json!({"doi": "https://doi.org/10.1/x", "title": null})).is_none(), "no title");
+    }
+
+    #[test]
+    fn crossref_references() {
+        let printed = json!({"author": "Clark R.", "year": "2009a", "journal-title": "Lunar Planet. Sci.",
+            "unstructured": "Clark R., Pieters C. M., Lunar Planet. Sci. XL, abstr. 2136 (2009)."});
+        let c = crossref_reference(&printed).unwrap();
+        assert_eq!((c.authors[0].as_str(), c.year, c.venue.as_str()), ("Clark, R.", Some(2009), "Lunar Planet. Sci."));
+        assert!(
+            c.title.starts_with("Clark R., Pieters") && c.ids.is_empty(),
+            "the printed citation stands in for a title"
+        );
+        let only_doi = crossref_reference(&json!({"DOI": "10.1126/science.1178658", "key": "e_1"})).unwrap();
+        assert_eq!(only_doi.title, "10.1126/science.1178658");
+        let stray = crossref_reference(&json!({"DOI": "10.1126/science.1178105)"})).unwrap();
+        assert_eq!(stray.ids.doi.as_deref(), Some("10.1126/science.1178105"), "punctuation from the printed citation");
+        let book = crossref_reference(&json!({"volume-title": "Lunar Sourcebook", "author": "Heiken"})).unwrap();
+        assert_eq!((book.title.as_str(), book.authors[0].as_str()), ("Lunar Sourcebook", "Heiken"));
+        assert!(crossref_reference(&json!({"key": "nothing"})).is_none());
     }
 
     #[test]
@@ -210,7 +283,7 @@ mod tests {
             "identifier": ["2011GSASP.477....1H", "arXiv:1101.00001v2"],
         });
         let c = ads_paper(&d).unwrap();
-        assert_eq!(c.authors, ["Hiesinger", "Head"]);
+        assert_eq!(c.authors, ["Hiesinger, H.", "Head, J. W., III"]);
         assert_eq!(
             (c.year, c.ids.doi.as_deref(), c.ids.arxiv.as_deref()),
             (Some(2011), Some("10.1130/2011.2477(01)"), Some("1101.00001"))

@@ -116,13 +116,15 @@ fn citation_graph() {
 #[test]
 #[ignore = "needs internet"]
 fn reference_sources() {
-    use carrel::refs::{Ads, Lookup, OpenAlex, ReferenceSource, SemanticScholar};
+    use carrel::refs::{Ads, Crossref, Lookup, OpenAlex, ReferenceSource, SemanticScholar};
     let _turn = one_at_a_time();
     let paper = ids(Some("10.1029/2010JE003711"), None);
     let lookup = Lookup { ids: &paper, title: "" };
     let openalex = OpenAlex { api_key: std::env::var("OPENALEX_API_KEY").ok() }.references(&lookup).unwrap();
     assert!(openalex.len() > 80, "{}", openalex.len());
     assert!(openalex.iter().any(|c| c.ids.doi.is_some() && !c.authors.is_empty() && c.year.is_some()));
+    let crossref = Crossref.references(&lookup).unwrap();
+    assert!(crossref.len() > 80 && crossref.iter().any(|c| c.ids.doi.is_none()), "{}", crossref.len());
     // Wiley hides that paper's references from Semantic Scholar ("elided by the publisher"); arXiv's are open.
     match SemanticScholar.references(&Lookup { ids: &ids(None, Some("1706.03762")), title: "" }) {
         Ok(found) => assert!(found.len() > 25, "{}", found.len()),
@@ -139,4 +141,5 @@ fn reference_sources() {
     let (id, messages) = lib.add("10.1126/science.1178105").unwrap();
     let refs = lib.references(&id, false).unwrap();
     assert!(refs.len() >= 15 && !refs[0].0.source.is_empty(), "{messages:?}");
+    assert!(refs.iter().any(|(r, _)| r.source == "crossref"), "an LPSC abstract OpenAlex can't match");
 }
