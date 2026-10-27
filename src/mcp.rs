@@ -114,6 +114,31 @@ fn brief(p: &Paper) -> Value {
     })
 }
 
+/// Everything about a paper; `get_paper` and `carrel list --json` share it.
+pub fn details(lib: &Library, p: &Paper) -> Value {
+    let b = &p.bib;
+    let fulltext = Some(p.dir.join("fulltext.md")).filter(|f| f.exists());
+    json!({
+        "id": p.id,
+        "title": b.title(),
+        "authors": b.authors(),
+        "year": b.year(),
+        "venue": b.venue(),
+        "doi": b.doi(),
+        "arxiv": b.arxiv(),
+        "abstract": b.get("abstract"),
+        "keywords": b.keywords(),
+        "summary": p.get(Field::Summary),
+        "notes": p.get(Field::Notes),
+        "figures": p.figures(),
+        "supplementary": p.supplementary(),
+        "fulltext_chars": p.fulltext().map(|t| t.chars().count()),
+        "pending_drafts": p.drafts().iter().map(|f| f.name()).collect::<Vec<_>>(),
+        "projects": lib.projects_of(&p.id),
+        "files": { "dir": p.dir, "bib": p.bib_path(), "pdf": p.pdf(), "fulltext": fulltext },
+    })
+}
+
 fn pretty(value: Value) -> String {
     serde_json::to_string_pretty(&value).unwrap_or_default()
 }
@@ -156,29 +181,7 @@ impl Server {
         description = "One paper's metadata, abstract, approved summary, keywords, notes, figure names, pending drafts and file paths. Read this before the full text."
     )]
     async fn get_paper(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
-        reply(self.lib.get(&a.id).map(|p| {
-            let b = &p.bib;
-            let fulltext = Some(p.dir.join("fulltext.md")).filter(|f| f.exists());
-            pretty(json!({
-                "id": p.id,
-                "title": b.title(),
-                "authors": b.authors(),
-                "year": b.year(),
-                "venue": b.venue(),
-                "doi": b.doi(),
-                "arxiv": b.arxiv(),
-                "abstract": b.get("abstract"),
-                "keywords": b.keywords(),
-                "summary": p.get(Field::Summary),
-                "notes": p.get(Field::Notes),
-                "figures": p.figures(),
-                "supplementary": p.supplementary(),
-                "fulltext_chars": p.fulltext().map(|t| t.chars().count()),
-                "pending_drafts": p.drafts().iter().map(|f| f.name()).collect::<Vec<_>>(),
-                "projects": self.lib.projects_of(&p.id),
-                "files": { "dir": p.dir, "bib": p.bib_path(), "pdf": p.pdf(), "fulltext": fulltext },
-            }))
-        }))
+        reply(self.lib.get(&a.id).map(|p| pretty(details(&self.lib, &p))))
     }
 
     #[tool(

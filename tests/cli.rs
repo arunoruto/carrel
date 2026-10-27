@@ -65,6 +65,12 @@ fn papers() {
     assert!(c.fails(&["add", pdf.to_str().unwrap()]).contains("already in the library"));
     assert!(c.fails(&["add", "./missing.pdf"]).contains("no such file"));
     assert!(c.ok(&["list"]).starts_with("graphtheory"));
+    let papers: serde_json::Value = serde_json::from_str(&c.ok(&["list", "--json"])).unwrap();
+    assert_eq!(papers[0]["id"], "graphtheory");
+    let fulltext = std::fs::read_to_string(papers[0]["files"]["fulltext"].as_str().unwrap()).unwrap();
+    assert!(fulltext.contains("Plain text"), "the path to the extracted text: {fulltext}");
+    let shown: serde_json::Value = serde_json::from_str(&c.ok(&["show", "graphtheory", "--json"])).unwrap();
+    assert_eq!(shown, papers[0]);
     assert!(c.ok(&["show", "graphtheory"]).contains("graph-theory"));
     assert!(c.ok(&["search", "plain", "text"]).contains("graphtheory"));
     assert!(c.ok(&["bib"]).starts_with("@misc{graphtheory,"));
@@ -138,6 +144,13 @@ fn projects_and_imports() {
     let out = c.ok(&["import", bib.to_str().unwrap(), "-p", "thesis"]);
     assert!(out.contains("3 entries"), "{out}");
     assert_eq!(c.ok(&["project"]), format!("{:<30} 3 papers\n", "thesis"));
+    let thesis: serde_json::Value = serde_json::from_str(&c.ok(&["list", "-p", "thesis", "--json"])).unwrap();
+    assert_eq!(thesis.as_array().unwrap().len(), 3);
+    assert_eq!(
+        (&thesis[0]["authors"], &thesis[0]["projects"]),
+        (&serde_json::json!(["A, B"]), &serde_json::json!(["thesis"]))
+    );
+    assert!(c.fails(&["list", "-p", "nope"]).contains("no project"));
     c.tmp.write("doc/main.tex", "\\cite{a2020,c2022} % \\cite{b2021}\n\\cite{nowhere}");
     c.tmp.write("doc/talk.typ", "As shown by @a2020 and #cite(<b2021>).");
     let out = c.ok(&[

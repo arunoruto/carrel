@@ -66,15 +66,26 @@ enum Cmd {
         #[arg(long)]
         cited_by: bool,
     },
-    /// List all papers
-    List,
+    /// List all papers, or a project's
+    List {
+        #[arg(short, long)]
+        project: Option<String>,
+        /// Machine-readable output: everything about each paper, with the paths of its files
+        #[arg(long)]
+        json: bool,
+    },
     /// Search titles, authors, keywords, abstracts, summaries, notes and full text
     Search {
         #[arg(required = true)]
         query: Vec<String>,
     },
     /// Show a paper's details
-    Show { id: String },
+    Show {
+        id: String,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// Edit a paper's .bib in $EDITOR
     Edit { id: String },
     /// Open a paper's PDF
@@ -191,10 +202,19 @@ fn main() -> Result<()> {
                 println!("{c}{known}");
             }
         }
-        Cmd::List => {
-            let (papers, broken) = lib.papers();
-            papers.iter().for_each(print_line);
-            broken.iter().for_each(|b| eprintln!("warning: {b}"));
+        Cmd::List { project, json } => {
+            let papers = match project {
+                Some(name) => project_papers(&lib, &name)?,
+                None => {
+                    let (papers, broken) = lib.papers();
+                    broken.iter().for_each(|b| eprintln!("warning: {b}"));
+                    papers
+                }
+            };
+            match json {
+                true => print_json(&papers.iter().map(|p| mcp::details(&lib, p)).collect::<Vec<_>>())?,
+                false => papers.iter().for_each(print_line),
+            }
         }
         Cmd::Search { query } => {
             for (p, snippet) in lib.search(&query.join(" "), 50)? {
@@ -202,7 +222,8 @@ fn main() -> Result<()> {
                 println!("{:30}   {snippet}", "");
             }
         }
-        Cmd::Show { id } => show(&lib, &lib.get(&id)?),
+        Cmd::Show { id, json: true } => print_json(&mcp::details(&lib, &lib.get(&id)?))?,
+        Cmd::Show { id, .. } => show(&lib, &lib.get(&id)?),
         Cmd::Edit { id } => {
             edit(&lib.bib_path(&id)?)?;
             lib.get(&id)?; // complain right away if the edit broke it
@@ -272,7 +293,7 @@ fn main() -> Result<()> {
 fn doctor(lib: &Library, json: bool, all: bool) -> Result<()> {
     let issues = lib.doctor();
     if json {
-        println!("{}", serde_json::to_string_pretty(&issues)?);
+        print_json(&issues)?;
         return Ok(());
     }
     let (shown, hidden): (Vec<_>, Vec<_>) = issues.iter().partition(|i| all || i.level != "info");
@@ -299,6 +320,11 @@ fn project_papers(lib: &Library, name: &str) -> Result<Vec<Paper>> {
     let (papers, missing) = lib.project_papers(name)?;
     missing.iter().for_each(|id| eprintln!("warning: project {name} lists {id}, which is not in the library"));
     Ok(papers)
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
 }
 
 fn print_line(p: &Paper) {
