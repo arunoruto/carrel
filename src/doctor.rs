@@ -1,6 +1,6 @@
 //! `carrel doctor`: what's wrong or missing in the library, each with the command that fixes it.
 
-use crate::{Library, fetch};
+use crate::{Library, fetch, graph};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub struct Issue {
     /// "error": the paper can't be loaded; "warning": something needs fixing; "info": worth a look.
     pub level: &'static str,
-    /// What was checked: broken, fields, markup, macro, duplicate, text, pdf, preprint, project.
+    /// What was checked: broken, fields, markup, macro, duplicate, text, pdf, preprint, references, project, people.
     pub check: &'static str,
     pub id: String,
     pub message: String,
@@ -99,6 +99,9 @@ impl Library {
                 let message = "an arXiv preprint; it may have been published since".into();
                 report("info", "preprint", id, message, Some(format!("carrel update {id}")));
             }
+            if let Err(e) = graph::read(&p.dir) {
+                report("error", "references", id, format!("{e:#}"), Some(format!("carrel refs {id} --refresh")));
+            }
         }
 
         for name in self.projects() {
@@ -106,6 +109,9 @@ impl Library {
                 let message = format!("listed in project {name} but not in the library");
                 report("warning", "project", &id, message, Some(format!("carrel project remove {name} {id}")));
             }
+        }
+        if let Err(e) = self.people() {
+            report("error", "people", crate::authors::DIR, format!("{e:#}"), None);
         }
         let rank = |level: &str| ["error", "warning", "info"].iter().position(|l| *l == level);
         issues.sort_by(|a, b| rank(a.level).cmp(&rank(b.level)).then(a.id.cmp(&b.id)));

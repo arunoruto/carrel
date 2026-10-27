@@ -128,10 +128,12 @@ fn tools() {
             "list_projects",
             "neighbors",
             "propose",
+            "propose_people",
             "read_paper",
             "related",
             "search",
-            "suggest"
+            "suggest",
+            "tree"
         ]
     );
     for t in tools.as_array().unwrap() {

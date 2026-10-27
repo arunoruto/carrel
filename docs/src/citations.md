@@ -8,7 +8,23 @@ carrel graph clark2009detection        # how it connects to the rest of the libr
 carrel graph                           # what the library cites most but lacks
 carrel graph -p thesis -n 10           # the same for one project
 carrel graph --dot | dot -Tsvg > graph.svg
+carrel tree mccord2011sources          # what it cites, what those cite, … (-d for depth)
+carrel tree pieters2009character --cited-by
 ```
+
+```text
+$ carrel tree mccord2011sources
+mccord2011sources  Sources and physical processes responsible for OH/H2O in the lunar soil …
+  clark2009detection  Detection of Adsorbed Water and Hydroxyl on the Moon
+    pieters2009character  Character and Spatial Distribution of OH/H2O on the Surface of the Moon …
+      clark2009detection  (see above)
+      sunshine2009temporal  Temporal and Spatial Variability of Lunar Hydration …
+    sunshine2009temporal  (see above)
+  pieters2009character  (see above)
+  sunshine2009temporal  (see above)
+```
+
+A paper met again is marked *(see above)* and not followed, so papers citing each other don't loop.
 
 ```text
 $ carrel graph clark2009detection
@@ -22,7 +38,7 @@ $ carrel graph
       cited by clark2009detection, mccord2011sources, pieters2009character
 ```
 
-An assistant gets the same through the MCP tools `neighbors` and `suggest`, so it can work out what else to read.
+An assistant gets the same through the MCP tools `neighbors`, `tree` and `suggest`, so it can work out what else to read.
 
 ## Where references come from
 
@@ -73,5 +89,24 @@ Clark, Roger N.
 ```
 
 *maybe also* lists names that fit but lack evidence, with their library papers or *cited only* for someone who appears only in references. Here Roger N. Clark wrote his paper alone and every reference spells him *R. N. Clark*, so carrel can't tell; you, or an assistant reading the papers, can. An assistant gets the same through the MCP tool `authors`.
+
+### Confirming people
+
+When you know better, say so; it comes before any evidence:
+
+```sh
+carrel authors same "Clark, Roger N." "Clark, R. N."        # one person
+carrel authors different "Head, J." "Head, James W."        # two people
+```
+
+Each confirmed person is a file, `people/<id>.json`, listing the spellings that belong to them and nobody else, so the decision travels with the library when you [share it](sharing.md). Confirming again with a spelling that's already taken joins the two.
+
+An assistant can propose such decisions too (the MCP tool `propose_people`, with its reasons). They wait as drafts:
+
+```sh
+carrel drafts                 # people 1   one person: Clark, Roger N.; R. N. Clark  (both at USGS Denver, same topic)
+carrel authors approve 1
+carrel authors reject 1
+```
 
 The references live in `<key>/references.json`, a plain JSON list, so they travel with the library when you [share it](sharing.md).

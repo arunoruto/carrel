@@ -83,6 +83,27 @@ struct AuthorsArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct TreeArgs {
+    /// Paper id.
+    id: String,
+    /// Follow who cites it, instead of what it cites.
+    #[serde(default)]
+    cited_by: bool,
+    /// How many levels deep (default 3).
+    depth: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct PeopleArgs {
+    /// Spellings of names exactly as `authors` lists them, at least two.
+    spellings: Vec<String>,
+    /// true: they are one person; false: they are different people.
+    same: bool,
+    /// Why, for the user who reviews it: shared co-authors, affiliation, topic, what the papers say.
+    reason: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct SuggestArgs {
     /// Only what this project's papers cite.
     project: Option<String>,
@@ -270,25 +291,49 @@ impl Server {
         description = "How a paper connects to the library: the library papers it cites and that cite it, those sharing authors with it, and its references that are not in the library. references_known is false when its references were never looked up (`related` looks them up)."
     )]
     async fn neighbors(&self, Parameters(a): Parameters<IdArgs>) -> Result<CallToolResult, ErrorData> {
-        reply(self.lib.graph().neighbors(&a.id).map(|n| pretty(json!(n))))
+        reply(self.lib.graph().and_then(|g| g.neighbors(&a.id)).map(|n| pretty(json!(n))))
     }
 
     #[tool(
         description = "The people behind the library's papers: each with their spellings of their name, their library papers and the people they wrote with most. Spellings count as one person only when they share co-authors or a first name, so two people with the same initials stay apart. Use it to find a person's other papers or close collaborators."
     )]
     async fn authors(&self, Parameters(a): Parameters<AuthorsArgs>) -> Result<CallToolResult, ErrorData> {
-        reply(Ok(pretty(json!(self.lib.graph().authors.people(a.name.as_deref())))))
+        reply(self.lib.graph().map(|g| pretty(json!(g.authors.people(a.name.as_deref())))))
+    }
+
+    #[tool(
+        description = "The library papers a paper cites, and those they cite in turn (or with cited_by, the papers citing it, and theirs), as a tree: each node with its level, id and title. A paper met again is marked `again` and not followed."
+    )]
+    async fn tree(&self, Parameters(a): Parameters<TreeArgs>) -> Result<CallToolResult, ErrorData> {
+        reply(self.lib.graph().and_then(|g| {
+            let nodes = g.tree(&a.id, a.depth.unwrap_or(3), a.cited_by)?;
+            let nodes = nodes
+                .iter()
+                .map(|(level, id, again)| json!({"level": level, "id": id, "title": g.title(id), "again": again}));
+            Ok(pretty(nodes.collect()))
+        }))
+    }
+
+    #[tool(
+        description = "Propose that some spellings of names are one person (same: true) or different people (same: false), for example when `authors` lists them as `maybe`. It becomes a draft the user reviews; say why in `reason`."
+    )]
+    async fn propose_people(&self, Parameters(a): Parameters<PeopleArgs>) -> Result<CallToolResult, ErrorData> {
+        reply(
+            self.lib
+                .propose_people(a.same, &a.spellings, &a.reason)
+                .map(|id| format!("Saved as people draft {id}. The user will review it.")),
+        )
     }
 
     #[tool(
         description = "Papers missing from the library that its papers (or a project's) cite most, each with the library papers citing it: what to read next. Only papers whose references are known count."
     )]
     async fn suggest(&self, Parameters(a): Parameters<SuggestArgs>) -> Result<CallToolResult, ErrorData> {
-        let within = a.project.as_deref().map(|name| self.lib.project(name)).transpose();
-        reply(within.map(|within| {
-            let found = self.lib.graph().suggestions(within.as_deref());
-            pretty(json!(found.into_iter().take(a.limit.unwrap_or(20)).collect::<Vec<_>>()))
-        }))
+        let found = a.project.as_deref().map(|name| self.lib.project(name)).transpose().and_then(|within| {
+            let found = self.lib.graph()?.suggestions(within.as_deref());
+            Ok(pretty(json!(found.into_iter().take(a.limit.unwrap_or(20)).collect::<Vec<_>>())))
+        });
+        reply(found)
     }
 
     #[tool(

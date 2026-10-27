@@ -238,6 +238,18 @@ fn graph() {
         "{smith}"
     );
     assert_eq!(c.ok(&["authors", "nobody"]), "");
+    assert_eq!(c.ok(&["authors", "same", "Smith, Jane", "J. Smith"]), "smith-jane\n");
+    assert!(c.ok(&["authors", "smith"]).contains("[confirmed: smith-jane]"));
+    assert_eq!(c.run(&["authors", "same", "only one"]).status.code(), Some(2));
+    assert_eq!(c.ok(&["tree", "b"]), "b  B\n  a  A\n");
+    assert_eq!(c.ok(&["tree", "a", "--cited-by"]), "a  A\n  b  B\n");
+    c.tmp.write(
+        "lib/people/drafts/1.json",
+        r#"{"same": false, "spellings": ["Doe, John", "J. Doe"], "reason": "two Does"}"#,
+    );
+    assert!(c.ok(&["drafts"]).contains("people 1"), "people drafts are listed too");
+    c.ok(&["authors", "reject", "1"]);
+    assert!(!c.ok(&["drafts"]).contains("people"));
     assert!(c.ok(&["graph"]).starts_with("  1× Outside (2000)"));
     let json: serde_json::Value = serde_json::from_str(&c.ok(&["graph", "--json"])).unwrap();
     assert_eq!(json[0]["cited_by"], serde_json::json!(["b"]));

@@ -324,11 +324,11 @@ fn citation_graph() {
     let drafted = r#"[{"title": "Global distribution of large lunar craters", "authors": ["Head"], "source": "openalex"},
                       {"title": "Lunar sourcebook!"}]"#;
     lib.propose("hiesinger2011", Field::References, drafted).unwrap();
-    assert!(!lib.graph().neighbors("hiesinger2011").unwrap().references_known, "a draft doesn't count yet");
+    assert!(!lib.graph().unwrap().neighbors("hiesinger2011").unwrap().references_known, "a draft doesn't count yet");
     assert!(lib.propose("hiesinger2011", Field::References, "Head et al. 2010").is_err(), "not JSON");
     lib.approve("hiesinger2011", Field::References).unwrap();
 
-    let g = lib.graph();
+    let g = lib.graph().unwrap();
     let n = g.neighbors("head2010").unwrap();
     assert_eq!(
         (n.cites.as_slice(), n.cited_by.as_slice()),
@@ -358,5 +358,56 @@ fn citation_graph() {
 
     // Renaming keeps the links: references point at DOIs and titles, not keys.
     lib.rename("head2010", Some("head2010craters")).unwrap();
-    assert_eq!(lib.graph().neighbors("pieters2009").unwrap().cited_by, ["head2010craters"]);
+    assert_eq!(lib.graph().unwrap().neighbors("pieters2009").unwrap().cited_by, ["head2010craters"]);
+}
+
+/// A citation tree through cycles, and decisions about people that outlast the evidence.
+#[test]
+fn trees_and_people() {
+    let tmp = Tmp::new("people");
+    let lib = library(&tmp);
+    paper(&lib, "a", "title = {A}, author = {Clark, Roger N.}");
+    paper(&lib, "b", "title = {B}, author = {Clark, R. N. and Pieters, C. M.}");
+    paper(&lib, "c", "title = {C}, author = {Pieters, Carle M.}");
+    let cites = |id: &str, titles: &[&str]| {
+        let refs: Vec<String> = titles.iter().map(|t| format!(r#"{{"title": "{t}", "source": "openalex"}}"#)).collect();
+        fs::write(lib.root.join(id).join("references.json"), format!("[{}]", refs.join(","))).unwrap();
+    };
+    cites("a", &["B", "Elsewhere"]);
+    cites("b", &["C", "A"]);
+    let g = lib.graph().unwrap();
+    let tree = g.tree("a", 3, false).unwrap();
+    assert_eq!(tree, [(1, "b".to_string(), false), (2, "a".into(), true), (2, "c".into(), false)], "a cycle ends");
+    assert_eq!(g.tree("c", 1, true).unwrap(), [(1, "b".to_string(), false)]);
+    assert!(g.tree("nope", 1, false).is_err());
+
+    assert_eq!(g.authors.people(Some("clark")).len(), 2, "single-author paper: no evidence");
+    assert_eq!(lib.same_person(&["Clark, Roger N.".into(), "Clark, R. N.".into()]).unwrap(), "clark-roger-n");
+    assert!(lib.get("people").is_err() && lib.papers().0.len() == 3, "people/ is not a paper");
+    let clark = lib
+        .graph()
+        .unwrap()
+        .authors
+        .people(Some("clark"))
+        .into_iter()
+        .map(|p| (p.id.clone(), p.papers.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(clark, [(Some("clark-roger-n".to_string()), vec!["a".to_string(), "b".into()])]);
+
+    // An AI says the two Pieters are different people; the user agrees.
+    let draft = lib
+        .propose_people(false, &["Pieters, C. M.".into(), "Pieters, Carle M.".into()], "different institutes")
+        .unwrap();
+    assert_eq!(lib.people_drafts()[0].reason, "different institutes");
+    lib.decide_people(&draft, true).unwrap();
+    assert!(lib.people_drafts().is_empty());
+    assert_eq!(lib.graph().unwrap().authors.people(Some("pieters")).len(), 2);
+    // Later the user changes their mind: joining them removes the separate files.
+    lib.same_person(&["Pieters, C. M.".into(), "Pieters, Carle M.".into()]).unwrap();
+    assert_eq!(lib.people().unwrap().len(), 2, "clark and one pieters");
+    assert!(lib.decide_people("nope", true).is_err());
+
+    fs::write(lib.root.join("people/broken.json"), "{").unwrap();
+    assert!(lib.doctor().iter().any(|i| i.check == "people"));
+    assert!(lib.graph().is_err(), "a broken decision is not silently ignored");
 }

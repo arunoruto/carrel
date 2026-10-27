@@ -1,13 +1,18 @@
-//! Full-text search: an SQLite FTS5 index in the cache directory. It only mirrors the files, so it is
-//! brought up to date before every search and can be deleted any time.
+//! The index: an SQLite database in the cache directory with full-text search (FTS5) and each paper's
+//! references for the citation graph. It only mirrors the files, so it is brought up to date before
+//! every use and can be deleted any time.
 
+use crate::graph::{self, Reference};
 use crate::{Field, Paper, SUPPLEMENTARY};
 use anyhow::Result;
 use rusqlite::{Connection, ErrorCode, TransactionBehavior, params};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
+
+/// Raised whenever the tables change: an index of another version is rebuilt.
+const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
@@ -15,7 +20,8 @@ CREATE TABLE IF NOT EXISTS stamps (id TEXT PRIMARY KEY, stamp TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS papers USING fts5(
     id UNINDEXED, title, authors, keywords, ids, abstract, summary, notes, fulltext,
     tokenize = 'porter unicode61 remove_diacritics 2'
-);";
+);
+CREATE TABLE IF NOT EXISTS refs (paper TEXT PRIMARY KEY, json TEXT NOT NULL);";
 
 /// Column weights, in schema order: a hit in the title counts ten times one in the full text.
 const RANK: &str = "bm25(papers, 0, 10, 6, 8, 5, 3, 3, 2, 1)";
@@ -57,6 +63,23 @@ pub fn search(path: &Path, papers: &[Paper], query: &str, limit: usize) -> Resul
     Ok(vec![])
 }
 
+/// Each paper's references, read from the files only for papers that changed since the last use.
+/// A damaged `references.json` counts as none (`carrel doctor` reports it).
+pub fn references(path: &Path, papers: &[Paper]) -> Result<BTreeMap<String, Vec<Reference>>> {
+    let mut conn = open(path)?;
+    sync(&mut conn, papers)?;
+    let mut stmt = conn.prepare("SELECT paper, json FROM refs")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut refs = BTreeMap::new();
+    for row in rows {
+        let (id, json) = row?;
+        if let Ok(list) = serde_json::from_str(&json) {
+            refs.insert(id, list);
+        }
+    }
+    Ok(refs)
+}
+
 /// Open the index, rebuilding it when the file is damaged; it is only a cache.
 fn open(path: &Path) -> Result<Connection> {
     if let Some(dir) = path.parent() {
@@ -65,6 +88,17 @@ fn open(path: &Path) -> Result<Connection> {
     let attempt = || -> rusqlite::Result<Connection> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(10))?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version != VERSION {
+            let tables: Vec<String> = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'papers_%' AND name NOT LIKE 'sqlite_%'")?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            for table in tables {
+                conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
+            }
+            conn.execute_batch(&format!("PRAGMA user_version = {VERSION}"))?;
+        }
         conn.execute_batch(SCHEMA)?;
         Ok(conn)
     };
@@ -126,11 +160,16 @@ fn sync(conn: &mut Connection, papers: &[Paper]) -> Result<()> {
                 text(p),
             ],
         )?;
+        tx.execute("DELETE FROM refs WHERE paper = ?1", [&p.id])?;
+        if let Ok(json) = fs::read_to_string(p.dir.join(graph::FILE)) {
+            tx.execute("INSERT INTO refs VALUES (?1, ?2)", [&p.id, &json])?;
+        }
         tx.execute("INSERT OR REPLACE INTO stamps VALUES (?1, ?2)", [&p.id, &stamp])?;
     }
     let live: HashSet<&str> = papers.iter().map(|p| p.id.as_str()).collect();
     for id in known.keys().filter(|id| !live.contains(id.as_str())) {
         tx.execute("DELETE FROM papers WHERE id = ?1", [id])?;
+        tx.execute("DELETE FROM refs WHERE paper = ?1", [id])?;
         tx.execute("DELETE FROM stamps WHERE id = ?1", [id])?;
     }
     tx.commit()?;
@@ -147,7 +186,13 @@ fn text(p: &Paper) -> String {
 /// Changes whenever one of a paper's indexed files does.
 fn stamp(p: &Paper) -> String {
     let supplementary = p.supplementary().into_iter().map(|name| p.dir.join(SUPPLEMENTARY).join(name));
-    let files = [p.bib_path(), p.dir.join("summary.md"), p.dir.join("notes.md"), p.dir.join("fulltext.md")];
+    let files = [
+        p.bib_path(),
+        p.dir.join("summary.md"),
+        p.dir.join("notes.md"),
+        p.dir.join("fulltext.md"),
+        p.dir.join(graph::FILE),
+    ];
     let files: Vec<_> = files.into_iter().chain(supplementary).collect();
     let stamps = files.iter().map(|f| fs::metadata(f).map(|m| format!("{}@{:?}", m.len(), m.modified().ok())));
     stamps.map(|s| s.unwrap_or_default()).collect::<Vec<_>>().join("|")

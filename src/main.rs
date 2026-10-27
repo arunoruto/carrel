@@ -92,9 +92,24 @@ enum Cmd {
     },
     /// The people behind the library's papers, with their spellings and co-authors. Spellings count as one
     /// person when they share co-authors or a first name
+    #[command(args_conflicts_with_subcommands = true)]
     Authors {
+        #[command(subcommand)]
+        cmd: Option<AuthorsCmd>,
         /// Only people with a spelling containing this
         name: Option<String>,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
+    /// The library papers a paper cites, and those they cite, as a tree (or with --cited-by, who cites it)
+    Tree {
+        id: String,
+        #[arg(long)]
+        cited_by: bool,
+        /// How many levels deep
+        #[arg(short, long, default_value_t = 3)]
+        depth: usize,
         /// Machine-readable output
         #[arg(long)]
         json: bool,
@@ -158,6 +173,24 @@ enum Cmd {
     Rm { id: String },
     /// Serve the library to AI assistants over MCP (stdio)
     Mcp,
+}
+
+#[derive(Subcommand)]
+enum AuthorsCmd {
+    /// Confirm that these spellings are one person, e.g. `carrel authors same "Clark, Roger N." "Clark, R. N."`
+    Same {
+        #[arg(required = true, num_args = 2..)]
+        spellings: Vec<String>,
+    },
+    /// Confirm that these spellings are different people
+    Different {
+        #[arg(required = true, num_args = 2..)]
+        spellings: Vec<String>,
+    },
+    /// Accept an AI's proposal about people (`carrel drafts` lists them)
+    Approve { draft: String },
+    /// Discard an AI's proposal about people
+    Reject { draft: String },
 }
 
 #[derive(Subcommand)]
@@ -252,8 +285,24 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Refs { id: None, .. } => unreachable!("clap requires an id without --all"),
+        Cmd::Tree { id, cited_by, depth, json } => {
+            let graph = lib.graph()?;
+            let tree = graph.tree(&id, depth, cited_by)?;
+            if json {
+                let nodes: Vec<_> = tree
+                    .iter()
+                    .map(|(level, id, again)| serde_json::json!({"level": level, "id": id, "again": again}))
+                    .collect();
+                return print_json(&nodes);
+            }
+            println!("{id}  {}", graph.title(&id));
+            for (level, id, again) in tree {
+                let title = if again { "(see above)".to_string() } else { graph.title(&id) };
+                println!("{}{id}  {title}", "  ".repeat(level));
+            }
+        }
         Cmd::Graph { id: Some(id), json, .. } => {
-            let n = lib.graph().neighbors(&id)?;
+            let n = lib.graph()?.neighbors(&id)?;
             if json {
                 return print_json(&n);
             }
@@ -271,7 +320,7 @@ fn main() -> Result<()> {
         }
         Cmd::Graph { id: None, project, dot, json, limit } => {
             let within = project.map(|name| lib.project(&name)).transpose()?;
-            let graph = lib.graph();
+            let graph = lib.graph()?;
             if dot {
                 print!("{}", graph.dot(within.as_deref()));
                 return Ok(());
@@ -285,8 +334,16 @@ fn main() -> Result<()> {
                 println!("      cited by {}", s.cited_by.join(", "));
             }
         }
-        Cmd::Authors { name, json } => {
-            let graph = lib.graph();
+        Cmd::Authors { cmd: Some(AuthorsCmd::Same { spellings }), .. } => {
+            println!("{}", lib.same_person(&spellings)?);
+        }
+        Cmd::Authors { cmd: Some(AuthorsCmd::Different { spellings }), .. } => {
+            println!("{}", lib.different_people(&spellings)?.join(", "));
+        }
+        Cmd::Authors { cmd: Some(AuthorsCmd::Approve { draft }), .. } => lib.decide_people(&draft, true)?,
+        Cmd::Authors { cmd: Some(AuthorsCmd::Reject { draft }), .. } => lib.decide_people(&draft, false)?,
+        Cmd::Authors { cmd: None, name, json } => {
+            let graph = lib.graph()?;
             let people = graph.authors.people(name.as_deref());
             if json {
                 return print_json(&people);
@@ -294,7 +351,8 @@ fn main() -> Result<()> {
             for p in people {
                 let others: Vec<&str> = p.variants.iter().map(String::as_str).filter(|v| *v != p.name).collect();
                 let also = if others.is_empty() { String::new() } else { format!("  (also {})", others.join("; ")) };
-                println!("{}{also}", p.name);
+                let id = p.id.as_ref().map_or(String::new(), |id| format!("  [confirmed: {id}]"));
+                println!("{}{also}{id}", p.name);
                 println!("  papers:     {}", p.papers.join(", "));
                 let with: Vec<String> = p.coauthors.iter().map(|(name, n)| format!("{name} ({n})")).collect();
                 println!("  co-authors: {}", list(&with));
@@ -348,6 +406,10 @@ fn main() -> Result<()> {
         Cmd::Drafts => {
             for (p, field) in lib.drafts() {
                 println!("{:<30} {}", p.id, field.name());
+            }
+            for d in lib.people_drafts() {
+                let what = if d.same { "one person" } else { "different people" };
+                println!("people {:<23} {what}: {}  ({})", d.id, d.spellings.join("; "), d.reason);
             }
         }
         Cmd::Approve { id, field } => lib.approve(&id, field)?,

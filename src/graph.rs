@@ -2,7 +2,7 @@
 //! [`crate::refs`] sources or read from the full text by an AI (as a draft a human approves). Every
 //! reference says where it came from. The links between papers are worked out from those files.
 
-use crate::authors::Authors;
+use crate::authors::{Authors, Confirmed};
 use crate::fetch::{self, Candidate, Ids};
 use crate::refs::{Lookup, ReferenceSource};
 use crate::{Library, Paper};
@@ -156,19 +156,29 @@ pub struct Graph {
     refs: BTreeMap<String, Vec<Reference>>,
     /// Paper keys (see [`fetch::paper_keys`]) to library ids.
     known: HashMap<String, String>,
+    /// Library papers each paper cites, and the reverse.
+    cites: BTreeMap<String, Vec<String>>,
+    cited_by: BTreeMap<String, Vec<String>>,
 }
 
 impl Graph {
-    fn new(papers: Vec<Paper>) -> Self {
+    fn new(papers: Vec<Paper>, refs: BTreeMap<String, Vec<Reference>>, people: &[Confirmed]) -> Self {
         let mut known = HashMap::new();
-        let mut refs = BTreeMap::new();
         for p in &papers {
             for key in fetch::paper_keys(&Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() }, &p.bib.title()) {
                 known.entry(key).or_insert_with(|| p.id.clone());
             }
-            if let Ok(Some(list)) = read(&p.dir) {
-                refs.insert(p.id.clone(), list);
+        }
+        let find = |r: &Reference| r.keys().iter().find_map(|k| known.get(k)).cloned();
+        let (mut cites, mut cited_by) = (BTreeMap::new(), BTreeMap::<String, Vec<String>>::new());
+        for (id, list) in &refs {
+            let mut found: Vec<String> = list.iter().filter_map(find).filter(|other| other != id).collect();
+            found.sort();
+            found.dedup();
+            for other in &found {
+                cited_by.entry(other.clone()).or_default().push(id.clone());
             }
+            cites.insert(id.clone(), found);
         }
         // Each paper's author list once: the library's, then the cited papers not in it.
         let mut docs: Vec<(Option<String>, Vec<String>)> =
@@ -182,7 +192,7 @@ impl Graph {
                 docs.push((None, r.authors.clone()));
             }
         }
-        Graph { authors: Authors::new(&docs), papers, refs, known }
+        Graph { authors: Authors::new(&docs, people), papers, refs, known, cites, cited_by }
     }
 
     /// The library id of a referenced paper.
@@ -190,25 +200,54 @@ impl Graph {
         r.keys().iter().find_map(|k| self.known.get(k)).map(String::as_str)
     }
 
-    /// Library papers that `id` cites.
-    fn cites(&self, id: &str) -> Vec<String> {
-        let found = self.refs.get(id).into_iter().flatten().filter_map(|r| self.find(r)).filter(|&other| other != id);
-        let mut ids: Vec<String> = found.map(String::from).collect();
-        ids.sort();
-        ids.dedup();
-        ids
+    /// Library papers that `id` cites, or with `cited_by` that cite it.
+    fn linked(&self, id: &str, cited_by: bool) -> &[String] {
+        let edges = if cited_by { &self.cited_by } else { &self.cites };
+        edges.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The library papers `id` cites (or that cite it), and theirs in turn, `depth` levels deep: each as
+    /// (level, id, already listed). A paper met again is listed but not followed, so cycles end.
+    pub fn tree(&self, id: &str, depth: usize, cited_by: bool) -> Result<Vec<(usize, String, bool)>> {
+        if !self.papers.iter().any(|p| p.id == id) {
+            bail!("no paper {id}");
+        }
+        fn walk(
+            g: &Graph,
+            id: &str,
+            level: usize,
+            depth: usize,
+            cited_by: bool,
+            seen: &mut HashSet<String>,
+            out: &mut Vec<(usize, String, bool)>,
+        ) {
+            for next in g.linked(id, cited_by) {
+                let again = !seen.insert(next.clone());
+                out.push((level, next.clone(), again));
+                if !again && level < depth {
+                    walk(g, next, level + 1, depth, cited_by, seen, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(self, id, 1, depth, cited_by, &mut HashSet::from([id.to_string()]), &mut out);
+        Ok(out)
+    }
+
+    /// A library paper's title.
+    pub fn title(&self, id: &str) -> String {
+        self.papers.iter().find(|p| p.id == id).map(|p| p.bib.title()).unwrap_or_default()
     }
 
     pub fn neighbors(&self, id: &str) -> Result<Neighbors> {
         if !self.papers.iter().any(|p| p.id == id) {
             bail!("no paper {id}");
         }
-        let cited_by = self.refs.keys().filter(|&other| other != id && self.cites(other).iter().any(|c| c == id));
         let shared_authors = self.authors.shared(id).into_iter().collect();
         let refs = self.refs.get(id);
         Ok(Neighbors {
-            cites: self.cites(id),
-            cited_by: cited_by.cloned().collect(),
+            cites: self.linked(id, false).to_vec(),
+            cited_by: self.linked(id, true).to_vec(),
             shared_authors,
             references_known: refs.is_some(),
             not_in_library: refs.into_iter().flatten().filter(|r| self.find(r).is_none()).cloned().collect(),
@@ -243,7 +282,7 @@ impl Graph {
         let mut out = String::from("digraph carrel {\n  rankdir=LR;\n  node [shape=box];\n");
         for p in self.papers.iter().filter(|p| shown(&p.id)) {
             out += &format!("  \"{}\";\n", p.id);
-            for cited in self.cites(&p.id).iter().filter(|&c| shown(c)) {
+            for cited in self.linked(&p.id, false).iter().filter(|&c| shown(c)) {
                 out += &format!("  \"{}\" -> \"{cited}\";\n", p.id);
             }
         }
@@ -252,8 +291,12 @@ impl Graph {
 }
 
 impl Library {
-    pub fn graph(&self) -> Graph {
-        Graph::new(self.papers().0)
+    /// The citation graph and who is who, from the papers, their references (cached in the index) and the
+    /// decisions about people.
+    pub fn graph(&self) -> Result<Graph> {
+        let papers = self.papers().0;
+        let refs = crate::index::references(&self.index, &papers)?;
+        Ok(Graph::new(papers, refs, &self.people()?))
     }
 
     /// A paper's references, looked up the first time (or again with `refresh`), each with its library id.
@@ -262,7 +305,7 @@ impl Library {
         if refresh || read(&p.dir)?.is_none() {
             self.look_up_references(&p)?;
         }
-        let graph = self.graph();
+        let graph = self.graph()?;
         let refs = read(&p.dir)?.unwrap_or_default();
         let with_ids = refs.into_iter().map(|r| {
             let found = graph.find(&r).filter(|&found| found != id).map(String::from);

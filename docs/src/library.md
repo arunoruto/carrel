@@ -16,6 +16,8 @@ The library is a folder of plain files, by default `~/Documents/carrel` (see [Co
     supplementary/             extra files; PDFs among them get their text next to them
   projects/
     thesis.txt                 a project: one paper id per line
+  people/
+    clark-roger-n.json         a confirmed person: the spellings that are them (see The citation graph)
 ```
 
 ## Citation keys
