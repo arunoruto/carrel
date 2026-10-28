@@ -48,7 +48,7 @@ carrel asks every source in this order, and each adds the references the earlier
 
 | Source | Covers | Needs |
 |---|---|---|
-| `ads` ([NASA ADS](https://ui.adsabs.harvard.edu)) | astronomy and planetary science, including conference abstracts without a DOI | a free token in `ADS_API_TOKEN`; skipped without one |
+| `ads` ([NASA ADS](https://ui.adsabs.harvard.edu)) | astronomy and planetary science, including conference abstracts without a DOI | a free token in `ADS_API_TOKEN` or [the config](configuration.md#api-tokens); skipped without one |
 | `openalex` ([OpenAlex](https://openalex.org)) | most journals across all fields, each reference matched to a record | nothing; `OPENALEX_API_KEY` raises the shared daily budget |
 | `crossref` ([Crossref](https://www.crossref.org)) | the reference lists publishers deposit, including what OpenAlex can't match: conference abstracts, theses, books. Some entries are only the citation as printed | a DOI |
 | `semantic-scholar` | computer science and preprints; asked only when the others find nothing, since some publishers (Wiley, for example) hide their references from it | nothing; `S2_API_KEY` against rate limits |

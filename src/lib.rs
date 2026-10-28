@@ -172,6 +172,58 @@ pub struct Config {
     /// The TUI's colours: a built-in theme (`catppuccin-mocha`, `catppuccin-latte`) or
     /// `<config dir>/carrel/themes/<name>.toml`.
     pub theme: Option<String>,
+    /// API tokens, for when environment variables are inconvenient.
+    #[serde(default)]
+    pub tokens: Tokens,
+}
+
+/// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tokens {
+    pub ads: Option<Secret>,
+    pub s2: Option<Secret>,
+    pub openalex: Option<Secret>,
+}
+
+/// A secret, written in the config or kept in a file of its own.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum Secret {
+    Value(String),
+    File { file: String },
+}
+
+impl Secret {
+    pub fn read(&self) -> Result<String> {
+        match self {
+            Self::Value(value) => Ok(value.trim().into()),
+            Self::File { file } => {
+                let path = expand_home(file);
+                let text = fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
+                Ok(text.trim().into())
+            }
+        }
+    }
+}
+
+/// The first of the environment variables `vars` that is set, else the config's token.
+pub fn token(vars: &[&str], configured: impl Fn(&Tokens) -> Option<&Secret>) -> Result<Option<String>> {
+    if let Some(value) = vars.iter().find_map(|var| std::env::var(var).ok()).filter(|v| !v.trim().is_empty()) {
+        return Ok(Some(value));
+    }
+    let config = Config::load()?;
+    let Some(secret) = configured(&config.tokens) else { return Ok(None) };
+    let value = secret.read()?;
+    Ok(Some(value).filter(|v| !v.is_empty()))
+}
+
+/// `~/rest` relative to the home folder; other paths as they are.
+pub(crate) fn expand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
+        None => PathBuf::from(path),
+    }
 }
 
 impl Config {
@@ -203,10 +255,7 @@ impl Library {
     /// `$CARREL_HOME`, else the config's `library`, else `carrel` in your Documents folder.
     pub fn open_default() -> Result<Self> {
         let config = Config::load()?;
-        let configured = config.library.map(|dir| match dir.strip_prefix("~/") {
-            Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
-            None => PathBuf::from(dir),
-        });
+        let configured = config.library.as_deref().map(expand_home);
         let root = match std::env::var_os("CARREL_HOME").map(PathBuf::from).or(configured) {
             Some(dir) => dir,
             None => dirs::document_dir()
@@ -367,7 +416,7 @@ impl Library {
         }
         let known = fetch::Ids { doi: bib.doi(), arxiv: bib.arxiv() };
         if !known.is_empty() {
-            match graph::look_up(&refs::sources(), &known, &bib.title()) {
+            match refs::sources().and_then(|sources| graph::look_up(&sources, &known, &bib.title())) {
                 Ok(found) => graph::write(&tmp.0, &found)?,
                 Err(e) => messages.push(format!("references: {e:#}")),
             }

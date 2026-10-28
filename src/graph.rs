@@ -316,7 +316,7 @@ impl Library {
 
     /// Look up a paper's references and save them. References an AI read stay unless a source has them too.
     pub fn look_up_references(&self, p: &Paper) -> Result<usize> {
-        let found = look_up(&crate::refs::sources(), &Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() }, &p.bib.title())?;
+        let found = look_up(&crate::refs::sources()?, &Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() }, &p.bib.title())?;
         let n = found.len();
         let from_ai = read(&p.dir)?.unwrap_or_default().into_iter().filter(|r| r.source == AI);
         write(&p.dir, &merge(found, from_ai))?;

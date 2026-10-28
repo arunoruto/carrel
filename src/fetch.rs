@@ -447,7 +447,7 @@ fn semantic_scholar(path: &str, query: &[(&str, &str)], retries: u32) -> Result<
             request = request.query(key, value);
         }
         // Anonymous requests share one global quota; a free key gets its own.
-        if let Ok(key) = std::env::var("S2_API_KEY") {
+        if let Some(key) = crate::token(&["S2_API_KEY"], |t| t.s2.as_ref())? {
             request = request.header("x-api-key", key);
         }
         match request.call() {
@@ -456,7 +456,7 @@ fn semantic_scholar(path: &str, query: &[(&str, &str)], retries: u32) -> Result<
                 wait *= 2;
             }
             Err(ureq::Error::StatusCode(429)) => {
-                bail!("Semantic Scholar is rate-limiting anonymous requests; try again later or set S2_API_KEY")
+                bail!("Semantic Scholar is rate-limiting anonymous requests; try later or add an S2 key")
             }
             Err(ureq::Error::StatusCode(404)) => bail!("Semantic Scholar doesn't know this paper"),
             response => return Ok(response.context("Semantic Scholar")?.into_body().read_json()?),

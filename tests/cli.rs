@@ -26,6 +26,7 @@ impl Carrel {
             .env_remove("S2_API_KEY")
             .env_remove("ADS_API_TOKEN")
             .env_remove("ADS_DEV_KEY")
+            .env_remove("OPENALEX_API_KEY")
             .stdin(Stdio::null());
         cmd
     }
@@ -139,6 +140,13 @@ fn config_file() {
     assert!(c.fails(&[]).contains("the config's default \"frobnicate\""));
     c.tmp.write("config/carrel/config.toml", "theme = \"nope\"\n");
     assert!(c.fails(&["config"]).contains("no theme \"nope\""));
+    let secret = c.tmp.write("ads-token", "  abc123\n");
+    let tokens = format!("[tokens]\nads = {{ file = \"{}\" }}\ns2 = \"xyz\"\n", secret.display());
+    c.tmp.write("config/carrel/config.toml", tokens);
+    let out = c.ok(&["config"]);
+    assert!(out.contains("tokens:  ads, s2\n") && !out.contains("abc123"), "{out}");
+    c.tmp.write("config/carrel/config.toml", "[tokens]\nads = { file = \"/no/such/file\" }\n");
+    assert!(c.fails(&["config"]).contains("cannot read /no/such/file"));
     c.tmp.write("config/carrel/config.toml", "keys = \"typo\"\n");
     assert!(c.fails(&["list"]).contains("config.toml is invalid"));
     c.tmp.write("config/carrel/config.toml", "key = \"{{ year \"\n");

@@ -486,6 +486,13 @@ fn main() -> Result<()> {
             println!("key:     {}", lib.key);
             println!("index:   {}", lib.index.display());
             println!("theme:   {}", theme::Theme::configured()?.name);
+            let tokens = [
+                ("ads", carrel::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())?),
+                ("s2", carrel::token(&["S2_API_KEY"], |t| t.s2.as_ref())?),
+                ("openalex", carrel::token(&["OPENALEX_API_KEY"], |t| t.openalex.as_ref())?),
+            ];
+            let found: Vec<_> = tokens.iter().filter(|(_, t)| t.is_some()).map(|(name, _)| *name).collect();
+            println!("tokens:  {}", if found.is_empty() { "none".into() } else { found.join(", ") });
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,

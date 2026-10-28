@@ -8,6 +8,8 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # extractor = "..."
 # default = "tui"
 # theme = "catppuccin-mocha"
+
+# [tokens]   API tokens, see below
 ```
 
 ## What `carrel` alone does
@@ -50,6 +52,19 @@ For *He, Zhang, Ren and Sun (2016), Deep Residual Learning for Image Recognition
 `extractor` is the shell command that turns a PDF into text and figures. It runs in an empty folder with the PDF's path in `$PDF` and must write `fulltext.md` there, and optionally figure images into `figures/`. `CARREL_EXTRACTOR` overrides it.
 
 The default runs pymupdf4llm through uv; the Nix package uses pymupdf4llm from nixpkgs instead. A wrapper around [docling](https://github.com/docling-project/docling) or [marker](https://github.com/datalab-to/marker) works too, for instance.
+
+## API tokens
+
+Tokens for ADS, Semantic Scholar and OpenAlex can go in the config instead of [environment variables](#environment-variables), either written out or kept in a file of their own (a password manager or agenix/sops can write that file):
+
+```toml
+[tokens]
+ads = { file = "~/.config/carrel/ads-token" }
+s2 = "your-semantic-scholar-key"
+# openalex = "..."
+```
+
+An environment variable wins over the config. `carrel config` lists the tokens it found, never their values.
 
 ## Environment variables
 

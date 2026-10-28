@@ -24,19 +24,15 @@ pub trait ReferenceSource {
 
 /// The sources available here, best first: NASA ADS when there is a token, OpenAlex and Crossref, and
 /// Semantic Scholar as a fallback.
-pub fn sources() -> Vec<Box<dyn ReferenceSource>> {
+pub fn sources() -> Result<Vec<Box<dyn ReferenceSource>>> {
     let mut all: Vec<Box<dyn ReferenceSource>> = vec![];
-    if let Some(token) = env(&["ADS_API_TOKEN", "ADS_DEV_KEY"]) {
+    if let Some(token) = crate::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())? {
         all.push(Box::new(Ads { token }));
     }
-    all.push(Box::new(OpenAlex { api_key: env(&["OPENALEX_API_KEY"]) }));
+    all.push(Box::new(OpenAlex { api_key: crate::token(&["OPENALEX_API_KEY"], |t| t.openalex.as_ref())? }));
     all.push(Box::new(Crossref));
     all.push(Box::new(SemanticScholar));
-    all
-}
-
-fn env(names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| std::env::var(name).ok()).filter(|value| !value.trim().is_empty())
+    Ok(all)
 }
 
 /// OpenAlex: free and broad. Without a key, everyone on an IP address shares a daily budget of about
@@ -57,7 +53,7 @@ impl OpenAlex {
         match request.call() {
             Err(ureq::Error::StatusCode(404)) => bail!("doesn't know this paper"),
             Err(ureq::Error::StatusCode(429)) => {
-                bail!("the free daily budget is used up; try tomorrow or set OPENALEX_API_KEY (free at openalex.org)")
+                bail!("the free daily budget is used up; try tomorrow or set an OpenAlex key (free at openalex.org)")
             }
             response => Ok(response.context("OpenAlex")?.into_body().read_json()?),
         }
@@ -180,7 +176,7 @@ impl Ads {
             .query("fl", fields)
             .query("rows", rows);
         let response: Value = match request.call() {
-            Err(ureq::Error::StatusCode(401)) => bail!("the token was refused; check ADS_API_TOKEN"),
+            Err(ureq::Error::StatusCode(401)) => bail!("the token was refused; check your ADS token"),
             Err(ureq::Error::StatusCode(429)) => bail!("the daily request limit is used up; try tomorrow"),
             response => response.context("NASA ADS")?.into_body().read_json()?,
         };
