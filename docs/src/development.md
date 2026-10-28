@@ -2,9 +2,17 @@
 
 carrel is written in Rust. The code is a library (`src/lib.rs` and its modules) with three frontends: the CLI (`src/main.rs`), the TUI (`src/tui.rs`) and the MCP server (`src/mcp.rs`).
 
+## Adding a backend
+
+Where carrel can be extended, there is a trait to implement, and the rest of the code only uses the trait:
+
+- `Remote` (`src/remote.rs`): where `carrel sync` copies files; S3 and folders so far.
+- `ReferenceSource` (`src/refs.rs`): where references come from; Crossref, Semantic Scholar, OpenAlex and ADS so far.
+- `Notifier` (`src/notify.rs`): how carrel tells you things; email so far. A new one (Telegram, say) is a struct with `name` and `send`, a field in `notify::Config` for its settings, and a line in `notifiers()`.
+
 ## Setup
 
-With Nix, `nix develop` gives you Rust, clippy, rustfmt, rust-analyzer, mdBook and uv. Otherwise install a recent Rust (1.88 or newer) and uv.
+With Nix, `nix develop` gives you Rust, clippy, rustfmt, rust-analyzer, mdBook and uv. Otherwise install a recent Rust (1.89 or newer) and uv.
 
 ```sh
 cargo run -- --help

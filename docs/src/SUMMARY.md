@@ -11,10 +11,12 @@
 - [Projects and bibliographies](projects.md)
 - [The citation graph](citations.md)
 - [Working with an AI](ai.md)
+- [Semantic search](semantic-search.md)
 - [The TUI](tui.md)
 - [Keeping the library healthy](maintenance.md)
 - [Sharing a library](sharing.md)
 - [Running a server](server.md)
+- [Clients and servers](architecture.md)
 
 # Reference
 
