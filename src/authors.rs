@@ -85,7 +85,7 @@ fn split(name: &str) -> (&str, &str) {
 }
 
 /// One person, as far as the library, its references and the confirmed people tell.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Person {
     /// The id of a confirmed person (`people/<id>.json`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,9 +98,30 @@ pub struct Person {
     pub papers: Vec<String>,
     /// The people they wrote with most, with how many papers (library papers and references) they share.
     pub coauthors: Vec<(String, usize)>,
-    /// Others whose names fit but who share no co-author or first name: perhaps the same person. Each with
-    /// their library papers, or `(cited only)`.
-    pub maybe: Vec<String>,
+    /// Others whose names fit but who share no co-author or first name: perhaps the same person.
+    pub maybe: Vec<Maybe>,
+}
+
+/// Someone who might be the same person as another.
+#[derive(Debug, Clone, Serialize)]
+pub struct Maybe {
+    pub name: String,
+    /// Their library papers; none when they only appear in references.
+    pub papers: Vec<String>,
+    /// Their spellings, for `same_person` or `different_people`.
+    pub spellings: Vec<String>,
+    /// Whom they wrote with most, to tell people of the same name apart.
+    pub with: Vec<String>,
+}
+
+impl std::fmt::Display for Maybe {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let with = if self.with.is_empty() { String::new() } else { format!("; with {}", self.with.join(", ")) };
+        match self.papers.as_slice() {
+            [] => write!(f, "{} (cited only{with})", self.name),
+            ids => write!(f, "{} ({}{with})", self.name, ids.join(", ")),
+        }
+    }
 }
 
 /// The people behind the library's papers and references.
@@ -229,11 +250,13 @@ impl Authors {
                 by_paper.entry(id.clone()).or_default().push((person[i], raw.clone()));
             }
         }
-        let mut together: HashMap<(usize, usize), usize> = HashMap::new();
+        // Co-authors and maybe-matches only for people with library papers: nobody looks at the rest.
+        let shown: Vec<bool> = people.iter().map(|p| !p.papers.is_empty()).collect();
+        let mut together: Vec<HashMap<usize, usize>> = vec![HashMap::new(); people.len()];
         for doc in &in_doc {
             for &a in doc {
                 for &b in doc.iter().filter(|&&b| b != a) {
-                    *together.entry((a, b)).or_default() += 1;
+                    *together[a].entry(b).or_default() += 1;
                 }
             }
         }
@@ -246,24 +269,31 @@ impl Authors {
             .collect();
         let mut papers: Vec<Vec<String>> = people.iter().map(|p| p.papers.clone()).collect();
         papers.iter_mut().for_each(|p| p.dedup());
-        let described = |j: usize| match papers[j].as_slice() {
-            [] => format!("{} (cited only)", names[j]),
-            ids => format!("{} ({})", names[j], ids.join(", ")),
+        let variants: Vec<Vec<String>> = people.iter().map(|p| p.variants.clone()).collect();
+        let top = |j: usize, n: usize| -> Vec<(String, usize)> {
+            let mut with: Vec<(String, usize)> = together[j].iter().map(|(b, n)| (names[*b].clone(), *n)).collect();
+            with.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            with.truncate(n);
+            with
+        };
+        let described = |j: usize| Maybe {
+            name: names[j].clone(),
+            papers: papers[j].clone(),
+            spellings: variants[j].clone(),
+            with: top(j, 2).into_iter().map(|(name, _)| name).collect(),
         };
         for (i, p) in people.iter_mut().enumerate() {
             p.id = what[i].person.clone();
             p.name = names[i].clone();
             p.papers.sort();
             p.papers.dedup();
-            let mut with: Vec<(String, usize)> =
-                together.iter().filter(|((a, _), _)| *a == i).map(|((_, b), n)| (names[*b].clone(), *n)).collect();
-            with.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-            with.truncate(8);
-            p.coauthors = with;
+            if !shown[i] {
+                continue;
+            }
+            p.coauthors = top(i, 8);
             let fits = by_key[&what[i].key()].iter().filter(|&&j| j != i && what[i].compatible(&what[j]));
             p.maybe = fits.map(|&j| described(j)).collect();
-            p.maybe.sort();
-            p.maybe.dedup();
+            p.maybe.sort_by(|a, b| a.name.cmp(&b.name).then(a.papers.cmp(&b.papers)));
         }
         Authors { people, by_paper }
     }
@@ -514,8 +544,12 @@ mod tests {
         assert!(heads[0].coauthors.iter().any(|(name, n)| name == "Wilson, Lionel" && *n == 2));
         let zhangs = authors.people(Some("zhang"));
         assert_eq!(zhangs.len(), 2, "no co-author in common: two people");
-        assert_eq!(zhangs[0].maybe, ["Zhang, Y. (d)"], "but perhaps one");
-        assert!(heads[0].maybe.iter().all(|m| !m.starts_with("Head, John")), "James is not John: {:?}", heads[0].maybe);
+        assert_eq!(
+            zhangs[0].maybe[0].to_string(),
+            "Zhang, Y. (d; with Jones, B.)",
+            "but perhaps one, told apart by co-author"
+        );
+        assert!(heads[0].maybe.iter().all(|m| m.name != "Head, John"), "James is not John: {:?}", heads[0].maybe);
         let shared =
             [("b".to_string(), vec!["Head, James W.".to_string()]), ("e".into(), vec!["Fassett, Caleb I.".into()])];
         assert_eq!(authors.shared("a"), shared, "e's Fassett, C. I. also wrote with a Head");
