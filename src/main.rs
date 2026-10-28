@@ -174,6 +174,15 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ProjectCmd>,
     },
+    /// Share the library: upload what changed here, download what changed on the config's remote
+    Sync {
+        /// Only list what would happen
+        #[arg(short = 'n', long)]
+        dry_run: bool,
+        /// Settle files changed on both sides by keeping this side's version
+        #[arg(long)]
+        keep: Option<carrel::remote::Keep>,
+    },
     /// Show where carrel keeps its settings, library and index
     Config,
     /// Delete a paper and all its files
@@ -275,6 +284,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Doctor { json, all } => doctor(&lib, json, all)?,
+        Cmd::Sync { dry_run, keep } => sync(&lib, dry_run, keep)?,
         Cmd::ImportIlibrarian { data } => {
             let imported = lib.import_ilibrarian(&data)?;
             imported.messages.iter().for_each(|m| println!("{m}"));
@@ -496,6 +506,36 @@ fn main() -> Result<()> {
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
+    }
+    Ok(())
+}
+
+fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>) -> Result<()> {
+    use carrel::remote::Action;
+    let config = Config::load()?.remote.context("no remote to sync with; add [remote] to the config")?;
+    let remote = config.open()?;
+    println!("syncing with {}", remote.name());
+    let report = lib.sync(&*remote, keep, dry_run, |path, action| {
+        let arrow = match action {
+            Action::Upload => "↑",
+            Action::Download => "↓",
+            Action::DeleteRemote => "✗ remote",
+            Action::DeleteLocal => "✗ here",
+            Action::Conflict => "! conflict",
+        };
+        println!("{arrow:<10} {path}");
+    })?;
+    let verb = if dry_run { "would " } else { "" };
+    println!("{verb}{}", report.summary());
+    let conflicts = report.count(Action::Conflict);
+    if conflicts > 0 {
+        println!("{conflicts} changed on both sides and left alone; settle them with --keep local or --keep remote");
+    }
+    for (path, error) in &report.failed {
+        eprintln!("failed: {path}: {error}");
+    }
+    if !report.failed.is_empty() {
+        bail!("{} files failed; run carrel sync again", report.failed.len());
     }
     Ok(())
 }

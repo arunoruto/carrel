@@ -10,6 +10,7 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # theme = "catppuccin-mocha"
 
 # [tokens]   API tokens, see below
+# [remote]   where the library is shared, see Sharing a library
 ```
 
 ## What `carrel` alone does
@@ -21,6 +22,8 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 ## The library
 
 `library` is the library folder. The environment variable `CARREL_HOME` overrides it. The default is `carrel` in your Documents folder.
+
+`[remote]` is where `carrel sync` shares it: an S3 bucket or a folder ([Sharing a library](sharing.md)).
 
 ## Citation keys
 
@@ -75,4 +78,5 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | `S2_API_KEY` | a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key); without one, references, citations and some lookups are often rate-limited |
 | `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
+| `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](sharing.md)'s settings |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |

@@ -2,7 +2,7 @@
 
 mod common;
 
-use carrel::{Field, chunk};
+use carrel::{Field, Library, chunk};
 use common::*;
 use std::fs;
 
@@ -512,4 +512,62 @@ fn moving_from_ilibrarian() {
     let again = lib.import_ilibrarian(&tmp.path("ilib")).unwrap();
     assert_eq!(lib.papers().0.len(), 2, "importing again adds nothing");
     assert_eq!(again.papers.len(), 3);
+}
+
+#[test]
+fn sharing_through_a_remote() {
+    use carrel::remote::{Action, Folder, Keep};
+    let tmp = Tmp::new("remote");
+    let a = library(&tmp);
+    let mut b = Library::open(tmp.path("libB")).unwrap();
+    b.index = tmp.path("indexB.sqlite");
+    let remote = Folder(tmp.path("remote"));
+    let sync = |lib: &Library, keep| {
+        let report = lib.sync(&remote, keep, false, |_, _| {}).unwrap();
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        report.done
+    };
+    assert!(a.sync(&remote, None, false, |_, _| {}).unwrap_err().to_string().contains("doesn't exist"));
+    fs::create_dir(&remote.0).unwrap();
+
+    let (id, _) = a.add(&tmp.write("in/graph-theory.pdf", FAKE_PDF).to_string_lossy()).unwrap();
+    tmp.write("lib/.tmp/half-added/x.pdf", "hidden files stay here");
+    let dry = a.sync(&remote, None, true, |_, _| {}).unwrap().done;
+    assert!(dry.iter().all(|(_, action)| *action == Action::Upload) && !dry.is_empty());
+    assert!(fs::read_dir(&remote.0).unwrap().next().is_none(), "a dry run changes nothing");
+    let uploaded = sync(&a, None);
+    assert_eq!(uploaded.len(), dry.len());
+    assert!(!remote.0.join(".tmp").exists() && !remote.0.join(".carrel").exists());
+    assert!(sync(&a, None).is_empty(), "nothing changed since");
+
+    // The colleague gets the paper, and their notes come back.
+    assert_eq!(sync(&b, None).len(), uploaded.len());
+    assert_eq!(b.get(&id).unwrap().bib.title(), "graph-theory");
+    fs::write(b.root.join(&id).join("notes.md"), "from b").unwrap();
+    assert_eq!(sync(&b, None), [(format!("{id}/notes.md"), Action::Upload)]);
+    assert_eq!(sync(&a, None), [(format!("{id}/notes.md"), Action::Download)]);
+    assert_eq!(fs::read_to_string(a.root.join(&id).join("notes.md")).unwrap(), "from b");
+
+    // Both change the notes: a conflict, until one side is kept; the loser goes to the trash.
+    fs::write(a.root.join(&id).join("notes.md"), "a's").unwrap();
+    fs::write(b.root.join(&id).join("notes.md"), "b's").unwrap();
+    sync(&a, None);
+    assert_eq!(sync(&b, None), [(format!("{id}/notes.md"), Action::Conflict)]);
+    assert_eq!(fs::read_to_string(b.root.join(&id).join("notes.md")).unwrap(), "b's", "left alone");
+    assert_eq!(sync(&b, Some(Keep::Remote)), [(format!("{id}/notes.md"), Action::Download)]);
+    assert_eq!(fs::read_to_string(b.root.join(&id).join("notes.md")).unwrap(), "a's");
+    assert_eq!(fs::read_to_string(b.root.join(".carrel/trash").join(&id).join("notes.md")).unwrap(), "b's");
+
+    // An edit beats a deletion; a deletion of an unchanged file goes through, into the trash.
+    fs::write(b.root.join(&id).join("notes.md"), "b edits").unwrap();
+    fs::remove_file(a.root.join(&id).join("notes.md")).unwrap();
+    sync(&a, None);
+    assert_eq!(sync(&b, None), [(format!("{id}/notes.md"), Action::Upload)]);
+    assert_eq!(sync(&a, None), [(format!("{id}/notes.md"), Action::Download)]);
+    a.remove(&id).unwrap();
+    assert!(sync(&a, None).iter().all(|(_, action)| *action == Action::DeleteRemote));
+    assert!(sync(&b, None).iter().all(|(_, action)| *action == Action::DeleteLocal));
+    assert!(!b.root.join(&id).exists(), "no empty folder is left behind");
+    assert!(b.papers().0.is_empty());
+    assert!(b.root.join(".carrel/trash").join(&id).join(format!("{id}.pdf")).exists());
 }

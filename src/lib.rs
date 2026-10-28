@@ -23,6 +23,7 @@ mod ilibrarian;
 mod index;
 mod projects;
 pub mod refs;
+pub mod remote;
 mod update;
 
 pub use doctor::Issue;
@@ -175,6 +176,8 @@ pub struct Config {
     /// API tokens, for when environment variables are inconvenient.
     #[serde(default)]
     pub tokens: Tokens,
+    /// Where the library is shared, see [`remote`].
+    pub remote: Option<remote::RemoteConfig>,
 }
 
 /// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.

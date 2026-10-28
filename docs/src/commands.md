@@ -32,5 +32,6 @@ Run `carrel <command> --help` for every option.
 | `bib [ids…] [-p project] [--files]` | BibTeX for papers, a project, or the library; `--files` adds the PDFs' paths for JabRef |
 | `doctor [--all] [--json]` | [check the library](maintenance.md) |
 | `rm <id>` | delete a paper and its files |
+| `sync [-n] [--keep local\|remote]` | [share the library](sharing.md) through the config's remote |
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](ai.md) on stdin/stdout |

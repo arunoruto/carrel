@@ -8,7 +8,7 @@ use anyhow::Result;
 use carrel::authors::{self, Person, Proposal};
 use carrel::fetch::{self, Candidate, Source};
 use carrel::graph::{Graph, Suggestion};
-use carrel::{Field, Library, Paper};
+use carrel::{Config, Field, Library, Paper};
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
@@ -74,6 +74,8 @@ enum Done {
     Paper(Result<(String, String)>),
     /// Papers found online, and what they are ("References of x").
     Found(Result<Vec<Candidate>>, String),
+    /// A sync with the remote finished.
+    Synced(Result<carrel::remote::Report>),
 }
 
 /// A left-hand shelf of the Library: everything, a project or a keyword.
@@ -458,7 +460,17 @@ impl App {
                 self.mode = Mode::Results;
             }
             Done::Found(Ok(_), title) => self.status = format!("{title}: nothing found"),
-            Done::Paper(Err(e)) | Done::Found(Err(e), _) => self.status = format!("{e:#}"),
+            Done::Synced(Ok(report)) => {
+                let conflicts = report.count(carrel::remote::Action::Conflict);
+                self.status = match (report.failed.len(), conflicts) {
+                    (0, 0) => format!("synced: {}", report.summary()),
+                    (0, n) => {
+                        format!("synced, but {n} files changed on both sides; settle them with carrel sync --keep")
+                    }
+                    (n, _) => format!("{n} files failed to sync, e.g. {}: {}", report.failed[0].0, report.failed[0].1),
+                };
+            }
+            Done::Paper(Err(e)) | Done::Found(Err(e), _) | Done::Synced(Err(e)) => self.status = format!("{e:#}"),
         }
     }
 
@@ -495,6 +507,7 @@ impl App {
             KeyCode::PageDown | KeyCode::Char('J') => return self.scroll = self.scroll.saturating_add(5),
             KeyCode::PageUp | KeyCode::Char('K') => return self.scroll = self.scroll.saturating_sub(5),
             KeyCode::Char('/') if matches!(self.tab, Tab::Library | Tab::People) => return self.mode = Mode::Filter,
+            KeyCode::Char('S') => return self.sync(),
             KeyCode::Esc => {
                 match self.tab {
                     Tab::People => self.people_query.clear(),
@@ -510,6 +523,18 @@ impl App {
             Tab::People => self.on_people(key.code),
             Tab::Drafts => self.on_drafts(key.code, term),
         }
+    }
+
+    /// Syncs with the config's remote in the background.
+    fn sync(&mut self) {
+        let remote = match Config::load().map(|c| c.remote) {
+            Ok(Some(remote)) => remote,
+            Ok(None) => return self.status = "no remote to sync with; add [remote] to the config".into(),
+            Err(e) => return self.status = format!("{e:#}"),
+        };
+        self.spawn("syncing", move |lib| {
+            Done::Synced(remote.open().and_then(|remote| lib.sync(&*remote, None, false, |_, _| {})))
+        });
     }
 
     fn move_by(&mut self, by: isize) {
@@ -1382,6 +1407,7 @@ impl App {
                 ("r/R", "refs/cited by"),
                 ("+/-", "project"),
                 ("D", "delete"),
+                ("S", "sync"),
                 ("q", "quit"),
             ],
             (_, Tab::Graph) => &[

@@ -143,3 +143,33 @@ fn reference_sources() {
     assert!(refs.len() >= 15 && !refs[0].0.source.is_empty(), "{messages:?}");
     assert!(refs.iter().any(|(r, _)| r.source == "crossref"), "an LPSC abstract OpenAlex can't match");
 }
+
+/// Two libraries sharing through a real bucket: `CARREL_TEST_BUCKET` and the usual `AWS_ENDPOINT_URL`,
+/// `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`. Skipped without them. Works in a folder of
+/// its own in the bucket and empties it again.
+#[test]
+#[ignore = "needs internet"]
+fn s3_remote() {
+    let Ok(bucket) = std::env::var("CARREL_TEST_BUCKET") else { return eprintln!("no CARREL_TEST_BUCKET; skipped") };
+    let tmp = Tmp::new("s3");
+    let prefix = tmp.0.file_name().unwrap().to_string_lossy().into_owned();
+    let config: carrel::remote::RemoteConfig =
+        toml::from_str(&format!("type = \"s3\"\nbucket = \"{bucket}\"\nprefix = \"{prefix}\"\n")).unwrap();
+    let remote = config.open().unwrap();
+    let a = library(&tmp);
+    let b = Library::open(tmp.path("libB")).unwrap();
+    tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {Ä paper}}\n");
+    tmp.write("lib/a2020/figures/figure 1 – ü.png", [0u8, 1, 2, 255]);
+    let sync = |lib: &Library| {
+        let report = lib.sync(&*remote, None, false, |_, _| {}).unwrap();
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        report.done.len()
+    };
+    assert_eq!(sync(&a), 2);
+    assert_eq!(sync(&a), 0, "S3's ETags match");
+    assert_eq!(sync(&b), 2);
+    assert_eq!(std::fs::read(b.root.join("a2020/figures/figure 1 – ü.png")).unwrap(), [0u8, 1, 2, 255]);
+    std::fs::remove_dir_all(a.root.join("a2020")).unwrap();
+    assert_eq!(sync(&a), 2);
+    assert!(remote.list().unwrap().is_empty());
+}
