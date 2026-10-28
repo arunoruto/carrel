@@ -381,7 +381,12 @@ pub async fn serve(lib: Library) -> anyhow::Result<()> {
 }
 
 /// Serves MCP at `/mcp` over HTTP, to clients sending `token` (if any), and `/health` to anyone.
-pub async fn serve_http(lib: Library, listener: tokio::net::TcpListener, token: Option<String>) -> anyhow::Result<()> {
+pub async fn serve_http(
+    lib: Library,
+    listener: tokio::net::TcpListener,
+    token: Option<String>,
+    trusted: Vec<Network>,
+) -> anyhow::Result<()> {
     use http_body_util::{BodyExt, Full};
     use hyper::{Response, StatusCode};
     use rmcp::transport::streamable_http_server::{
@@ -392,9 +397,12 @@ pub async fn serve_http(lib: Library, listener: tokio::net::TcpListener, token: 
     let config = StreamableHttpServerConfig::default().disable_allowed_hosts();
     let mcp = StreamableHttpService::new(move || Ok(Server { lib: lib.clone() }), Default::default(), config);
     let mcp: std::sync::Arc<StreamableHttpService<Server, LocalSessionManager>> = std::sync::Arc::new(mcp);
+    // No token and no trusted networks: listening on loopback, where whoever can connect may.
+    let open = token.is_none() && trusted.is_empty();
     let token = std::sync::Arc::new(token);
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
+        let trusted = open || trusted.iter().any(|n| n.contains(peer.ip()));
         let (mcp, token) = (mcp.clone(), token.clone());
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
@@ -408,7 +416,7 @@ pub async fn serve_http(lib: Library, listener: tokio::net::TcpListener, token: 
                     let path = request.uri().path();
                     let response = if path == "/health" {
                         plain(StatusCode::OK, "ok\n")
-                    } else if !authorized(&request, token.as_deref()) {
+                    } else if !trusted && !authorized(&request, token.as_deref()) {
                         plain(StatusCode::UNAUTHORIZED, "send the server's token: Authorization: Bearer <token>\n")
                     } else if path == "/mcp" || path.starts_with("/mcp/") {
                         mcp.handle(request).await
@@ -425,9 +433,69 @@ pub async fn serve_http(lib: Library, listener: tokio::net::TcpListener, token: 
 }
 
 fn authorized<B>(request: &hyper::Request<B>, token: Option<&str>) -> bool {
-    let Some(token) = token else { return true };
+    let Some(token) = token else { return false };
     let sent = request.headers().get("authorization").and_then(|v| v.to_str().ok());
     let sent = sent.and_then(|v| v.strip_prefix("Bearer ")).unwrap_or_default();
     // Compares every byte, so the time taken doesn't tell how much of a guess was right.
     sent.len() == token.len() && sent.bytes().zip(token.bytes()).fold(0, |diff, (a, b)| diff | (a ^ b)) == 0
+}
+
+/// A network whose clients need no token, like `100.64.0.0/10`; a bare address is just that address.
+#[derive(Debug, Clone, Copy)]
+pub struct Network(std::net::IpAddr, u32);
+
+impl std::str::FromStr for Network {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        let wrong = || format!("{s:?} is not a network like 100.64.0.0/10");
+        let (ip, len) = s.split_once('/').unwrap_or((s, ""));
+        let ip: std::net::IpAddr = ip.trim().parse().with_context(wrong)?;
+        let bits = if ip.is_ipv4() { 32 } else { 128 };
+        let len = match len.trim() {
+            "" => bits,
+            len => len.parse().ok().filter(|&len| len <= bits).with_context(wrong)?,
+        };
+        Ok(Network(ip, len))
+    }
+}
+
+impl Network {
+    pub fn contains(&self, ip: std::net::IpAddr) -> bool {
+        use std::net::IpAddr::{V4, V6};
+        // A server listening on [::] sees IPv4 clients as ::ffff:a.b.c.d.
+        match (self.0, ip.to_canonical()) {
+            (V4(net), V4(ip)) => {
+                let mask = u32::MAX.checked_shl(32 - self.1).unwrap_or(0);
+                u32::from(net) & mask == u32::from(ip) & mask
+            }
+            (V6(net), V6(ip)) => {
+                let mask = u128::MAX.checked_shl(128 - self.1).unwrap_or(0);
+                u128::from(net) & mask == u128::from(ip) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Network;
+
+    #[test]
+    fn networks() {
+        let has = |net: &str, ip: &str| net.parse::<Network>().unwrap().contains(ip.parse().unwrap());
+        assert!(has("100.64.0.0/10", "100.101.102.103"));
+        assert!(!has("100.64.0.0/10", "100.128.0.1"));
+        assert!(has("100.64.0.0/10", "::ffff:100.64.0.1"), "an IPv4 client of a server on [::]");
+        assert!(has("127.0.0.1", "127.0.0.1") && !has("127.0.0.1", "127.0.0.2"));
+        assert!(has("0.0.0.0/0", "8.8.8.8") && !has("0.0.0.0/0", "::1"));
+        assert!(
+            has("fd7a:115c:a1e0::/48", "fd7a:115c:a1e0:ab12::1") && !has("fd7a:115c:a1e0::/48", "fd7a:115c:a1e1::1")
+        );
+        assert!(has("::/0", "2001:db8::1") && has("::1", "::1"));
+        for wrong in ["100.64.0.0/33", "::/129", "tailscale", "10.0.0.0/x", ""] {
+            assert!(wrong.parse::<Network>().is_err(), "{wrong}");
+        }
+    }
 }

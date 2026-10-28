@@ -17,8 +17,13 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
         Some(token) => Some(token.trim().to_string()),
         None => config.serve.token.as_ref().map(|t| t.read()).transpose()?,
     };
-    if token.is_none() && !addr.ip().is_loopback() {
-        bail!("the library would be open to anyone on the network; set CARREL_SERVE_TOKEN or [serve] token");
+    let trusted: Vec<crate::mcp::Network> =
+        config.serve.trusted.iter().map(|n| n.parse()).collect::<Result<_>>().context("in [serve] trusted")?;
+    if token.is_none() && trusted.is_empty() && !addr.ip().is_loopback() {
+        bail!(
+            "the library would be open to anyone on the network; set CARREL_SERVE_TOKEN or [serve] token, \
+             or name the networks to let in with [serve] trusted"
+        );
     }
     let every = Duration::from_secs(60 * every.or(config.serve.every).unwrap_or(5).max(1));
 
@@ -30,8 +35,11 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
         log(&format!("serving {} at http://{}/mcp", lib.root.display(), listener.local_addr()?));
+        if !config.serve.trusted.is_empty() {
+            log(&format!("no token needed from {}", config.serve.trusted.join(", ")));
+        }
         tokio::select! {
-            served = crate::mcp::serve_http(lib, listener, token) => served,
+            served = crate::mcp::serve_http(lib, listener, token, trusted) => served,
             () = stopped() => {
                 log("stopping");
                 Ok(())

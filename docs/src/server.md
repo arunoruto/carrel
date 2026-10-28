@@ -95,3 +95,20 @@ Other MCP clients take the same URL and header; in Python, the `mcp` package's `
 ## Security
 
 Without a token, `carrel serve` only listens on `127.0.0.1`: the library holds publishers' PDFs. Anything reachable from the network needs `CARREL_SERVE_TOKEN` (or `[serve] token` in the config, written out or `{ file = "..." }`), and should sit behind a reverse proxy with HTTPS (Caddy, nginx, Traefik) so the token never crosses the network in the clear. `/health` answers without a token, for health checks.
+
+### Networks without a token
+
+Clients on networks you trust can skip the token, for example the server itself and your Tailscale network:
+
+```toml
+[serve]
+listen = "0.0.0.0:8080"
+trusted = ["127.0.0.0/8", "::1", "100.64.0.0/10", "fd7a:115c:a1e0::/48"]
+```
+
+Entries are networks (`100.64.0.0/10`) or single addresses (`10.0.0.5`). `100.64.0.0/10` and `fd7a:115c:a1e0::/48` are the addresses Tailscale gives its devices. Everyone else still needs the token. Without a token set, nobody else gets in.
+
+carrel checks the address the connection comes from, not the name it was reached by. So watch for two traps:
+
+- **A reverse proxy on the same machine** makes every request it forwards come from `127.0.0.1`. Trusting `127.0.0.0/8` then trusts the whole internet. Behind a proxy, don't trust loopback; trust the network the proxy can't be reached from instead.
+- **In Docker**, a request from the host itself comes from the Docker bridge (often `172.17.0.1`), not `127.0.0.1`. Requests from other machines, Tailscale included, keep their address.

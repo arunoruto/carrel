@@ -299,15 +299,20 @@ fn serving_over_http() {
     let open = c.command(&["serve", "--listen", "0.0.0.0:0"]).env_remove("CARREL_SERVE_TOKEN").output().unwrap();
     assert!(String::from_utf8_lossy(&open.stderr).contains("open to anyone"), "no token, no network");
 
-    let mut server = c
-        .command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"])
-        .env("CARREL_SERVE_TOKEN", "s3cret")
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
-    let serving = lines.find_map(|l| l.ok().filter(|l| l.contains("serving"))).expect("the server starts");
-    let url = serving.split_whitespace().last().unwrap().trim_end_matches("/mcp").to_string();
+    let start = |listen: &str, token: Option<&str>| {
+        let mut command = c.command(&["serve", "--listen", listen, "--every", "60"]);
+        command.env_remove("CARREL_SERVE_TOKEN").stdout(Stdio::piped());
+        if let Some(token) = token {
+            command.env("CARREL_SERVE_TOKEN", token);
+        }
+        let mut server = command.spawn().unwrap();
+        let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
+        let serving = lines.find_map(|l| l.ok().filter(|l| l.contains("serving"))).expect("the server starts");
+        let url = serving.split_whitespace().last().unwrap().trim_end_matches("/mcp").to_string();
+        // The output stays open: a server whose log can't be written fails.
+        (server, url.replace("0.0.0.0", "127.0.0.1"), lines)
+    };
+    let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -317,7 +322,7 @@ fn serving_over_http() {
     let mut health = agent.get(&format!("{url}/health")).call().unwrap();
     assert_eq!((health.status().as_u16(), health.body_mut().read_to_string().unwrap()), (200, "ok\n".into()));
     let initialize = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
-    let post = |token: &str| {
+    let post_to = |url: &str, token: &str| {
         agent
             .post(&format!("{url}/mcp"))
             .header("Authorization", &format!("Bearer {token}"))
@@ -326,6 +331,7 @@ fn serving_over_http() {
             .send(initialize)
             .unwrap()
     };
+    let post = |token: &str| post_to(&url, token);
     assert_eq!(post("wrong").status().as_u16(), 401);
     assert_eq!(agent.get(&format!("{url}/mcp")).call().unwrap().status().as_u16(), 401, "no token");
     let mut ok = post("s3cret");
@@ -337,4 +343,16 @@ fn serving_over_http() {
     let started = std::time::Instant::now();
     assert!(server.wait().unwrap().success());
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
+
+    // Trusted networks need no token; everyone else does, and without one set nobody else gets in.
+    c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"127.0.0.1\"]\n");
+    let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
+    assert_eq!(post_to(&url, "").status().as_u16(), 200, "trusted");
+    server.kill().unwrap();
+    c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/10\"]\n");
+    let (mut server, url, _log) = start("0.0.0.0:0", None);
+    assert_eq!(post_to(&url, "").status().as_u16(), 401, "not trusted, and no token to send");
+    server.kill().unwrap();
+    c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/33\"]\n");
+    assert!(c.fails(&["serve"]).contains("not a network"));
 }

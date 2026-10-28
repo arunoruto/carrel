@@ -66,7 +66,10 @@ The default runs pymupdf4llm through uv; the Nix package uses pymupdf4llm from n
 listen = "0.0.0.0:8080"   # 127.0.0.1:8080 by default
 every = 5                 # minutes between rounds of syncing and background work
 token = { file = "/run/secrets/carrel-token" }   # what clients must send; CARREL_SERVE_TOKEN overrides it
+trusted = ["127.0.0.0/8", "100.64.0.0/10"]       # networks that need no token, here the server and Tailscale
 ```
+
+See [Networks without a token](server.md#networks-without-a-token) before trusting loopback behind a reverse proxy.
 
 ## API tokens
 
