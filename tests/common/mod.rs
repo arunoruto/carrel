@@ -67,3 +67,126 @@ pub fn paper(lib: &Library, id: &str, fields: &str) {
 pub fn read(path: impl AsRef<Path>) -> String {
     fs::read_to_string(path).unwrap()
 }
+
+/// An Ollama stand-in serving `models` (name, whether it embeds) at the returned URL. Its embeddings put
+/// each word in one of 64 dimensions, so texts sharing words are close. Counts the texts it embedded.
+pub fn fake_ollama(models: &[(&str, bool)]) -> (String, std::sync::Arc<AtomicUsize>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let models: Vec<(String, bool)> = models.iter().map(|(m, e)| (m.to_string(), *e)).collect();
+    let embedded = std::sync::Arc::new(AtomicUsize::new(0));
+    let count = embedded.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let (mut head, mut length) = (String::new(), 0);
+            reader.read_line(&mut head).unwrap();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if let Some(n) = line.to_lowercase().strip_prefix("content-length:") {
+                    length = n.trim().parse().unwrap();
+                }
+                if line.trim().is_empty() {
+                    break;
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+            let path = head.split_whitespace().nth(1).unwrap_or_default();
+            let (status, reply) = match path {
+                "/api/tags" => {
+                    let names: Vec<_> =
+                        models.iter().map(|(m, _)| serde_json::json!({"name": format!("{m}:latest")})).collect();
+                    (200, serde_json::json!({ "models": names }))
+                }
+                "/api/show" => match models.iter().find(|(m, _)| body["model"] == m.as_str()) {
+                    Some((_, embeds)) => {
+                        let capabilities = if *embeds { vec!["embedding"] } else { vec!["completion"] };
+                        (200, serde_json::json!({ "capabilities": capabilities }))
+                    }
+                    None => (404, serde_json::json!({ "error": "model not found" })),
+                },
+                "/api/embed" => {
+                    let texts: Vec<String> = serde_json::from_value(body["input"].clone()).unwrap();
+                    count.fetch_add(texts.len(), Ordering::Relaxed);
+                    let vectors: Vec<Vec<f32>> = texts
+                        .iter()
+                        .map(|text| {
+                            let mut v = vec![0.0; 64];
+                            for word in text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+                                let hash = word
+                                    .to_lowercase()
+                                    .bytes()
+                                    .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+                                v[hash as usize % 64] += 1.0;
+                            }
+                            v
+                        })
+                        .collect();
+                    (200, serde_json::json!({ "embeddings": vectors }))
+                }
+                _ => (404, serde_json::json!({ "error": "not found" })),
+            };
+            let reply = reply.to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+        }
+    });
+    (url, embedded)
+}
+
+/// A mail server taking mail without login, as a university relay does. Returns its address and the
+/// messages it got, each as everything after DATA up to the lone dot.
+pub fn fake_smtp() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let mails = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+    let got = mails.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            stream.write_all(b"220 test ESMTP\r\n").unwrap();
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let reply: &[u8] = match line.trim().split(' ').next().unwrap_or_default() {
+                    "EHLO" => b"250-test\r\n250 8BITMIME\r\n",
+                    "DATA" => {
+                        stream.write_all(b"354 go on\r\n").unwrap();
+                        let mut mail = String::new();
+                        loop {
+                            let mut l = String::new();
+                            reader.read_line(&mut l).unwrap();
+                            if l == ".\r\n" {
+                                break;
+                            }
+                            mail.push_str(&l);
+                        }
+                        got.lock().unwrap().push(mail);
+                        b"250 queued\r\n"
+                    }
+                    "QUIT" => b"221 bye\r\n",
+                    _ => b"250 ok\r\n",
+                };
+                stream.write_all(reply).unwrap();
+                line.clear();
+            }
+        }
+    });
+    (addr, mails)
+}
+
+/// The text of a mail from carrel: its base64 body, decoded.
+pub fn mail_body(mail: &str) -> String {
+    use base64::Engine;
+    let body = mail.split("\r\n\r\n").nth(1).unwrap().replace("\r\n", "");
+    String::from_utf8(base64::engine::general_purpose::STANDARD.decode(body).unwrap()).unwrap()
+}

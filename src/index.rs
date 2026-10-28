@@ -1,7 +1,8 @@
 //! The index: an SQLite database in the cache directory with full-text search (FTS5) and each paper's
-//! references for the citation graph. It only mirrors the files, so it is brought up to date before
+//! references for the citation graph, and the passages' vectors for semantic search. It only mirrors the files, so it is brought up to date before
 //! every use and can be deleted any time.
 
+use crate::embed::{self, Span};
 use crate::graph::{self, Reference};
 use crate::{Field, Paper, SUPPLEMENTARY};
 use anyhow::Result;
@@ -12,7 +13,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Raised whenever the tables change: an index of another version is rebuilt.
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
@@ -21,7 +22,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS papers USING fts5(
     id UNINDEXED, title, authors, keywords, ids, abstract, summary, notes, fulltext,
     tokenize = 'porter unicode61 remove_diacritics 2'
 );
-CREATE TABLE IF NOT EXISTS refs (paper TEXT PRIMARY KEY, json TEXT NOT NULL);";
+CREATE TABLE IF NOT EXISTS refs (paper TEXT PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS passages (paper TEXT NOT NULL, model TEXT NOT NULL, start INTEGER, length INTEGER NOT NULL, vector BLOB NOT NULL);
+CREATE INDEX IF NOT EXISTS passages_paper ON passages (paper);";
 
 /// Column weights, in schema order: a hit in the title counts ten times one in the full text.
 const RANK: &str = "bm25(papers, 0, 10, 6, 8, 5, 3, 3, 2, 1)";
@@ -78,6 +81,32 @@ pub fn references(path: &Path, papers: &[Paper]) -> Result<BTreeMap<String, Vec<
         }
     }
     Ok(refs)
+}
+
+/// For each paper with embeddings by `model`, its passage closest to `query` (a unit vector) with the
+/// cosine similarity, best first.
+pub fn nearest(path: &Path, papers: &[Paper], model: &str, query: &[f32]) -> Result<Vec<(String, Span, f32)>> {
+    let mut conn = open(path)?;
+    sync(&mut conn, papers)?;
+    let mut stmt = conn.prepare("SELECT paper, start, length, vector FROM passages WHERE model = ?1")?;
+    let mut rows = stmt.query([model])?;
+    let mut best: HashMap<String, (Span, f32)> = HashMap::new();
+    // ponytail: every vector is compared, fine for thousands of papers; an ANN index (sqlite-vec) beyond that.
+    while let Some(row) = rows.next()? {
+        let vector: Vec<u8> = row.get(3)?;
+        let score: f32 = vector.as_chunks::<4>().0.iter().zip(query).map(|(b, q)| f32::from_le_bytes(*b) * q).sum();
+        let paper: String = row.get(0)?;
+        if best.get(&paper).is_none_or(|(_, s)| score > *s) {
+            let span = Span {
+                offset: row.get::<_, Option<i64>>(1)?.map(|o| o as usize),
+                length: row.get::<_, i64>(2)? as usize,
+            };
+            best.insert(paper, (span, score));
+        }
+    }
+    let mut hits: Vec<_> = best.into_iter().map(|(paper, (span, score))| (paper, span, score)).collect();
+    hits.sort_by(|a, b| b.2.total_cmp(&a.2));
+    Ok(hits)
 }
 
 /// Open the index, rebuilding it when the file is damaged; it is only a cache.
@@ -164,12 +193,26 @@ fn sync(conn: &mut Connection, papers: &[Paper]) -> Result<()> {
         if let Ok(json) = fs::read_to_string(p.dir.join(graph::FILE)) {
             tx.execute("INSERT INTO refs VALUES (?1, ?2)", [&p.id, &json])?;
         }
+        tx.execute("DELETE FROM passages WHERE paper = ?1", [&p.id])?;
+        // Damaged embeddings count as none. Outdated ones still serve until `carrel embed` redoes them.
+        if let Some(stored) = embed::stored(p)
+            && let Ok(vectors) = stored.vectors()
+        {
+            for (span, vector) in stored.passages.iter().zip(vectors) {
+                let bytes: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
+                tx.execute(
+                    "INSERT INTO passages VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![p.id, stored.model, span.offset.map(|o| o as i64), span.length as i64, bytes],
+                )?;
+            }
+        }
         tx.execute("INSERT OR REPLACE INTO stamps VALUES (?1, ?2)", [&p.id, &stamp])?;
     }
     let live: HashSet<&str> = papers.iter().map(|p| p.id.as_str()).collect();
     for id in known.keys().filter(|id| !live.contains(id.as_str())) {
         tx.execute("DELETE FROM papers WHERE id = ?1", [id])?;
         tx.execute("DELETE FROM refs WHERE paper = ?1", [id])?;
+        tx.execute("DELETE FROM passages WHERE paper = ?1", [id])?;
         tx.execute("DELETE FROM stamps WHERE id = ?1", [id])?;
     }
     tx.commit()?;
@@ -192,6 +235,7 @@ fn stamp(p: &Paper) -> String {
         p.dir.join("notes.md"),
         p.dir.join("fulltext.md"),
         p.dir.join(graph::FILE),
+        p.dir.join(embed::FILE),
     ];
     let files: Vec<_> = files.into_iter().chain(supplementary).collect();
     let stamps = files.iter().map(|f| fs::metadata(f).map(|m| format!("{}@{:?}", m.len(), m.modified().ok())));

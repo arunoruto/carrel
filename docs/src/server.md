@@ -3,9 +3,11 @@
 `carrel serve` runs the library on a server, for a group and its AIs:
 
 - it serves the [MCP tools](mcp-tools.md) over HTTP at `/mcp`, so an AI anywhere on the network can use the library;
-- every few minutes it [syncs](sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs and looks up the references of new papers. Everyone else gets the results with their next `carrel sync`.
+- every few minutes it [syncs](sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs, looks up the references of new papers and, with `[embeddings]` in its config, computes their [embeddings](semantic-search.md). Everyone else gets the results with their next `carrel sync`.
+- with `[consume]` and `auto = true` in its config, it adds the papers that turn up in a folder (a shared drop folder, say) and logs what it added;
+- with [notifiers](configuration.md#notifications) in its config, it tells you about its own trouble, such as Ollama going away. Papers others drop in don't land in your inbox; only a `carrel consume` on your own machine tells you about your Downloads.
 
-Everyone keeps their own library and syncs it as before; the server is one more member of the group, one that never sleeps. It needs a [remote](sharing.md) in its config to share its work.
+Everyone keeps their own library and syncs it as before; the server is one more member of the group, one that never sleeps. It needs a [remote](sharing.md) in its config to share its work. [Clients and servers](architecture.md) shows how the pieces connect.
 
 ## With Docker
 

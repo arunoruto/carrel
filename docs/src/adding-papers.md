@@ -13,6 +13,49 @@ A title that doesn't match exactly prints the closest papers with the id to add 
 
 If an arXiv version exists, its PDF is downloaded, while the metadata comes from the published DOI when there is one.
 
+## From your Downloads
+
+Papers pile up in Downloads first. `carrel consume` lists the PDFs there from the last 30 days and asks about each; the ones you say yes to move into the library (out of Downloads), the ones you say no to aren't asked about again (`--again` asks anyway):
+
+```text
+$ carrel consume
+2 PDFs from the last 30 days. Added ones move out of their folder.
+Enter adds those naming a DOI or arXiv id [Y/n] and skips the rest [y/N]; q stops.
+
+/home/me/Downloads/2301.01234v2.pdf
+  arXiv id 2301.01234 in its name: add? [Y/n/q]
+  added smith2023learning
+/home/me/Downloads/eInvoice_1922.pdf
+  no DOI or arXiv id in its name or metadata: add? [y/N/q]
+```
+
+The DOI or arXiv id only sets the default answer: a DOI in the file may also be one it cites, and plenty of papers keep theirs where carrel doesn't look before extracting. Adding decides from the text.
+
+Other folders, and how far back to look:
+
+```toml
+[consume]
+folders = ["~/Downloads", "~/Nextcloud/papers"]
+days = 30
+auto = false
+```
+
+Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. A systemd user timer every 10 minutes:
+
+```ini
+# ~/.config/systemd/user/carrel-consume.service
+[Service]
+ExecStart=%h/.nix-profile/bin/carrel consume
+
+# ~/.config/systemd/user/carrel-consume.timer
+[Timer]
+OnCalendar=*:0/10
+[Install]
+WantedBy=timers.target
+```
+
+`systemctl --user enable --now carrel-consume.timer` starts it.
+
 ## Duplicates
 
 A paper is the same as one in the library when its DOI, its arXiv id or its title (ignoring case, punctuation and accents) matches. Adding it again is refused, except to give a paper without a PDF its PDF.

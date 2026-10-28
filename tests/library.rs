@@ -571,3 +571,99 @@ fn sharing_through_a_remote() {
     assert!(b.papers().0.is_empty());
     assert!(b.root.join(".carrel/trash").join(&id).join(format!("{id}.pdf")).exists());
 }
+
+#[test]
+fn semantic_search() {
+    use carrel::embed::{Config, Ollama};
+    let tmp = Tmp::new("semantic");
+    let lib = library(&tmp);
+    let config = |url: &str, model: Option<&str>| Config { ollama: Some(url.into()), model: model.map(String::from) };
+    let connect = |url: &str, model| Ollama::connect(&config(url, model)).map(|o| o.model);
+    let error = |url: &str, model| format!("{:#}", Ollama::connect(&config(url, model)).err().unwrap());
+
+    // Which model: the configured one, else bge-m3, else any that embeds.
+    let (url, embedded) = fake_ollama(&[("llama3", false), ("nomic-embed-text", true), ("bge-m3", true)]);
+    assert_eq!(connect(&url, None).unwrap(), "bge-m3");
+    assert_eq!(connect(&url, Some("nomic-embed-text:latest")).unwrap(), "nomic-embed-text");
+    assert!(error(&url, Some("llama3")).contains("llama3 on Ollama at http://127.0.0.1"), "not an embedding model");
+    assert!(error(&url, Some("mxbai")).contains("doesn't have mxbai; `ollama pull mxbai` there"));
+    let (other, _) = fake_ollama(&[("llama3", false), ("nomic-embed-text", true)]);
+    assert_eq!(connect(other.trim_start_matches("http://"), None).unwrap(), "nomic-embed-text", "no scheme");
+    let (none, _) = fake_ollama(&[("llama3", false)]);
+    assert!(error(&none, None).contains("has no embedding model; `ollama pull bge-m3` there"));
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    assert!(error(&format!("http://{closed}"), None).contains(&format!("cannot reach Ollama at http://{closed}")));
+
+    paper(&lib, "moon", "title = {Lunar Surfaces}, keywords = {regolith}");
+    fs::write(
+        lib.root.join("moon/fulltext.md"),
+        "The regolith of the lunar surface darkens through space weathering.\n",
+    )
+    .unwrap();
+    paper(&lib, "graphs", "title = {Graph Theory}");
+    fs::write(lib.root.join("graphs/fulltext.md"), "Every planar graph can be coloured with four colours.\n").unwrap();
+    lib.add_to_project("thesis", &["graphs".into()]).unwrap();
+    let ollama = Ollama::connect(&config(&url, None)).unwrap();
+    for p in lib.papers().0 {
+        assert!(!lib.embedded(&p, "bge-m3"));
+        assert!(lib.embed(&ollama, &p).unwrap(), "computed");
+        assert!(!lib.embed(&ollama, &p).unwrap() && lib.embedded(&p, "bge-m3"), "and then up to date");
+    }
+    assert_eq!(embedded.load(std::sync::atomic::Ordering::Relaxed), 4, "head and text of two papers, once");
+    let stored: serde_json::Value = serde_json::from_str(&read(lib.root.join("moon/embeddings.json"))).unwrap();
+    assert_eq!(stored["model"], "bge-m3", "the file says which model made it");
+
+    let hits = lib.semantic_search(&ollama, "space weathering darkens", 10).unwrap();
+    assert_eq!(hits[0].0.id, "moon");
+    assert!(hits[0].1.contains("full text at 0: The regolith"), "{}", hits[0].1);
+    assert_eq!(lib.semantic_search(&ollama, "Lunar regolith", 10).unwrap()[0].1.split(' ').nth(1), Some("title"));
+    let within = lib.semantic_search(&ollama, "space weathering project:thesis", 10).unwrap();
+    assert_eq!(within.iter().map(|(p, _)| p.id.as_str()).collect::<Vec<_>>(), ["graphs"]);
+    assert!(lib.semantic_search(&ollama, "project:thesis", 10).is_err(), "nothing to search for");
+
+    // A new text, or another model, makes them out of date.
+    fs::write(lib.root.join("graphs/fulltext.md"), "Trees are graphs without cycles.\n").unwrap();
+    let graphs = lib.get("graphs").unwrap();
+    assert!(!lib.embedded(&graphs, "bge-m3") && lib.embed(&ollama, &graphs).unwrap());
+    assert!(!lib.embedded(&graphs, "nomic-embed-text"));
+    let nomic = Ollama::connect(&config(&url, Some("nomic-embed-text"))).unwrap();
+    assert!(lib.semantic_search(&nomic, "space weathering", 10).unwrap().is_empty(), "no vectors by that model");
+}
+
+#[test]
+fn consuming() {
+    use carrel::consume::find;
+    let tmp = Tmp::new("consume");
+    let lib = library(&tmp);
+    let dirs = [tmp.path("Downloads")];
+    tmp.write("Downloads/2301.01234v2.pdf", FAKE_PDF);
+    tmp.write("Downloads/plain.PDF", FAKE_PDF);
+    tmp.write("Downloads/with-doi.pdf", b"%PDF-1.4\n<prism:doi>10.1029/2000JE001402</prism:doi>\n");
+    tmp.write("Downloads/sub/deeper.pdf", FAKE_PDF);
+    let old = tmp.write("Downloads/old.pdf", FAKE_PDF);
+    let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86400);
+    fs::File::options().write(true).open(&old).unwrap().set_modified(month_ago).unwrap();
+
+    let found = find(&dirs, 30);
+    let names: Vec<(String, Option<String>)> =
+        found.iter().map(|f| (f.path.file_name().unwrap().to_string_lossy().into_owned(), f.clue.clone())).collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    let clue = |c: &str| Some(c.to_string());
+    assert_eq!(
+        sorted,
+        [
+            ("2301.01234v2.pdf".into(), clue("arXiv id 2301.01234 in its name")),
+            ("plain.PDF".into(), None),
+            ("with-doi.pdf".into(), clue("DOI 10.1029/2000JE001402 in the file")),
+        ]
+    );
+    assert_eq!(find(&dirs, 40).len(), 4, "older ones with more days");
+
+    let plain = found.iter().find(|f| f.path.ends_with("plain.PDF")).unwrap();
+    assert!(lib.consume(plain, true).unwrap_err().to_string().contains("not recognised as a paper"));
+    assert!(plain.path.exists() && lib.papers().0.is_empty(), "refused: left where it was");
+    let (id, _) = lib.consume(plain, false).unwrap();
+    assert!(!plain.path.exists(), "moved");
+    assert!(lib.get(&id).unwrap().pdf().is_some());
+}

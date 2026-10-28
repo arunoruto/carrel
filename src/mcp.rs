@@ -37,6 +37,9 @@ struct SearchArgs {
     query: String,
     /// Maximum number of results (default 10).
     limit: Option<usize>,
+    /// Search by meaning rather than by the words: finds papers that say the same in other words or
+    /// languages, and returns the passage that matched with where it is in the full text.
+    semantic: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -189,7 +192,17 @@ impl Server {
         description = "Search the paper library. Returns the best matches first, with id, title, authors, year, keywords and where the words matched."
     )]
     async fn search(&self, Parameters(a): Parameters<SearchArgs>) -> Result<CallToolResult, ErrorData> {
-        reply(self.lib.search(&a.query, a.limit.unwrap_or(10)).map(|hits| {
+        let limit = a.limit.unwrap_or(10);
+        let hits = match a.semantic.unwrap_or(false) {
+            true => self
+                .lib
+                .embeddings
+                .as_ref()
+                .context("semantic search isn't set up: the config has no [embeddings]")
+                .and_then(|config| self.lib.semantic_search(&carrel::embed::Ollama::connect(config)?, &a.query, limit)),
+            false => self.lib.search(&a.query, limit),
+        };
+        reply(hits.map(|hits| {
             let hits = hits.iter().map(|(p, snippet)| {
                 let mut paper = brief(p);
                 paper["match"] = json!(snippet);

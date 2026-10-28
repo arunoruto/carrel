@@ -21,6 +21,7 @@ impl Carrel {
             .env("CARREL_HOME", self.tmp.path("lib"))
             .env("XDG_CACHE_HOME", self.tmp.path("cache"))
             .env("XDG_CONFIG_HOME", self.tmp.path("config"))
+            .env("XDG_STATE_HOME", self.tmp.path("state"))
             .env("CARREL_EXTRACTOR", fake_extractor("Plain text without a heading or identifier."))
             .env("VISUAL", "true")
             .env_remove("S2_API_KEY")
@@ -148,6 +149,16 @@ fn config_file() {
     c.tmp.write("config/carrel/config.toml", "[tokens]\nads = { file = \"/no/such/file\" }\n");
     assert!(c.fails(&["config"]).contains("cannot read /no/such/file"));
     assert!(c.fails(&["sync"]).contains("no remote to sync with"));
+    c.tmp.write("config/carrel/config.toml", "");
+    assert!(c.ok(&["config"]).contains("embeddings: off; add [embeddings]"));
+    assert!(c.fails(&["search", "-s", "moon"]).contains("needs [embeddings] in the config"));
+    let (ollama, _) = fake_ollama(&[("bge-m3", true)]);
+    c.tmp.write("config/carrel/config.toml", format!("[embeddings]\nollama = \"{ollama}\"\n"));
+    assert!(c.ok(&["config"]).contains(&format!("embeddings: bge-m3 on {ollama}")));
+    assert!(c.ok(&["embed", "--all"]).contains("embedding with bge-m3"));
+    c.tmp.write("config/carrel/config.toml", "[embeddings]\nollama = \"http://127.0.0.1:9\"\n");
+    assert!(c.ok(&["config"]).contains("embeddings: not working: cannot reach Ollama at http://127.0.0.1:9"));
+    assert!(c.fails(&["embed", "--all"]).contains("cannot reach Ollama"));
     std::fs::create_dir_all(c.tmp.path("shared")).unwrap();
     c.tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {A}}\n");
     c.tmp.write(
@@ -367,4 +378,46 @@ fn serving_over_http() {
     server.kill().unwrap();
     c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/33\"]\n");
     assert!(c.fails(&["serve"]).contains("not a network"));
+}
+
+#[test]
+fn consuming_downloads() {
+    let c = Carrel::new("cli-consume");
+    let (smtp, mails) = fake_smtp();
+    let downloads = c.tmp.path("Downloads");
+    c.tmp.write("Downloads/2301.01234v2.pdf", FAKE_PDF);
+    c.tmp.write("Downloads/invoice.pdf", FAKE_PDF);
+    c.tmp.write("Downloads/notes.txt", "not a pdf");
+    let config = format!(
+        "[consume]\nfolders = [\"{}\"]\n\n[notify.email]\nserver = \"{smtp}\"\nfrom = \"carrel@x.org\"\nto = \"me@x.org\"\n",
+        downloads.display()
+    );
+    c.tmp.write("config/carrel/config.toml", &config);
+
+    // From a timer (no terminal): it tells, once.
+    let out = c.ok(&["consume"]);
+    assert!(
+        out.contains("New, waiting for `carrel consume`")
+            && out.contains("2301.01234v2.pdf  (arXiv id 2301.01234 in its name)"),
+        "{out}"
+    );
+    assert!(!out.contains("notes.txt"));
+    let mail = mails.lock().unwrap().pop().expect("a mail");
+    assert!(mail.contains("Subject: carrel found 2 new PDFs\r\n") && mail.contains("To: me@x.org"), "{mail}");
+    assert!(mail_body(&mail).contains("invoice.pdf"));
+    assert!(c.ok(&["consume"]).contains("nothing new"));
+    assert!(mails.lock().unwrap().is_empty(), "told once");
+
+    // --yes adds what it can identify; offline, the fake text identifies nothing.
+    let out = c.ok(&["consume", "--yes"]);
+    assert!(out.contains("Not added") && out.contains("not recognised as a paper"), "{out}");
+    assert!(downloads.join("invoice.pdf").exists(), "what isn't added stays");
+    assert!(c.ok(&["list"]).is_empty());
+
+    assert!(c.ok(&["notify", "hello"]).contains("email to me@x.org: sent"));
+    assert_eq!(mail_body(&mails.lock().unwrap().pop().unwrap()), "hello\r\n");
+    c.tmp.write("config/carrel/config.toml", config.replace(&smtp, "127.0.0.1:9"));
+    assert!(c.fails(&["notify"]).contains("cannot reach 127.0.0.1:9"));
+    c.tmp.write("config/carrel/config.toml", "");
+    assert!(c.fails(&["notify"]).contains("no notifiers"));
 }

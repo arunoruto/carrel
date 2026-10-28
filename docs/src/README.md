@@ -20,6 +20,8 @@ Add papers by PDF, DOI, arXiv id or title. carrel finds their metadata, turns ea
 - **AI writes drafts, you decide.** Summaries, keywords and notes an AI proposes wait in `drafts/` until you approve them.
 - **Projects and bibliographies.** Group papers into projects, keep them in sync with the citations in your LaTeX or Typst files, and get each project's `.bib` in one command.
 - **Search everything** with a full-text index over titles, authors, keywords, abstracts, summaries, notes and full texts, with field filters like `author:` and `year:`.
+- **Search by meaning** with [semantic search](semantic-search.md): embeddings from Ollama find papers that say the same in other words or languages.
+- **Papers from your Downloads** move into the library with [`carrel consume`](adding-papers.md#from-your-downloads), asking first or on their own, with an email about what happened.
 - **Follow citations**: the references and the citing papers of any paper, marked when they are already in your library.
 - **A TUI, a CLI and an MCP server** on one core library, so other frontends can follow.
 

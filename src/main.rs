@@ -134,6 +134,9 @@ enum Cmd {
     Search {
         #[arg(required = true)]
         query: Vec<String>,
+        /// Search by meaning, with the embeddings from `carrel embed` (needs [embeddings] in the config)
+        #[arg(short, long)]
+        semantic: bool,
     },
     /// Show a paper's details
     Show {
@@ -153,6 +156,13 @@ enum Cmd {
         ids: Vec<String>,
         /// Every paper with a PDF
         #[arg(long)]
+        all: bool,
+    },
+    /// Compute the embeddings for semantic search, on the Ollama in the config's [embeddings]
+    Embed {
+        ids: Vec<String>,
+        /// Every paper whose embeddings are missing or out of date
+        #[arg(long, conflicts_with = "ids")]
         all: bool,
     },
     /// List drafts waiting for review
@@ -183,6 +193,25 @@ enum Cmd {
         /// Settle files changed on both sides by keeping this side's version
         #[arg(long)]
         keep: Option<carrel::remote::Keep>,
+    },
+    /// Move new PDFs from Downloads (or the config's [consume] folders) into the library, asking for each.
+    /// Without a terminal (from a timer) it doesn't ask: it tells through the notifiers, or with
+    /// `auto = true` adds the PDFs it can identify as papers
+    Consume {
+        /// Add the PDFs it can identify as papers without asking
+        #[arg(short, long)]
+        yes: bool,
+        /// Also offer the PDFs you said no to before
+        #[arg(long)]
+        again: bool,
+        /// Only PDFs changed in the last this many days [default: the config's, else 30]
+        #[arg(long)]
+        days: Option<u64>,
+    },
+    /// Send a message through the config's notifiers, to try them
+    Notify {
+        #[arg(default_value = "carrel can reach you this way.")]
+        message: String,
     },
     /// Show where carrel keeps its settings, library and index
     Config,
@@ -265,7 +294,7 @@ fn main() -> Result<()> {
         Cmd::Add { sources } => {
             let mut failed = 0;
             for source in &sources {
-                match lib.add(source) {
+                match spinning(&format!("adding {source}"), || lib.add(source)) {
                     Ok((id, messages)) => {
                         println!("added {id}");
                         messages.iter().for_each(|m| println!("  {m}"));
@@ -280,7 +309,9 @@ fn main() -> Result<()> {
                 bail!("{failed} of {} could not be added", sources.len());
             }
         }
-        Cmd::Attach { id, pdf } => lib.attach(&id, pdf.as_deref())?.iter().for_each(|m| println!("{m}")),
+        Cmd::Attach { id, pdf } => spinning(&format!("attaching to {id}"), || lib.attach(&id, pdf.as_deref()))?
+            .iter()
+            .for_each(|m| println!("{m}")),
         Cmd::Addto { id, files } => lib.add_supplementary(&id, &files)?.iter().for_each(|m| println!("{m}")),
         Cmd::Update { id: Some(id), source, .. } => {
             lib.update(&id, source.as_deref())?.iter().for_each(|m| println!("{m}"))
@@ -424,8 +455,12 @@ fn main() -> Result<()> {
                 false => papers.iter().for_each(print_line),
             }
         }
-        Cmd::Search { query } => {
-            for (p, snippet) in lib.search(&query.join(" "), 50)? {
+        Cmd::Search { query, semantic } => {
+            let hits = match semantic {
+                true => lib.semantic_search(&ollama(&lib)?, &query.join(" "), 20)?,
+                false => lib.search(&query.join(" "), 50)?,
+            };
+            for (p, snippet) in hits {
                 print_line(&p);
                 println!("{:30}   {snippet}", "");
             }
@@ -444,12 +479,33 @@ fn main() -> Result<()> {
                 false => ids,
             };
             for id in ids {
-                print!("{id} ... ");
-                std::io::stdout().flush()?;
-                match lib.extract(&id) {
-                    Ok(()) => println!("ok"),
-                    Err(e) => println!("{e:#}"),
+                match spinning(&format!("extracting {id}"), || lib.extract(&id)) {
+                    Ok(()) => println!("{id}: ok"),
+                    Err(e) => println!("{id}: {e:#}"),
                 }
+            }
+        }
+        Cmd::Embed { ids, all } => {
+            let ollama = ollama(&lib)?;
+            println!("embedding with {} on {}", ollama.model, ollama.url);
+            let papers = match all {
+                true => lib.papers().0,
+                false => ids.iter().map(|id| lib.get(id)).collect::<Result<_>>()?,
+            };
+            let mut failed = 0;
+            for p in papers {
+                match spinning(&format!("embedding {}", p.id), || lib.embed(&ollama, &p)) {
+                    Ok(true) => println!("{}: done", p.id),
+                    Ok(false) if !all => println!("{}: up to date", p.id),
+                    Ok(false) => {}
+                    Err(e) => {
+                        failed += 1;
+                        println!("{}: {e:#}", p.id);
+                    }
+                }
+            }
+            if failed > 0 {
+                bail!("{failed} papers failed");
             }
         }
         Cmd::Drafts => {
@@ -515,12 +571,141 @@ fn main() -> Result<()> {
             ];
             let found: Vec<_> = tokens.iter().filter(|(_, t)| t.is_some()).map(|(name, _)| *name).collect();
             println!("tokens:  {}", if found.is_empty() { "none".into() } else { found.join(", ") });
+            let embeddings = match &lib.embeddings {
+                None => "off; add [embeddings] for semantic search".into(),
+                Some(config) => match carrel::embed::Ollama::connect(config) {
+                    Ok(o) => format!("{} on {}", o.model, o.url),
+                    Err(e) => format!("not working: {e:#}"),
+                },
+            };
+            println!("embeddings: {embeddings}");
+        }
+        Cmd::Consume { yes, again, days } => consume(&lib, yes, again, days)?,
+        Cmd::Notify { message } => {
+            let config = Config::load()?.notify;
+            let notifiers = carrel::notify::notifiers(&config);
+            if notifiers.is_empty() {
+                bail!("no notifiers; add [notify.email] to the config");
+            }
+            let failed = carrel::notify::send(&config, "carrel", &format!("{message}\n"));
+            for n in &notifiers {
+                let ok = !failed.iter().any(|f| f.starts_with(&n.name()));
+                println!("{}: {}", n.name(), if ok { "sent" } else { "failed" });
+            }
+            if !failed.is_empty() {
+                bail!("{}", failed.join("\n"));
+            }
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Serve { listen, every } => serve::run(lib, listen, every)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
     }
     Ok(())
+}
+
+/// Run `work` with a spinner and the seconds so far on the terminal, so that a long PDF doesn't look
+/// like a hang. Nothing is shown when stderr isn't a terminal.
+fn spinning<T>(message: &str, work: impl FnOnce() -> T) -> T {
+    use std::io::IsTerminal;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    if !std::io::stderr().is_terminal() {
+        return work();
+    }
+    let done = AtomicBool::new(false);
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let start = std::time::Instant::now();
+            for frame in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].iter().cycle() {
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                eprint!("\r{frame} {message} {}s", start.elapsed().as_secs());
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            eprint!("\r\x1b[2K"); // clear the line for what comes next
+        });
+        let result = work();
+        done.store(true, Ordering::Relaxed);
+        result
+    })
+}
+
+fn consume(lib: &Library, yes: bool, again: bool, days: Option<u64>) -> Result<()> {
+    use carrel::consume::{self, Mark, Seen};
+    use std::io::IsTerminal;
+    let config = Config::load()?;
+    let mut settings = config.consume.unwrap_or_default();
+    settings.days = days.or(settings.days);
+    let folders = settings.folders();
+    if folders.is_empty() {
+        bail!("no folder to look in; set [consume] folders in the config");
+    }
+    let interactive = std::io::stdin().is_terminal();
+    if yes || !interactive {
+        let Some((subject, body)) = consume::unattended(lib, &settings, yes || settings.auto, yes)? else {
+            println!(
+                "nothing new in {}",
+                folders.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", ")
+            );
+            return Ok(());
+        };
+        println!("{body}");
+        if !interactive {
+            for failed in carrel::notify::send(&config.notify, &subject, &body) {
+                eprintln!("cannot notify: {failed}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut seen = Seen::load();
+    let found: Vec<_> = consume::find(&folders, settings.days())
+        .into_iter()
+        .filter(|f| again || seen.get(f) != Some(Mark::Skipped))
+        .collect();
+    if found.is_empty() {
+        let where_ = folders.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", ");
+        println!("no new PDFs from the last {} days in {where_}", settings.days());
+        return Ok(());
+    }
+    println!("{} PDFs from the last {} days. Added ones move out of their folder.", found.len(), settings.days());
+    println!("Enter adds those naming a DOI or arXiv id [Y/n] and skips the rest [y/N]; q stops.\n");
+    for f in found {
+        let question = match &f.clue {
+            Some(clue) => format!("{clue}: add? [Y/n/q] "),
+            None => "no DOI or arXiv id in its name or metadata: add? [y/N/q] ".into(),
+        };
+        print!("{}\n  {question}", f.path.display());
+        std::io::stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        match answer.trim().to_lowercase().as_str() {
+            "q" => break,
+            "y" | "yes" => {}
+            "" if f.clue.is_some() => {}
+            _ => {
+                seen.set(&f, Mark::Skipped);
+                continue;
+            }
+        }
+        match spinning("extracting text and figures, then looking it up", || lib.consume(&f, false)) {
+            Ok((id, messages)) => {
+                println!("  added {id}");
+                messages.iter().for_each(|m| println!("  {m}"));
+            }
+            Err(e) => {
+                println!("  {e:#}");
+                seen.set(&f, Mark::Told);
+            }
+        }
+    }
+    seen.save()
+}
+
+fn ollama(lib: &Library) -> Result<carrel::embed::Ollama> {
+    let config =
+        lib.embeddings.as_ref().context("semantic search needs [embeddings] in the config (where Ollama is)")?;
+    carrel::embed::Ollama::connect(config)
 }
 
 fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>) -> Result<()> {

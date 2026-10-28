@@ -153,7 +153,11 @@ pub fn paper_keys(ids: &Ids, title: &str) -> Vec<String> {
 
 /// A title's letters and digits, lowercased: equal for titles that [`same_title`] matches.
 pub fn title_key(title: &str) -> String {
-    deunicode::deunicode(title).chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_lowercase()
+    deunicode::deunicode(&strip_tags(title))
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_lowercase()
 }
 
 pub(crate) fn agent() -> ureq::Agent {
@@ -264,7 +268,7 @@ fn from_csl(v: &Value, doi: &str, arxiv: Option<&str>, preprint: bool) -> Entry 
     e
 }
 
-/// Crossref titles and abstracts carry JATS/HTML tags.
+/// Crossref titles and abstracts carry JATS/HTML tags, and so does extracted text (`Fe<sup>0</sup>`).
 pub(crate) fn strip_tags(s: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;

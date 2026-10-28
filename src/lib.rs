@@ -16,11 +16,14 @@
 
 pub mod authors;
 pub mod bib;
+pub mod consume;
 mod doctor;
+pub mod embed;
 pub mod fetch;
 pub mod graph;
 mod ilibrarian;
 mod index;
+pub mod notify;
 mod projects;
 pub mod refs;
 pub mod remote;
@@ -181,6 +184,13 @@ pub struct Config {
     /// `carrel serve`'s settings.
     #[serde(default)]
     pub serve: Serve,
+    /// Where Ollama is, for semantic search.
+    pub embeddings: Option<embed::Config>,
+    /// Folders where new papers turn up, like Downloads.
+    pub consume: Option<consume::Config>,
+    /// How to tell the user what happened while they weren't looking.
+    #[serde(default)]
+    pub notify: notify::Config,
 }
 
 /// `carrel serve`'s settings; its command-line flags override them.
@@ -273,6 +283,8 @@ pub struct Library {
     pub key: String,
     /// Shell command extracting text and figures, see [`DEFAULT_EXTRACTOR`].
     pub extractor: String,
+    /// Where to compute embeddings for semantic search; none without `[embeddings]` in the config.
+    pub embeddings: Option<embed::Config>,
 }
 
 impl Library {
@@ -296,6 +308,7 @@ impl Library {
         if let Some(cmd) = std::env::var("CARREL_EXTRACTOR").ok().or(config.extractor) {
             lib.extractor = cmd;
         }
+        lib.embeddings = config.embeddings;
         Ok(lib)
     }
 
@@ -307,7 +320,7 @@ impl Library {
         let mut hash = DefaultHasher::new();
         root.hash(&mut hash);
         let index = cache.join(format!("index-{:016x}.sqlite", hash.finish()));
-        Ok(Self { root, index, key: DEFAULT_KEY.into(), extractor: DEFAULT_EXTRACTOR.into() })
+        Ok(Self { root, index, key: DEFAULT_KEY.into(), extractor: DEFAULT_EXTRACTOR.into(), embeddings: None })
     }
 
     pub fn get(&self, id: &str) -> Result<Paper> {
@@ -361,6 +374,11 @@ impl Library {
 
     /// Add a paper from a PDF, DOI, arXiv id/URL or exact title. Returns its id and messages worth showing.
     pub fn add(&self, source: &str) -> Result<(String, Vec<String>)> {
+        self.add_from(source, false)
+    }
+
+    /// [`Library::add`], refusing PDFs that turn out to have no DOI or arXiv id (invoices, letters, ...).
+    fn add_from(&self, source: &str, known_only: bool) -> Result<(String, Vec<String>)> {
         let tmp = Staging::new(&self.root)?;
         let ids = match fetch::classify(source)? {
             fetch::Source::Pdf(path) => {
@@ -371,15 +389,21 @@ impl Library {
             fetch::Source::Doi(doi) => fetch::Ids { doi: Some(doi), ..Default::default() },
             fetch::Source::Title(title) => fetch::by_title(&title)?,
         };
-        self.add_staged(tmp, ids, source)
+        self.add_staged(tmp, ids, source, known_only)
     }
 
     /// Add a search result: metadata from its DOI when it has one, the PDF from arXiv when it is there.
     pub fn add_ids(&self, ids: &fetch::Ids) -> Result<(String, Vec<String>)> {
-        self.add_staged(Staging::new(&self.root)?, ids.clone(), &ids.source())
+        self.add_staged(Staging::new(&self.root)?, ids.clone(), &ids.source(), false)
     }
 
-    fn add_staged(&self, tmp: Staging, mut ids: fetch::Ids, source: &str) -> Result<(String, Vec<String>)> {
+    fn add_staged(
+        &self,
+        tmp: Staging,
+        mut ids: fetch::Ids,
+        source: &str,
+        known_only: bool,
+    ) -> Result<(String, Vec<String>)> {
         let mut messages = vec![];
         let pdf = tmp.0.join("paper.pdf");
         if !pdf.exists()
@@ -395,8 +419,21 @@ impl Library {
         // Identify a PDF: ids printed on its first page, else its title.
         let text = fs::read_to_string(tmp.0.join("fulltext.md")).unwrap_or_default();
         let title = guess_title(&text);
+        let mut fetched = None;
         if ids.is_empty() {
-            ids = fetch::find_ids(&text);
+            // A DOI in the text may be one it cites (a data set, a related paper): believe it only when its
+            // title is at the start of the text.
+            let found = fetch::find_ids(&text);
+            match fetch::metadata(&found) {
+                _ if found.is_empty() => {}
+                Ok(bib) if starts(&text, &bib.title()) => (ids, fetched) = (found, Some(bib)),
+                Ok(bib) => messages.push(format!(
+                    "ignored {} from the text: it is {:?}, likely a work it cites",
+                    found.source(),
+                    bib.title()
+                )),
+                Err(_) => ids = found, // can't tell; the metadata lookup below says why
+            }
         }
         if ids.is_empty()
             && let Some(t) = &title
@@ -406,11 +443,14 @@ impl Library {
                 Err(e) => messages.push(format!("title lookup failed: {e:#}")),
             }
         }
+        if known_only && ids.is_empty() {
+            bail!("not recognised as a paper: no DOI or arXiv id, and no known title");
+        }
         let mut bib = if ids.is_empty() {
             messages.push("no DOI or arXiv id found; fix the metadata with `carrel edit`".into());
             Entry::new("misc")
         } else {
-            match fetch::metadata(&ids) {
+            match fetched.map_or_else(|| fetch::metadata(&ids), Ok) {
                 Ok(bib) => bib,
                 Err(e) if has_pdf => {
                     messages.push(format!("metadata lookup failed: {e:#}"));
@@ -700,22 +740,27 @@ impl Library {
     /// limited to a field (`author:hinton year:2015`) and `project:thesis` searches one project.
     /// A query without words lists the papers.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<(Paper, String)>> {
+        let (words, allowed) = self.scope(query)?;
+        let wanted = |p: &Paper| allowed.as_ref().is_none_or(|ids| ids.contains(&p.id));
+        let papers = self.papers().0;
+        if words.is_empty() {
+            return Ok(papers.into_iter().filter(wanted).take(limit).map(|p| (p, String::new())).collect());
+        }
+        let hits = index::search(&self.index, &papers, &words, if allowed.is_some() { usize::MAX } else { limit })?;
+        let mut by_id: HashMap<String, Paper> = papers.into_iter().map(|p| (p.id.clone(), p)).collect();
+        let found = hits.into_iter().filter_map(|(id, snippet)| Some((by_id.remove(&id)?, snippet)));
+        Ok(found.filter(|(p, _)| wanted(p)).take(limit).collect())
+    }
+
+    /// A query's words without its `project:name`, and the ids of that project's papers.
+    pub(crate) fn scope(&self, query: &str) -> Result<(String, Option<Vec<String>>)> {
         let mut project = None;
         let words: Vec<&str> = query
             .split_whitespace()
             .filter(|w| w.strip_prefix("project:").map(|name| project = Some(name)).is_none())
             .collect();
         let allowed = project.map(|name| self.project(name)).transpose()?;
-        let wanted = |p: &Paper| allowed.as_ref().is_none_or(|ids| ids.contains(&p.id));
-        let papers = self.papers().0;
-        if words.is_empty() {
-            return Ok(papers.into_iter().filter(wanted).take(limit).map(|p| (p, String::new())).collect());
-        }
-        let hits =
-            index::search(&self.index, &papers, &words.join(" "), if project.is_some() { usize::MAX } else { limit })?;
-        let mut by_id: HashMap<String, Paper> = papers.into_iter().map(|p| (p.id.clone(), p)).collect();
-        let found = hits.into_iter().filter_map(|(id, snippet)| Some((by_id.remove(&id)?, snippet)));
-        Ok(found.filter(|(p, _)| wanted(p)).take(limit).collect())
+        Ok((words.join(" "), allowed))
     }
 }
 
@@ -858,10 +903,26 @@ fn citekey(template: &str, bib: &Entry) -> Result<String> {
 }
 
 /// The first Markdown heading of the extracted text, which is the title for most papers.
+/// Whether `title` appears in the first pages of `text`, letters and digits only.
+fn starts(text: &str, title: &str) -> bool {
+    let title = fetch::title_key(title);
+    let head: String = text.chars().take(20_000).collect();
+    title.len() >= 10 && fetch::title_key(&head).contains(&title)
+}
+
+/// The title from the first page's headings: the first of four words or more, else of two or more. A
+/// single word ("Abstract", a journal's name) is never the title.
 fn guess_title(text: &str) -> Option<String> {
-    let heading = text.lines().take(60).find_map(|l| l.trim().strip_prefix('#'))?;
-    let title = heading.replace("**", "");
-    Some(title.trim_matches(|c: char| c == '#' || c.is_whitespace()).to_string()).filter(|t| t.len() > 3)
+    let headings: Vec<String> = text
+        .lines()
+        .take(60)
+        .filter_map(|l| l.trim().strip_prefix('#'))
+        .map(|h| {
+            fetch::strip_tags(&h.replace("**", "")).trim_matches(|c: char| c == '#' || c.is_whitespace()).to_string()
+        })
+        .collect();
+    let words = |h: &String| h.split_whitespace().count();
+    headings.iter().find(|h| words(h) >= 4).or_else(|| headings.iter().find(|h| words(h) >= 2)).cloned()
 }
 
 fn file_stem(source: &str) -> String {
@@ -890,6 +951,24 @@ mod tests {
         assert!(citekey("{{ year ", &bib).is_err());
         assert_eq!(normalize_keywords("- GANs, diffusion\n* gans; score matching"), "GANs\ndiffusion\nscore matching");
         assert_eq!(guess_title("x\n# **Attention Is All You Need** \n"), Some("Attention Is All You Need".into()));
+        let page = "# Ultramicroscopy\n## Quantifying noise limitations of <i>neural</i> networks\n# Abstract\n";
+        assert_eq!(
+            guess_title(page),
+            Some("Quantifying noise limitations of neural networks".into()),
+            "not the journal"
+        );
+        assert_eq!(
+            guess_title("# Nature\n# Deep learning\n# Abstract\n"),
+            Some("Deep learning".into()),
+            "short titles"
+        );
+        assert_eq!(guess_title("# Abstract\nplain text"), None);
+        assert!(starts(
+            "Ultramicroscopy\n# Quantifying noise limitations of\nneural networks",
+            "Quantifying Noise Limitations of Neural Networks"
+        ));
+        assert!(!starts("Our data (doi:10.11583/x)", "Data for \"Quantifying\""), "not on the page");
+        assert!(!starts("Abstract: we", "Abstract"), "too short to tell");
     }
 
     #[test]

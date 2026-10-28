@@ -12,6 +12,9 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # [tokens]   API tokens, see below
 # [remote]   where the library is shared, see Sharing a library
 # [serve]    carrel serve's settings, see Running a server
+# [embeddings]  where Ollama is, see Semantic search
+# [consume]  folders where new papers turn up, see Adding papers
+# [notify]   how carrel tells you what happened, see below
 ```
 
 ## What `carrel` alone does
@@ -72,6 +75,19 @@ proxies = ["172.18.0.0/16"]                      # reverse proxies whose X-Forwa
 
 See [Networks without a token](server.md#networks-without-a-token) before trusting anything behind a reverse proxy.
 
+## Notifications
+
+carrel tells you what it did while you weren't looking: PDFs that `carrel consume` found in your [Downloads](adding-papers.md#from-your-downloads) or added from there when run from a timer, and a [server](server.md) that can't reach Ollama. A server never mails you about papers others dropped in its folder. For now by email, through a mail server that takes mail without login or TLS, as many university relays do on their own network:
+
+```toml
+[notify.email]
+server = "unimail.tu-dortmund.de:25"   # port 25 when left out
+from = "you@tu-dortmund.de"
+to = "you@tu-dortmund.de"
+```
+
+`carrel notify` sends a test message.
+
 ## API tokens
 
 Tokens for ADS, Semantic Scholar and OpenAlex can go in the config instead of [environment variables](#environment-variables), either written out or kept in a file of their own (a password manager or agenix/sops can write that file):
@@ -96,4 +112,5 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
 | `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](sharing.md)'s settings |
 | `CARREL_SERVE_TOKEN` | the token [`carrel serve`](server.md)'s clients must send |
+| `OLLAMA_HOST` | where Ollama is, for [semantic search](semantic-search.md) |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |
