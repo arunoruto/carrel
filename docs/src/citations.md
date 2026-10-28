@@ -42,7 +42,7 @@ An assistant gets the same through the MCP tools `neighbors`, `tree` and `sugges
 
 ## Where references come from
 
-`carrel add` looks up a paper's references when it has a DOI or arXiv id. For papers added another way, `carrel refs <id>` looks them up the first time, and `carrel refs --all` does it for every paper without references. `--refresh` looks them up again.
+`carrel add` looks up a paper's references when it has a DOI or arXiv id. For papers added another way, `carrel refs <id>` looks them up the first time, and `carrel refs --all` does it for every paper without references. `--refresh` looks them up again. With an ADS token, a paper with neither a DOI nor an arXiv id first gets them from ADS, when ADS has a record with the same title, year and first author; the other sources need them.
 
 carrel asks every source in this order, and each adds the references the earlier ones lack. Where two list the same paper, the earlier entry stays, as its details are usually better:
 

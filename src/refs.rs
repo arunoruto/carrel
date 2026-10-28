@@ -26,8 +26,8 @@ pub trait ReferenceSource {
 /// Semantic Scholar as a fallback.
 pub fn sources() -> Result<Vec<Box<dyn ReferenceSource>>> {
     let mut all: Vec<Box<dyn ReferenceSource>> = vec![];
-    if let Some(token) = crate::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())? {
-        all.push(Box::new(Ads { token }));
+    if let Some(ads) = ads()? {
+        all.push(Box::new(ads));
     }
     all.push(Box::new(OpenAlex { api_key: crate::token(&["OPENALEX_API_KEY"], |t| t.openalex.as_ref())? }));
     all.push(Box::new(Crossref));
@@ -181,6 +181,47 @@ impl Ads {
             response => response.context("NASA ADS")?.into_body().read_json()?,
         };
         Ok(response["response"]["docs"].as_array().cloned().unwrap_or_default())
+    }
+}
+
+/// NASA ADS, when there is a token.
+pub fn ads() -> Result<Option<Ads>> {
+    Ok(crate::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())?.map(|token| Ads { token }))
+}
+
+impl Ads {
+    /// The DOI and arXiv id of the paper with this title, year (give or take one) and first author, if ADS
+    /// knows them.
+    /// Several papers share some titles, so without a year only a unique title counts.
+    pub fn ids(&self, title: &str, year: Option<i32>, first_author: Option<&str>) -> Result<Ids> {
+        let q = format!("title:\"{}\"", title.replace('"', ""));
+        let docs = self.query(&q, "title,year,doi,identifier,first_author", "20")?;
+        // Generic titles ("Classical Electrodynamics", 1998) need the author too.
+        let family = |name: &str| fetch::title_key(crate::bib::family(name));
+        let author_fits = |d: &Value| match (first_author, d["first_author"].as_str()) {
+            (Some(a), Some(b)) => family(a) == family(b),
+            _ => true,
+        };
+        let year_fits = |d: &Value| match (year, d["year"].as_str().and_then(|y| y.parse::<i32>().ok())) {
+            (Some(a), Some(b)) => (a - b).abs() <= 1,
+            _ => true,
+        };
+        let same: Vec<_> = docs
+            .iter()
+            .filter(|d| {
+                d["title"][0].as_str().is_some_and(|t| fetch::same_title(t, title)) && year_fits(d) && author_fits(d)
+            })
+            .collect();
+        // Without a year, only a title no other record shares.
+        let [d, ..] = same[..] else { return Ok(Ids::default()) };
+        if year.is_none() && same.len() > 1 {
+            return Ok(Ids::default());
+        }
+        let identifiers = d["identifier"].as_array().into_iter().flatten().filter_map(Value::as_str);
+        Ok(Ids {
+            doi: d["doi"][0].as_str().map(String::from),
+            arxiv: identifiers.filter_map(|i| i.strip_prefix("arXiv:")).find_map(fetch::arxiv_id),
+        })
     }
 }
 

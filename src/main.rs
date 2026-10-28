@@ -305,7 +305,8 @@ fn main() -> Result<()> {
             let papers = lib.papers().0.into_iter().filter(|p| !p.dir.join(carrel::graph::FILE).exists());
             for p in papers {
                 match lib.look_up_references(&p) {
-                    Ok(n) => println!("{}: {n} references", p.id),
+                    Ok((n, Some(note))) => println!("{}: {note}; {n} references", p.id),
+                    Ok((n, None)) => println!("{}: {n} references", p.id),
                     Err(e) => println!("{}: {e:#}", p.id),
                 }
             }

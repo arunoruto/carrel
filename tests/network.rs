@@ -116,7 +116,7 @@ fn citation_graph() {
 #[test]
 #[ignore = "needs internet"]
 fn reference_sources() {
-    use carrel::refs::{Ads, Crossref, Lookup, OpenAlex, ReferenceSource, SemanticScholar};
+    use carrel::refs::{Crossref, Lookup, OpenAlex, ReferenceSource, SemanticScholar};
     let _turn = one_at_a_time();
     let paper = ids(Some("10.1029/2010JE003711"), None);
     let lookup = Lookup { ids: &paper, title: "" };
@@ -130,9 +130,25 @@ fn reference_sources() {
         Ok(found) => assert!(found.len() > 25, "{}", found.len()),
         Err(e) => assert!(e.to_string().contains("rate-limiting"), "{e:#}"),
     }
-    match std::env::var("ADS_API_TOKEN") {
-        Ok(token) => assert!(Ads { token }.references(&lookup).unwrap().len() > 80),
-        Err(_) => eprintln!("ADS skipped: no ADS_API_TOKEN"),
+    match carrel::refs::ads().unwrap() {
+        Some(ads) => {
+            let n = ads.references(&lookup).unwrap().len();
+            assert!(n > 50, "{n}"); // ADS keeps only the references it could resolve: 62 of them
+            // Three records carry this title (2008, 2012, 2016); the year picks the one with a DOI.
+            let title = "Space Weathering on Airless Bodies";
+            assert_eq!(
+                ads.ids(title, Some(2016), Some("Pieters, Carlé M.")).unwrap().doi.as_deref(),
+                Some("10.1002/2016JE005128")
+            );
+            assert!(ads.ids(title, Some(2008), None).unwrap().is_empty(), "the 2008 abstract has no DOI");
+            assert!(ads.ids(title, Some(1990), None).unwrap().is_empty(), "no record from 1990");
+            assert!(ads.ids(title, None, None).unwrap().is_empty(), "without a year, the title is ambiguous");
+            let greiner = ads.ids("Classical Electrodynamics", Some(1998), Some("Greiner, Walter")).unwrap();
+            assert_eq!(greiner.doi.as_deref(), Some("10.1007/978-1-4612-0587-6"));
+            let jackson = ads.ids("Classical Electrodynamics", Some(1998), Some("Jackson, John David")).unwrap();
+            assert_ne!(jackson.doi, greiner.doi, "same title and year, another author");
+        }
+        None => eprintln!("ADS skipped: no ADS token"),
     }
 
     // Added by DOI, a paper comes with its references.

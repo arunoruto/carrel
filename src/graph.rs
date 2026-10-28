@@ -315,12 +315,37 @@ impl Library {
     }
 
     /// Look up a paper's references and save them. References an AI read stay unless a source has them too.
-    pub fn look_up_references(&self, p: &Paper) -> Result<usize> {
-        let found = look_up(&crate::refs::sources()?, &Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() }, &p.bib.title())?;
+    /// A paper without a DOI or arXiv id gets them from ADS first, when it knows the title; the note says so.
+    pub fn look_up_references(&self, p: &Paper) -> Result<(usize, Option<String>)> {
+        let note = self.fill_ids(p).unwrap_or_else(|e| Some(format!("ADS: {e:#}")));
+        let p = &self.get(&p.id)?;
+        let found = look_up(&crate::refs::sources()?, &Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() }, &p.bib.title());
+        let found = found.map_err(|e| match &note {
+            Some(note) => e.context(note.clone()),
+            None => e,
+        })?;
         let n = found.len();
         let from_ai = read(&p.dir)?.unwrap_or_default().into_iter().filter(|r| r.source == AI);
         write(&p.dir, &merge(found, from_ai))?;
-        Ok(n)
+        Ok((n, note))
+    }
+
+    /// Adds the DOI and arXiv id ADS has for a paper lacking both.
+    fn fill_ids(&self, p: &Paper) -> Result<Option<String>> {
+        let (None, None, Some(ads)) = (p.bib.doi(), p.bib.arxiv(), crate::refs::ads()?) else { return Ok(None) };
+        let ids = ads.ids(&p.bib.title(), p.bib.year(), p.bib.authors().first().map(String::as_str))?;
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let mut p = p.clone();
+        p.bib.set("doi", ids.doi.as_deref());
+        if ids.arxiv.is_some() {
+            p.bib.set("eprint", ids.arxiv.as_deref());
+            p.bib.set("archiveprefix", Some("arXiv"));
+        }
+        p.save()?;
+        let found = [ids.doi.map(|d| format!("DOI {d}")), ids.arxiv.map(|a| format!("arXiv {a}"))];
+        Ok(Some(format!("found {} via ADS", found.into_iter().flatten().collect::<Vec<_>>().join(" and "))))
     }
 }
 
