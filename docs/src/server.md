@@ -110,5 +110,13 @@ Entries are networks (`100.64.0.0/10`) or single addresses (`10.0.0.5`). `100.64
 
 carrel checks the address the connection comes from, not the name it was reached by. So watch for two traps:
 
-- **A reverse proxy on the same machine** makes every request it forwards come from `127.0.0.1`. Trusting `127.0.0.0/8` then trusts the whole internet. Behind a proxy, don't trust loopback; trust the network the proxy can't be reached from instead.
+- **A reverse proxy** makes every request it forwards come from the proxy. Trusting the proxy's address, such as `127.0.0.0/8` for a proxy on the same machine, then trusts everyone who can reach the proxy. Name the proxy in `proxies` instead. carrel then uses the address the proxy saw, which the proxy adds to `X-Forwarded-For`:
+
+  ```toml
+  [serve]
+  trusted = ["100.64.0.0/10"]
+  proxies = ["172.18.0.0/16"]   # here the Docker network Traefik reaches carrel through
+  ```
+
+  carrel only reads the last `X-Forwarded-For` entry, the one each proxy in `proxies` added. Entries further left came from the client and can be faked. Anything that can reach carrel from a network in `proxies` can claim any address, so keep that list to the proxies themselves.
 - **In Docker**, a request from the host itself comes from the Docker bridge (often `172.17.0.1`), not `127.0.0.1`. Requests from other machines, Tailscale included, keep their address.

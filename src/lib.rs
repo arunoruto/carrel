@@ -196,6 +196,9 @@ pub struct Serve {
     /// Networks whose clients need no token, like `127.0.0.0/8` or Tailscale's `100.64.0.0/10`.
     #[serde(default)]
     pub trusted: Vec<String>,
+    /// Reverse proxies in front of carrel, whose `X-Forwarded-For` says where a request came from.
+    #[serde(default)]
+    pub proxies: Vec<String>,
 }
 
 /// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.

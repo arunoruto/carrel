@@ -349,6 +349,18 @@ fn serving_over_http() {
     let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
     assert_eq!(post_to(&url, "").status().as_u16(), 200, "trusted");
     server.kill().unwrap();
+    // Behind a proxy, what it says in X-Forwarded-For.
+    c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/10\"]\nproxies = [\"127.0.0.1\"]\n");
+    let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
+    let forwarded = |from: &str| {
+        let request = agent.post(&format!("{url}/mcp")).header("X-Forwarded-For", from);
+        let request = request.header("Accept", "application/json, text/event-stream");
+        request.header("Content-Type", "application/json").send(initialize).unwrap().status().as_u16()
+    };
+    assert_eq!(forwarded("100.99.1.2"), 200);
+    assert_eq!(forwarded("100.99.1.2, 8.8.8.8"), 401);
+    assert_eq!(post_to(&url, "").status().as_u16(), 401, "the proxy itself isn't trusted");
+    server.kill().unwrap();
     c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/10\"]\n");
     let (mut server, url, _log) = start("0.0.0.0:0", None);
     assert_eq!(post_to(&url, "").status().as_u16(), 401, "not trusted, and no token to send");

@@ -386,6 +386,7 @@ pub async fn serve_http(
     listener: tokio::net::TcpListener,
     token: Option<String>,
     trusted: Vec<Network>,
+    proxies: Vec<Network>,
 ) -> anyhow::Result<()> {
     use http_body_util::{BodyExt, Full};
     use hyper::{Response, StatusCode};
@@ -399,14 +400,16 @@ pub async fn serve_http(
     let mcp: std::sync::Arc<StreamableHttpService<Server, LocalSessionManager>> = std::sync::Arc::new(mcp);
     // No token and no trusted networks: listening on loopback, where whoever can connect may.
     let open = token.is_none() && trusted.is_empty();
-    let token = std::sync::Arc::new(token);
+    let (token, trusted, proxies) =
+        (std::sync::Arc::new(token), std::sync::Arc::new(trusted), std::sync::Arc::new(proxies));
     loop {
         let (stream, peer) = listener.accept().await?;
-        let trusted = open || trusted.iter().any(|n| n.contains(peer.ip()));
-        let (mcp, token) = (mcp.clone(), token.clone());
+        let (mcp, token, trusted, proxies) = (mcp.clone(), token.clone(), trusted.clone(), proxies.clone());
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
                 let (mcp, token) = (mcp.clone(), token.clone());
+                let client = client(&request, peer.ip(), &proxies);
+                let trusted = open || client.is_some_and(|ip| trusted.iter().any(|n| n.contains(ip)));
                 async move {
                     let plain = |status, text: &'static str| {
                         let mut response = Response::new(Full::new(bytes::Bytes::from(text)).boxed());
@@ -438,6 +441,21 @@ fn authorized<B>(request: &hyper::Request<B>, token: Option<&str>) -> bool {
     let sent = sent.and_then(|v| v.strip_prefix("Bearer ")).unwrap_or_default();
     // Compares every byte, so the time taken doesn't tell how much of a guess was right.
     sent.len() == token.len() && sent.bytes().zip(token.bytes()).fold(0, |diff, (a, b)| diff | (a ^ b)) == 0
+}
+
+/// Where a request comes from: the connection's address or, from one of `proxies`, the address the proxy
+/// got it from, which it appends to `X-Forwarded-For`. Entries further left are whatever the client claimed,
+/// so only a chain of proxies is followed. `None` when a proxy's entry can't be read.
+fn client<B>(request: &hyper::Request<B>, peer: std::net::IpAddr, proxies: &[Network]) -> Option<std::net::IpAddr> {
+    let headers = request.headers().get_all("x-forwarded-for");
+    let forwarded: Vec<&str> = headers.iter().filter_map(|v| v.to_str().ok()).flat_map(|v| v.split(',')).collect();
+    let mut forwarded = forwarded.into_iter().rev().map(str::trim);
+    let mut ip = peer;
+    while proxies.iter().any(|p| p.contains(ip)) {
+        let Some(from) = forwarded.next() else { break };
+        ip = from.parse().or_else(|_| from.parse::<std::net::SocketAddr>().map(|a| a.ip())).ok()?;
+    }
+    Some(ip)
 }
 
 /// A network whose clients need no token, like `100.64.0.0/10`; a bare address is just that address.
@@ -480,7 +498,7 @@ impl Network {
 
 #[cfg(test)]
 mod tests {
-    use super::Network;
+    use super::{Network, client};
 
     #[test]
     fn networks() {
@@ -497,5 +515,25 @@ mod tests {
         for wrong in ["100.64.0.0/33", "::/129", "tailscale", "10.0.0.0/x", ""] {
             assert!(wrong.parse::<Network>().is_err(), "{wrong}");
         }
+    }
+
+    #[test]
+    fn behind_a_proxy() {
+        let proxies = ["172.18.0.0/16".parse().unwrap()];
+        let from = |peer: &str, forwarded: &[&str]| {
+            let mut request = hyper::Request::new(());
+            for f in forwarded {
+                request.headers_mut().append("x-forwarded-for", f.parse().unwrap());
+            }
+            client(&request, peer.parse().unwrap(), &proxies).map(|ip| ip.to_string())
+        };
+        let ip = |ip: &str| Some(ip.to_string());
+        assert_eq!(from("172.18.0.2", &["100.99.1.2"]), ip("100.99.1.2"));
+        assert_eq!(from("172.18.0.2", &["100.99.1.2, 8.8.8.8"]), ip("8.8.8.8"), "the client claimed the first");
+        assert_eq!(from("172.18.0.2", &["100.99.1.2", "172.18.0.3"]), ip("100.99.1.2"), "two proxies");
+        assert_eq!(from("172.18.0.2", &["[2001:db8::1]:443"]), ip("2001:db8::1"));
+        assert_eq!(from("172.18.0.2", &[]), ip("172.18.0.2"), "the proxy itself");
+        assert_eq!(from("172.18.0.2", &["nonsense"]), None);
+        assert_eq!(from("129.217.143.136", &["100.99.1.2"]), ip("129.217.143.136"), "not a proxy: ignored");
     }
 }

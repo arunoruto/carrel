@@ -17,8 +17,11 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
         Some(token) => Some(token.trim().to_string()),
         None => config.serve.token.as_ref().map(|t| t.read()).transpose()?,
     };
-    let trusted: Vec<crate::mcp::Network> =
-        config.serve.trusted.iter().map(|n| n.parse()).collect::<Result<_>>().context("in [serve] trusted")?;
+    let networks = |list: &[String], name| -> Result<Vec<crate::mcp::Network>> {
+        list.iter().map(|n| n.parse()).collect::<Result<_>>().with_context(|| format!("in [serve] {name}"))
+    };
+    let trusted = networks(&config.serve.trusted, "trusted")?;
+    let proxies = networks(&config.serve.proxies, "proxies")?;
     if token.is_none() && trusted.is_empty() && !addr.ip().is_loopback() {
         bail!(
             "the library would be open to anyone on the network; set CARREL_SERVE_TOKEN or [serve] token, \
@@ -39,7 +42,7 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
             log(&format!("no token needed from {}", config.serve.trusted.join(", ")));
         }
         tokio::select! {
-            served = crate::mcp::serve_http(lib, listener, token, trusted) => served,
+            served = crate::mcp::serve_http(lib, listener, token, trusted, proxies) => served,
             () = stopped() => {
                 log("stopping");
                 Ok(())
