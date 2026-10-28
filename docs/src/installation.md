@@ -49,6 +49,14 @@ or as a flake input, using its package or overlay:
 
 The Nix package comes with its text extractor (Python with pymupdf4llm from nixpkgs), so nothing is downloaded at runtime and extraction works offline.
 
+## Docker
+
+For a server, the image `ghcr.io/arunoruto/carrel` runs [`carrel serve`](server.md) and comes with the extractor:
+
+```sh
+docker run --rm -it -v ~/Documents/carrel:/library ghcr.io/arunoruto/carrel:latest list
+```
+
 ## With Cargo
 
 ```sh

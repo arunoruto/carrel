@@ -1,4 +1,5 @@
 mod mcp;
+mod serve;
 mod theme;
 mod tui;
 
@@ -189,6 +190,16 @@ enum Cmd {
     Rm { id: String },
     /// Serve the library to AI assistants over MCP (stdio)
     Mcp,
+    /// Run the library on a server: MCP over HTTP at /mcp, plus syncing, extraction and reference
+    /// lookups every few minutes
+    Serve {
+        /// Address to listen on [default: the config's, else 127.0.0.1:8080]
+        #[arg(long)]
+        listen: Option<String>,
+        /// Minutes between rounds of background work [default: the config's, else 5]
+        #[arg(long)]
+        every: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -506,6 +517,7 @@ fn main() -> Result<()> {
             println!("tokens:  {}", if found.is_empty() { "none".into() } else { found.join(", ") });
         }
         Cmd::Rm { id } => lib.remove(&id)?,
+        Cmd::Serve { listen, every } => serve::run(lib, listen, every)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
     }
     Ok(())

@@ -291,3 +291,50 @@ fn graph() {
     assert_eq!(c.run(&["refs"]).status.code(), Some(2), "an id or --all");
     assert_eq!(c.run(&["graph", "a", "--dot"]).status.code(), Some(2));
 }
+
+#[test]
+fn serving_over_http() {
+    use std::io::{BufRead, BufReader};
+    let c = Carrel::new("cli-serve");
+    let open = c.command(&["serve", "--listen", "0.0.0.0:0"]).env_remove("CARREL_SERVE_TOKEN").output().unwrap();
+    assert!(String::from_utf8_lossy(&open.stderr).contains("open to anyone"), "no token, no network");
+
+    let mut server = c
+        .command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"])
+        .env("CARREL_SERVE_TOKEN", "s3cret")
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
+    let serving = lines.find_map(|l| l.ok().filter(|l| l.contains("serving"))).expect("the server starts");
+    let url = serving.split_whitespace().last().unwrap().trim_end_matches("/mcp").to_string();
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .build()
+        .into();
+    let mut health = agent.get(&format!("{url}/health")).call().unwrap();
+    assert_eq!((health.status().as_u16(), health.body_mut().read_to_string().unwrap()), (200, "ok\n".into()));
+    let initialize = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
+    let post = |token: &str| {
+        agent
+            .post(&format!("{url}/mcp"))
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .send(initialize)
+            .unwrap()
+    };
+    assert_eq!(post("wrong").status().as_u16(), 401);
+    assert_eq!(agent.get(&format!("{url}/mcp")).call().unwrap().status().as_u16(), 401, "no token");
+    let mut ok = post("s3cret");
+    assert_eq!(ok.status().as_u16(), 200);
+    let body = ok.body_mut().read_to_string().unwrap();
+    assert!(body.contains("\"name\":\"carrel\""), "{body}");
+    // SIGTERM, as from `docker stop`, stops it at once.
+    unsafe { libc::kill(server.id() as i32, libc::SIGTERM) };
+    let started = std::time::Instant::now();
+    assert!(server.wait().unwrap().success());
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}

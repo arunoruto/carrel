@@ -178,6 +178,21 @@ pub struct Config {
     pub tokens: Tokens,
     /// Where the library is shared, see [`remote`].
     pub remote: Option<remote::RemoteConfig>,
+    /// `carrel serve`'s settings.
+    #[serde(default)]
+    pub serve: Serve,
+}
+
+/// `carrel serve`'s settings; its command-line flags override them.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Serve {
+    /// The address to listen on, `127.0.0.1:8080` by default.
+    pub listen: Option<String>,
+    /// The token clients must send (`Authorization: Bearer ...`); `CARREL_SERVE_TOKEN` overrides it.
+    pub token: Option<Secret>,
+    /// Minutes between rounds of syncing and background work, 5 by default.
+    pub every: Option<u64>,
 }
 
 /// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.

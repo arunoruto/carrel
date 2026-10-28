@@ -33,5 +33,6 @@ Run `carrel <command> --help` for every option.
 | `doctor [--all] [--json]` | [check the library](maintenance.md) |
 | `rm <id>` | delete a paper and its files |
 | `sync [-n] [--keep local\|remote]` | [share the library](sharing.md) through the config's remote |
+| `serve [--listen addr] [--every minutes]` | [run the library on a server](server.md): MCP over HTTP, syncing and background work |
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](ai.md) on stdin/stdout |

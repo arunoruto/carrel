@@ -52,3 +52,6 @@ jobs:
       # Builds the package and runs its tests in the Nix sandbox.
       - run: nix build --print-build-logs
       - run: nix develop --command cargo --version
+      # The NixOS module in a VM: the service starts, answers and keeps strangers out.
+      - if: matrix.os == 'ubuntu-latest'
+        run: nix build --print-build-logs .#checks.x86_64-linux.module

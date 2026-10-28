@@ -14,6 +14,7 @@
 - [The TUI](tui.md)
 - [Keeping the library healthy](maintenance.md)
 - [Sharing a library](sharing.md)
+- [Running a server](server.md)
 
 # Reference
 

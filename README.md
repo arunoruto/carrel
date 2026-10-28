@@ -12,6 +12,7 @@ A research paper library for you and your AI. *(A carrel is the private study de
 - **AI writes drafts, you decide**: proposed summaries, keywords and notes wait for your approval.
 - **Projects** whose bibliographies follow the citations in your LaTeX or Typst files.
 - **Full-text search**, **citation graphs**, a **TUI**, and a health check (`carrel doctor`).
+- **Shared by a group**: `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder, and `carrel serve` on a server (Docker image or NixOS module) for MCP over HTTP and background work.
 
 **Documentation: <https://arunoruto.github.io/carrel>**
 

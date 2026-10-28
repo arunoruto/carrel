@@ -11,6 +11,7 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 
 # [tokens]   API tokens, see below
 # [remote]   where the library is shared, see Sharing a library
+# [serve]    carrel serve's settings, see Running a server
 ```
 
 ## What `carrel` alone does
@@ -56,6 +57,17 @@ For *He, Zhang, Ren and Sun (2016), Deep Residual Learning for Image Recognition
 
 The default runs pymupdf4llm through uv; the Nix package uses pymupdf4llm from nixpkgs instead. A wrapper around [docling](https://github.com/docling-project/docling) or [marker](https://github.com/datalab-to/marker) works too, for instance.
 
+## The server
+
+`[serve]` holds [`carrel serve`](server.md)'s settings; its flags override them:
+
+```toml
+[serve]
+listen = "0.0.0.0:8080"   # 127.0.0.1:8080 by default
+every = 5                 # minutes between rounds of syncing and background work
+token = { file = "/run/secrets/carrel-token" }   # what clients must send; CARREL_SERVE_TOKEN overrides it
+```
+
 ## API tokens
 
 Tokens for ADS, Semantic Scholar and OpenAlex can go in the config instead of [environment variables](#environment-variables), either written out or kept in a file of their own (a password manager or agenix/sops can write that file):
@@ -79,4 +91,5 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
 | `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](sharing.md)'s settings |
+| `CARREL_SERVE_TOKEN` | the token [`carrel serve`](server.md)'s clients must send |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |

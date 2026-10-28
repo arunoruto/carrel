@@ -379,3 +379,55 @@ pub async fn serve(lib: Library) -> anyhow::Result<()> {
     server.waiting().await?;
     Ok(())
 }
+
+/// Serves MCP at `/mcp` over HTTP, to clients sending `token` (if any), and `/health` to anyone.
+pub async fn serve_http(lib: Library, listener: tokio::net::TcpListener, token: Option<String>) -> anyhow::Result<()> {
+    use http_body_util::{BodyExt, Full};
+    use hyper::{Response, StatusCode};
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+
+    // The token, not the Host header, keeps others out, so the server can sit behind any name.
+    let config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+    let mcp = StreamableHttpService::new(move || Ok(Server { lib: lib.clone() }), Default::default(), config);
+    let mcp: std::sync::Arc<StreamableHttpService<Server, LocalSessionManager>> = std::sync::Arc::new(mcp);
+    let token = std::sync::Arc::new(token);
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let (mcp, token) = (mcp.clone(), token.clone());
+        tokio::spawn(async move {
+            let service = hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+                let (mcp, token) = (mcp.clone(), token.clone());
+                async move {
+                    let plain = |status, text: &'static str| {
+                        let mut response = Response::new(Full::new(bytes::Bytes::from(text)).boxed());
+                        *response.status_mut() = status;
+                        response
+                    };
+                    let path = request.uri().path();
+                    let response = if path == "/health" {
+                        plain(StatusCode::OK, "ok\n")
+                    } else if !authorized(&request, token.as_deref()) {
+                        plain(StatusCode::UNAUTHORIZED, "send the server's token: Authorization: Bearer <token>\n")
+                    } else if path == "/mcp" || path.starts_with("/mcp/") {
+                        mcp.handle(request).await
+                    } else {
+                        plain(StatusCode::NOT_FOUND, "carrel serves MCP at /mcp\n")
+                    };
+                    Ok::<_, std::convert::Infallible>(response)
+                }
+            });
+            let io = hyper_util::rt::TokioIo::new(stream);
+            let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, service).await;
+        });
+    }
+}
+
+fn authorized<B>(request: &hyper::Request<B>, token: Option<&str>) -> bool {
+    let Some(token) = token else { return true };
+    let sent = request.headers().get("authorization").and_then(|v| v.to_str().ok());
+    let sent = sent.and_then(|v| v.strip_prefix("Bearer ")).unwrap_or_default();
+    // Compares every byte, so the time taken doesn't tell how much of a guess was right.
+    sent.len() == token.len() && sent.bytes().zip(token.bytes()).fold(0, |diff, (a, b)| diff | (a ^ b)) == 0
+}
