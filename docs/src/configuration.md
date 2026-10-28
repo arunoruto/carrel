@@ -6,7 +6,15 @@ Settings live in `~/.config/carrel/config.toml` (or `$XDG_CONFIG_HOME/carrel/con
 library = "~/Documents/carrel"
 key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # extractor = "..."
+# default = "tui"
+# theme = "catppuccin-mocha"
 ```
+
+## What `carrel` alone does
+
+`default` is what running `carrel` without a command does, written as its arguments: `tui` (the default) opens the [TUI](tui.md), `list -p thesis` lists a project, `search` with a query… Arguments are split on spaces; quotes aren't understood.
+
+`theme` picks the TUI's colours ([themes](tui.md#themes)).
 
 ## The library
 

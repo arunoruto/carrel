@@ -1,0 +1,17 @@
+# carrel theme: Catppuccin Mocha (built in; copy this file to ~/.config/carrel/themes/<name>.toml and
+# set `theme = "<name>"` in config.toml to make your own). Tapedeck themes work unchanged.
+# Colours are "#rrggbb", or terminal names like "blue", "lightred", "gray".
+name = "Catppuccin Mocha"
+
+text = "#cdd6f4"          # normal text
+muted = "#6c7086"         # key hints, counts, secondary text
+accent = "#89b4fa"        # focused pane border, active tab, keys
+border = "#45475a"        # unfocused pane borders
+title = "#b4befe"         # pane titles, labels
+selection_bg = "#313244"  # highlighted row
+selection_fg = "#f5e0dc"
+ready = "#a6e3a1"         # paper status: text extracted, an AI can read it
+failed = "#f38ba8"        #   a PDF whose text couldn't be extracted
+wanted = "#f9e2af"        #   no PDF yet
+warning = "#fab387"       # drafts waiting, confirmations, messages
+stripes = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#89b4fa", "#cba6f7"]   # the book spines in the logo

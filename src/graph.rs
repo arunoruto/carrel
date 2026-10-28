@@ -141,7 +141,7 @@ pub struct Neighbors {
 }
 
 /// A paper missing from the library, with the library papers citing it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
     #[serde(flatten)]
     pub reference: Reference,

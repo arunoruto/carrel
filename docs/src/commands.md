@@ -4,7 +4,8 @@ Run `carrel <command> --help` for every option.
 
 | Command | What it does |
 |---|---|
-| `carrel` | the [TUI](tui.md) |
+| `carrel` | the config's `default`: the [TUI](tui.md) unless set |
+| `tui` | the [TUI](tui.md) |
 | `add <source>…` | add papers by PDF, DOI, arXiv id/URL or exact title |
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |

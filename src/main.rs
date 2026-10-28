@@ -1,4 +1,5 @@
 mod mcp;
+mod theme;
 mod tui;
 
 use anyhow::{Context, Result, bail};
@@ -8,7 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// A paper library for you and your AI. Run without a command to open the TUI.
+/// A paper library for you and your AI. Without a command it runs the config's `default`, the TUI unless set.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -18,6 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// The terminal UI: browse, filter and manage the library, the citation graph, people and drafts
+    Tui,
     /// Add papers by PDF file, DOI, arXiv id/URL or exact title
     Add {
         #[arg(required = true)]
@@ -224,10 +227,21 @@ enum ProjectCmd {
 fn main() -> Result<()> {
     // Rust ignores SIGPIPE, so `carrel list | head` would panic; die quietly like other Unix tools.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
-    let cli = Cli::parse();
+    let cmd = match Cli::parse().cmd {
+        Some(cmd) => cmd,
+        // `default = "list -p thesis"` in the config: words split on spaces, no quoting.
+        None => match Config::load()?.default.filter(|d| !d.trim().is_empty()) {
+            Some(default) => {
+                let args = std::iter::once("carrel").chain(default.split_whitespace());
+                let cli = Cli::try_parse_from(args).with_context(|| format!("the config's default {default:?}"))?;
+                cli.cmd.unwrap_or(Cmd::Tui)
+            }
+            None => Cmd::Tui,
+        },
+    };
     let lib = Library::open_default()?;
-    let Some(cmd) = cli.cmd else { return tui::run(lib) };
     match cmd {
+        Cmd::Tui => tui::run(lib)?,
         Cmd::Add { sources } => {
             let mut failed = 0;
             for source in &sources {
@@ -369,7 +383,8 @@ fn main() -> Result<()> {
                 let with: Vec<String> = p.coauthors.iter().map(|(name, n)| format!("{name} ({n})")).collect();
                 println!("  co-authors: {}", list(&with));
                 if !p.maybe.is_empty() {
-                    println!("  maybe also: {}  [no co-author or first name in common]", p.maybe.join("; "));
+                    let maybe: Vec<String> = p.maybe.iter().map(|m| m.to_string()).collect();
+                    println!("  maybe also: {}  [no co-author or first name in common]", maybe.join("; "));
                 }
             }
         }
@@ -470,6 +485,7 @@ fn main() -> Result<()> {
             println!("library: {}", lib.root.display());
             println!("key:     {}", lib.key);
             println!("index:   {}", lib.index.display());
+            println!("theme:   {}", theme::Theme::configured()?.name);
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,

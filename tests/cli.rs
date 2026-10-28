@@ -133,6 +133,12 @@ fn config_file() {
     assert_eq!(read(c.tmp.path("lib/paper-graphtheory/fulltext.md")), "from the config", "the config's extractor ran");
     assert!(c.ok(&["config"]).contains("paper-{{ word }}"));
 
+    c.tmp.write("config/carrel/config.toml", "default = \"list --json\"\n");
+    assert!(c.ok(&[]).trim_start().starts_with('['), "carrel alone runs the default");
+    c.tmp.write("config/carrel/config.toml", "default = \"frobnicate\"\n");
+    assert!(c.fails(&[]).contains("the config's default \"frobnicate\""));
+    c.tmp.write("config/carrel/config.toml", "theme = \"nope\"\n");
+    assert!(c.fails(&["config"]).contains("no theme \"nope\""));
     c.tmp.write("config/carrel/config.toml", "keys = \"typo\"\n");
     assert!(c.fails(&["list"]).contains("config.toml is invalid"));
     c.tmp.write("config/carrel/config.toml", "key = \"{{ year \"\n");

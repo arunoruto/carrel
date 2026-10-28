@@ -167,6 +167,11 @@ pub struct Config {
     /// Shell command that turns `$PDF` into `fulltext.md` (and `figures/`) in the current directory.
     /// `CARREL_EXTRACTOR` overrides it.
     pub extractor: Option<String>,
+    /// What `carrel` without arguments runs, as its arguments: `tui` (the default), `list -p thesis`, ...
+    pub default: Option<String>,
+    /// The TUI's colours: a built-in theme (`catppuccin-mocha`, `catppuccin-latte`) or
+    /// `<config dir>/carrel/themes/<name>.toml`.
+    pub theme: Option<String>,
 }
 
 impl Config {
