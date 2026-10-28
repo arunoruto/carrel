@@ -4,6 +4,7 @@
 use carrel::Library;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A temporary folder, deleted when dropped, also when a test fails.
@@ -11,8 +12,11 @@ pub struct Tmp(pub PathBuf);
 
 impl Tmp {
     pub fn new(name: &str) -> Self {
+        // The count tells apart tests starting at once: macOS clocks only tick in microseconds.
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+        let n = COUNT.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("carrel-{name}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("carrel-{name}-{}-{nanos}-{n}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }

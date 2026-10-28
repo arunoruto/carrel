@@ -785,8 +785,12 @@ struct Staging(PathBuf);
 
 impl Staging {
     fn new(root: &Path) -> Result<Self> {
+        // The count tells apart folders made at once (`carrel serve` works on several papers at a time),
+        // also where clocks only tick in microseconds.
+        static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let dir = root.join(".tmp").join(format!("{}-{nanos}", std::process::id()));
+        let dir = root.join(".tmp").join(format!("{}-{nanos}-{n}", std::process::id()));
         fs::create_dir_all(&dir)?;
         Ok(Self(dir))
     }
