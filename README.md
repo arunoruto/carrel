@@ -59,7 +59,7 @@
 - **AI writes drafts, you decide**: proposed summaries, keywords and notes wait for your approval.
 - **Projects** whose bibliographies follow the citations in your LaTeX or Typst files.
 - **Full-text search** with field filters, and **semantic search** by meaning, with embeddings from [Ollama](https://ollama.com) (bge-m3 or a model you pick).
-- **Picks papers up from Downloads** (`carrel consume`), asking first, or watching the folder with the Home Manager module and emailing you what it found.
+- **Picks papers up from Downloads** (`carrel consume`), asking first, or watching the folder with the Home Manager module and telling you what it found, on the desktop, by email or on Telegram.
 - **A web UI** (`carrel web`) with a built-in PDF reader, a **TUI**, citation graphs, and a health check (`carrel doctor`).
 - **Shared by a group**: `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder, and `carrel serve` on a server (Docker image or NixOS module) for MCP over HTTP and background work.
 

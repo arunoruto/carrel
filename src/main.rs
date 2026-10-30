@@ -600,7 +600,9 @@ fn main() -> Result<()> {
             let config = Config::load()?.notify;
             let notifiers = carrel::notify::notifiers(&config);
             if notifiers.is_empty() {
-                bail!("no notifiers; add [notify.email] to the config");
+                bail!(
+                    "no notifiers; add [notify.email], [notify.telegram] or `desktop = true` under [notify] to the config"
+                );
             }
             let failed = carrel::notify::send(&config, "carrel", &format!("{message}\n"));
             for n in &notifiers {

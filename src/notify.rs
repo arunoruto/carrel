@@ -1,5 +1,5 @@
 //! Telling the user what carrel did while they weren't looking: papers it found or added, a server that
-//! can't reach Ollama. Each way of telling is a [`Notifier`]; email is the first.
+//! can't reach Ollama. Each way of telling is a [`Notifier`]: email, the desktop's notifications, Telegram.
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -13,6 +13,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub email: Option<Email>,
+    /// A notification on this computer's desktop: `notify-send` on Linux, Notification Center on macOS.
+    #[serde(default)]
+    pub desktop: bool,
+    pub telegram: Option<Telegram>,
 }
 
 /// Mail through an SMTP server that takes it without login or TLS, like a university's internal relay.
@@ -25,6 +29,30 @@ pub struct Email {
     pub to: String,
 }
 
+/// A message from a Telegram bot: make one with @BotFather, send it a message, and its token and your chat id
+/// (from `https://api.telegram.org/bot<token>/getUpdates`) go here.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Telegram {
+    pub token: crate::Secret,
+    /// Your chat's number, or `@name` for a public channel.
+    pub chat_id: ChatId,
+    /// A self-hosted Bot API server instead of api.telegram.org.
+    #[serde(default = "telegram_api")]
+    pub api: String,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(untagged)]
+pub enum ChatId {
+    Number(i64),
+    Name(String),
+}
+
+fn telegram_api() -> String {
+    "https://api.telegram.org".into()
+}
+
 pub trait Notifier {
     /// What and where, for messages: `email to x@y.org`.
     fn name(&self) -> String;
@@ -33,7 +61,17 @@ pub trait Notifier {
 
 /// The notifiers the config sets up.
 pub fn notifiers(config: &Config) -> Vec<Box<dyn Notifier>> {
-    config.email.iter().map(|e| Box::new(e.clone()) as Box<dyn Notifier>).collect()
+    let mut all: Vec<Box<dyn Notifier>> = vec![];
+    if let Some(email) = &config.email {
+        all.push(Box::new(email.clone()));
+    }
+    if config.desktop {
+        all.push(Box::new(Desktop));
+    }
+    if let Some(telegram) = &config.telegram {
+        all.push(Box::new(telegram.clone()));
+    }
+    all
 }
 
 /// Tell through every notifier; the ones that fail are returned with why.
@@ -65,6 +103,94 @@ impl Notifier for Email {
         smtp.expect(None, 250)?;
         let _ = smtp.expect(Some("QUIT"), 221);
         Ok(())
+    }
+}
+
+pub struct Desktop;
+
+impl Notifier for Desktop {
+    fn name(&self) -> String {
+        "desktop".into()
+    }
+
+    fn send(&self, subject: &str, body: &str) -> Result<()> {
+        use std::process::Command;
+        // Text goes as arguments, never into a script, so nothing in a paper's title can run.
+        let commands: Vec<Command> = match cfg!(target_os = "macos") {
+            true => {
+                let mut c = Command::new("osascript");
+                let script = "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run";
+                c.args(["-e", script, subject, body]);
+                vec![c]
+            }
+            false => {
+                // The notification service over D-Bus: busctl comes with systemd, notify-send often isn't installed.
+                let mut busctl = Command::new("busctl");
+                busctl.args([
+                    "--user",
+                    "call",
+                    "--",
+                    "org.freedesktop.Notifications",
+                    "/org/freedesktop/Notifications",
+                ]);
+                busctl.args(["org.freedesktop.Notifications", "Notify", "susssasa{sv}i", "carrel", "0"]);
+                busctl.args(["accessories-dictionary", subject, body, "0", "0", "-1"]);
+                let mut notify_send = Command::new("notify-send");
+                notify_send.args(["--app-name=carrel", "--icon=accessories-dictionary", "--", subject, body]);
+                vec![busctl, notify_send]
+            }
+        };
+        let mut why = vec![];
+        for mut command in commands {
+            let program = command.get_program().to_string_lossy().into_owned();
+            match command.output() {
+                Ok(output) if output.status.success() => return Ok(()),
+                Ok(output) => why.push(format!("{program} failed: {}", String::from_utf8_lossy(&output.stderr).trim())),
+                Err(e) => why.push(format!("cannot run {program}: {e}")),
+            }
+        }
+        bail!("{}", why.join("; "))
+    }
+}
+
+impl Notifier for Telegram {
+    fn name(&self) -> String {
+        match &self.chat_id {
+            ChatId::Number(n) => format!("telegram to {n}"),
+            ChatId::Name(name) => format!("telegram to {name}"),
+        }
+    }
+
+    fn send(&self, subject: &str, body: &str) -> Result<()> {
+        let token = self.token.read()?;
+        let url = format!("{}/bot{token}/sendMessage", self.api.trim_end_matches('/'));
+        // Plain text: no parse mode, so titles with `_` or `<` arrive as written. Telegram takes 4096 characters.
+        let text: String = format!("{subject}\n\n{}", body.trim_end()).chars().take(4096).collect();
+        let message =
+            serde_json::json!({"chat_id": self.chat_id, "text": text, "link_preview_options": {"is_disabled": true}});
+        for attempt in 0..2 {
+            let response = crate::fetch::agent()
+                .post(&url)
+                .config()
+                .http_status_as_error(false)
+                .build()
+                .send_json(&message)
+                // ureq's errors name the URL, which holds the token.
+                .map_err(|e| anyhow::anyhow!("cannot reach {}: {}", self.api, e.to_string().replace(&token, "…")))?;
+            let status = response.status().as_u16();
+            let reply: serde_json::Value = response.into_body().read_json().unwrap_or_default();
+            if reply["ok"] == true {
+                return Ok(());
+            }
+            let wait = reply["parameters"]["retry_after"].as_u64();
+            if status == 429 && attempt == 0 && wait.is_some_and(|s| s <= 30) {
+                std::thread::sleep(Duration::from_secs(wait.unwrap_or(1)));
+                continue;
+            }
+            let why = reply["description"].as_str().unwrap_or("no reason given").replace(&token, "…");
+            bail!("Telegram refused the message ({status}): {why}");
+        }
+        unreachable!("the loop returns")
     }
 }
 
@@ -159,6 +285,75 @@ fn hostname() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    /// A Bot API that answers each request with the next of `replies`, and hands back what it was sent.
+    fn fake_telegram(replies: Vec<(u16, &'static str)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let api = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut requests = vec![];
+            for (status, reply) in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let (mut head, mut length) = (String::new(), 0);
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if let Some(n) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = n.trim().parse().unwrap();
+                    }
+                    head.push_str(&line);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                requests.push(head + &String::from_utf8(body).unwrap());
+                let response = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+            requests
+        });
+        (api, server)
+    }
+
+    fn bot(api: String) -> Telegram {
+        Telegram { token: crate::Secret::Value("123:SECRET".into()), chat_id: ChatId::Number(42), api }
+    }
+
+    #[test]
+    fn telegram() {
+        let (api, server) = fake_telegram(vec![
+            (429, r#"{"ok":false,"description":"Too Many Requests","parameters":{"retry_after":0}}"#),
+            (200, r#"{"ok":true,"result":{}}"#),
+        ]);
+        bot(api).send("2 new papers", &format!("{}\n", "x".repeat(5000))).unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2, "retried after 429");
+        assert!(requests[1].starts_with("POST /bot123:SECRET/sendMessage "));
+        let body: serde_json::Value = serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["chat_id"], 42);
+        let text = body["text"].as_str().unwrap();
+        assert!(text.starts_with("2 new papers\n\nxxx") && text.chars().count() == 4096, "cut to Telegram's limit");
+
+        let (api, server) = fake_telegram(vec![(401, r#"{"ok":false,"description":"Unauthorized for 123:SECRET"}"#)]);
+        let error = format!("{:#}", bot(api).send("s", "b").unwrap_err());
+        server.join().unwrap();
+        assert!(error.contains("Unauthorized") && !error.contains("SECRET"), "{error}");
+
+        let error = format!("{:#}", bot("http://127.0.0.1:9".into()).send("s", "b").unwrap_err());
+        assert!(!error.contains("SECRET"), "{error}");
+
+        let config: Config =
+            toml::from_str("desktop = true\n[telegram]\ntoken = { file = \"/t\" }\nchat_id = \"@chan\"").unwrap();
+        let names: Vec<String> = notifiers(&config).iter().map(|n| n.name()).collect();
+        assert_eq!(names, ["desktop", "telegram to @chan"]);
+    }
 
     #[test]
     fn dates() {

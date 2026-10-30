@@ -77,14 +77,23 @@ See [Networks without a token](server.md#networks-without-a-token) before trusti
 
 ## Notifications
 
-carrel tells you what it did while you weren't looking: PDFs that `carrel consume` found in your [Downloads](adding-papers.md#from-your-downloads) or added from there when run from a timer, and a [server](server.md) that can't reach Ollama. A server never mails you about papers others dropped in its folder. For now by email, through a mail server that takes mail without login or TLS, as many university relays do on their own network:
+carrel tells you what it did while you weren't looking: PDFs that `carrel consume` found in your [Downloads](adding-papers.md#from-your-downloads) or added from there when run from a timer, and a [server](server.md) that can't reach Ollama. A server never tells you about papers others dropped in its folder. Use any of these, or several:
 
 ```toml
-[notify.email]
+[notify]
+desktop = true   # a notification on this computer: over D-Bus on Linux, Notification Center on macOS
+
+[notify.email]   # through a mail server that takes mail without login or TLS, as many university relays do
 server = "unimail.tu-dortmund.de:25"   # port 25 when left out
 from = "you@tu-dortmund.de"
 to = "you@tu-dortmund.de"
+
+[notify.telegram]
+token = { file = "~/.config/carrel/telegram-token" }   # or the token written out
+chat_id = 123456789                                    # or "@channel" for a public channel
 ```
+
+For Telegram, make a bot by messaging [@BotFather](https://t.me/BotFather), which gives you its token. Send your bot any message, then open `https://api.telegram.org/bot<token>/getUpdates`: the number after `"chat":{"id":` is your `chat_id`. Messages go as plain text, cut at Telegram's 4096 characters; `api = "https://…"` points at a self-hosted Bot API server instead.
 
 `carrel notify` sends a test message.
 

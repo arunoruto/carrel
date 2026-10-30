@@ -227,7 +227,7 @@ pub struct Tokens {
 }
 
 /// A secret, written in the config or kept in a file of its own.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Secret {
     Value(String),
