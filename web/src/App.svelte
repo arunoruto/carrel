@@ -43,7 +43,7 @@
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto">
         {#if router.parts[0] === 'paper' && router.parts[1]}
-          <Paper id={router.parts[1]} />
+          <Paper id={router.parts[1]} reading={router.parts[2] === 'read'} />
         {:else if router.path === '/inbox'}
           <Inbox />
         {:else if router.path === '/drafts'}

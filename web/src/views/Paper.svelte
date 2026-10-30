@@ -9,14 +9,15 @@
   import Dialog from '../lib/components/Dialog.svelte';
   import Spinner from '../lib/components/Spinner.svelte';
   import Status from '../lib/components/Status.svelte';
-  import { markdown } from '../lib/markdown';
-  import { go, router } from '../lib/router.svelte';
+  import { byline, markdown } from '../lib/markdown';
+  import { go, paperHref, router } from '../lib/router.svelte';
   import { tick } from 'svelte';
   import { app } from '../lib/state.svelte';
   import { toasts } from '../lib/toast.svelte';
   import References from './References.svelte';
 
-  let { id }: { id: string } = $props();
+  // `reading`: the PDF over the whole area, at #/paper/<id>/read.
+  let { id, reading = false }: { id: string; reading?: boolean } = $props();
 
   let paper = $state<Paper | null>(null);
   let error = $state('');
@@ -30,6 +31,8 @@
   let fulltext = $state<string | null>(null);
   let fullShown = $state(150_000);
   let copied = $state(false);
+  let notesOpen = $state(false);
+  let allAuthors = $state(false);
   let pdfPicker: HTMLInputElement;
   let suppPicker: HTMLInputElement;
 
@@ -53,6 +56,7 @@
     fullShown = 150_000;
     tab = at !== null ? 'text' : 'overview';
     editingNotes = false;
+    allAuthors = false;
     load();
   });
 
@@ -168,89 +172,124 @@
   <div class="flex h-full items-center justify-center"><Spinner class="size-6 text-faint" /></div>
 {:else}
   {@const p = paper}
-  <div class="flex h-full flex-col">
-    <header class="border-b bg-card/50 px-6 py-4 lg:px-8">
-      <div class="flex items-center gap-2 text-sm text-muted">
-        <button class="flex cursor-pointer items-center gap-1 hover:text-foreground" onclick={() => history.back()}><ArrowLeft class="size-4" />Back</button>
-        <span class="text-faint">/</span>
-        <span class="font-mono text-xs">{p.id}</span>
-        <div class="ml-1 flex gap-1"><Status pdf={p.pdf} text={p.text} drafts={Object.keys(p.drafts)} /></div>
-      </div>
-      <div class="mt-2 flex flex-wrap items-start justify-between gap-4">
-        <div class="min-w-0 flex-1">
-          <h1 class="text-xl leading-snug font-semibold tracking-tight lg:text-2xl">{p.title}</h1>
-          <p class="mt-1.5 text-sm text-muted">{p.authors.join(', ')}</p>
-          <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-            {#if p.venue}<span class="italic text-muted">{p.venue}</span>{/if}
-            {#if p.year}<span class="text-muted">{p.year}</span>{/if}
-            {#if p.doi}<a class="flex items-center gap-1 text-accent hover:underline" href="https://doi.org/{p.doi}" target="_blank" rel="noreferrer">doi:{p.doi}<ExternalLink class="size-3" /></a>{/if}
-            {#if p.arxiv}<a class="flex items-center gap-1 text-accent hover:underline" href="https://arxiv.org/abs/{p.arxiv}" target="_blank" rel="noreferrer">arXiv:{p.arxiv}<ExternalLink class="size-3" /></a>{/if}
-          </p>
+  {#if reading}
+    <!-- Reading: the PDF takes the whole area next to the sidebar. -->
+    <div class="flex h-full flex-col">
+      <div class="flex h-12 shrink-0 items-center gap-2 border-b bg-card/60 px-3">
+        <a href={paperHref(id)} class="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-hover hover:text-foreground">
+          <ArrowLeft class="size-4" />Details
+        </a>
+        <div class="min-w-0 flex-1 truncate text-sm">
+          <span class="font-medium">{p.title}</span>
+          <span class="text-faint">· {byline(p)}</span>
         </div>
-        <div class="flex flex-wrap gap-2">
-          {#if p.pdf}
-            <a href={api.pdfUrl(id)} target="_blank" rel="noreferrer"><Button><ExternalLink class="size-4" />Open PDF</Button></a>
-          {/if}
-          <Button busy={busy === 'update'} onclick={() => act('update', () => api.update(id), 'Metadata updated')} title="Fetch the metadata again"><RefreshCw class="size-4" />Update</Button>
-          {#if p.pdf}
-            <Button busy={busy === 'extract'} onclick={() => act('extract', () => api.extract(id), 'Text and figures extracted')} title="Run the text extraction again"><ScanText class="size-4" />Extract</Button>
-          {/if}
-          <Button variant="ghost" size="icon" onclick={() => (removing = true)} title="Delete"><Trash2 class="size-4 text-failed" /></Button>
-        </div>
-      </div>
-    </header>
-
-    <div class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      <!-- The PDF, in the browser's own reader. -->
-      <section class="hidden min-h-0 border-r bg-hover/30 lg:block" data-own-drop>
+        <Button size="sm" variant={notesOpen ? 'outline' : 'ghost'} onclick={() => (notesOpen = !notesOpen)} title="Notes beside the PDF">
+          <NotebookPen class="size-3.5" />Notes
+        </Button>
         {#if p.pdf}
-          <iframe title="PDF of {p.title}" src="{api.pdfUrl(id)}#navpanes=0&view=FitH" class="h-full w-full"></iframe>
+          <a href={api.pdfUrl(id)} target="_blank" rel="noreferrer" title="Open in a new tab" class="rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground"><ExternalLink class="size-4" /></a>
+        {/if}
+      </div>
+      <div class="flex min-h-0 flex-1">
+        {#if p.pdf}
+          <iframe title="PDF of {p.title}" src={api.pdfUrl(id)} class="min-w-0 flex-1 bg-hover/40"></iframe>
         {:else}
-          <div
-            class="flex h-full flex-col items-center justify-center gap-4 p-10 text-center"
-            role="region"
-            ondragover={(e) => e.preventDefault()}
-            ondrop={(e) => {
-              e.preventDefault();
-              const file = e.dataTransfer?.files[0];
-              if (file) act('attach', () => api.attach(id, file), 'PDF attached');
-            }}
-          >
+          <div class="flex flex-1 flex-col items-center justify-center gap-4 p-10 text-center">
             <FileUp class="size-10 text-faint" />
-            <div>
-              <div class="font-medium">No PDF yet</div>
-              <p class="mt-1 text-sm text-muted">Drop it here, or choose the file.</p>
-            </div>
-            <div class="flex gap-2">
-              <Button variant="primary" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-4" />Attach PDF</Button>
-              {#if p.arxiv}<Button busy={busy === 'arxiv'} onclick={() => act('arxiv', () => api.attach(id), 'Downloaded from arXiv')}><Download class="size-4" />From arXiv</Button>{/if}
-            </div>
+            <div class="font-medium">No PDF yet</div>
+            <Button variant="primary" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-4" />Attach PDF</Button>
           </div>
         {/if}
-      </section>
+        {#if notesOpen}
+          <aside class="flex w-80 shrink-0 flex-col gap-3 border-l bg-card/40 p-4 2xl:w-96">
+            <div class="text-xs font-semibold tracking-wide text-faint uppercase">Notes</div>
+            <textarea
+              bind:value={notes}
+              placeholder="Your notes, in Markdown."
+              class="min-h-0 flex-1 resize-none rounded-xl border bg-card p-3 font-mono text-sm leading-relaxed outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
+              onkeydown={(e) => (e.metaKey || e.ctrlKey) && e.key === 's' && (e.preventDefault(), saveNotes())}
+            ></textarea>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-faint">Ctrl+S saves</span>
+              <Button size="sm" variant="primary" busy={busy === 'notes'} onclick={saveNotes} disabled={notes === (p.notes ?? '')}>Save</Button>
+            </div>
+          </aside>
+        {/if}
+      </div>
+    </div>
+  {:else}
+    <div class="flex h-full flex-col">
+      <header class="border-b px-6 pt-5 lg:px-10">
+        <div class="mx-auto max-w-5xl">
+          <div class="flex items-center gap-2 text-sm text-muted">
+            <button class="flex cursor-pointer items-center gap-1 hover:text-foreground" onclick={() => history.back()}><ArrowLeft class="size-4" />Back</button>
+            <span class="text-faint">/</span>
+            <span class="font-mono text-xs">{p.id}</span>
+            <div class="ml-1 flex gap-1"><Status pdf={p.pdf} text={p.text} drafts={Object.keys(p.drafts)} /></div>
+          </div>
+          <div class="mt-3 flex flex-wrap items-start gap-x-8 gap-y-4">
+            <div class="min-w-0 flex-1 basis-96">
+              <h1 class="text-2xl leading-snug font-semibold tracking-tight">{p.title}</h1>
+              <p class="mt-2 text-sm text-muted">
+                {allAuthors || p.authors.length <= 12 ? p.authors.join(', ') : `${p.authors.slice(0, 10).join(', ')}, `}
+                {#if !allAuthors && p.authors.length > 12}<button class="cursor-pointer text-accent hover:underline" onclick={() => (allAuthors = true)}>and {p.authors.length - 10} more</button>{/if}
+              </p>
+              <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+                {#if p.venue}<span class="italic">{p.venue}</span>{/if}
+                {#if p.year}<span>{p.year}</span>{/if}
+                {#if p.doi}<a class="flex items-center gap-1 text-accent hover:underline" href="https://doi.org/{p.doi}" target="_blank" rel="noreferrer">doi:{p.doi}<ExternalLink class="size-3" /></a>{/if}
+                {#if p.arxiv}<a class="flex items-center gap-1 text-accent hover:underline" href="https://arxiv.org/abs/{p.arxiv}" target="_blank" rel="noreferrer">arXiv:{p.arxiv}<ExternalLink class="size-3" /></a>{/if}
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-1">
+              {#if p.pdf}
+                <a href="{paperHref(id)}/read"><Button variant="primary"><BookOpen class="size-4" />Read</Button></a>
+              {:else}
+                <Button variant="primary" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-4" />Attach PDF</Button>
+              {/if}
+              <Button variant="ghost" size="icon" busy={busy === 'update'} onclick={() => act('update', () => api.update(id), 'Metadata updated')} title="Fetch the metadata again"><RefreshCw class="size-4" /></Button>
+              {#if p.pdf}
+                <Button variant="ghost" size="icon" busy={busy === 'extract'} onclick={() => act('extract', () => api.extract(id), 'Text and figures extracted')} title="Extract the text and figures again"><ScanText class="size-4" /></Button>
+              {/if}
+              <Button variant="ghost" size="icon" onclick={() => (removing = true)} title="Delete"><Trash2 class="size-4 text-failed" /></Button>
+            </div>
+          </div>
+          <nav class="mt-4 flex gap-1 overflow-x-auto [scrollbar-width:none]">
+            {#each tabs as t}
+              {#if !('hidden' in t && t.hidden)}
+                <button
+                  class="flex cursor-pointer items-center gap-1.5 border-b-2 px-3 pt-1.5 pb-2.5 text-sm whitespace-nowrap transition {tab === t.key ? 'border-accent font-medium text-foreground' : 'border-transparent text-muted hover:text-foreground'}"
+                  onclick={() => (tab = t.key)}
+                >
+                  <t.icon class="size-4" />{t.label}
+                  {#if 'count' in t && t.count}<span class="text-xs text-faint">{t.count}</span>{/if}
+                </button>
+              {/if}
+            {/each}
+          </nav>
+        </div>
+      </header>
 
-      <section class="flex min-h-0 flex-col">
-        <nav class="flex gap-1 overflow-x-auto border-b px-4 pt-2 [scrollbar-width:none] lg:px-6">
-          {#each tabs as t}
-            {#if !('hidden' in t && t.hidden)}
-              <button
-                class="flex cursor-pointer items-center gap-1.5 border-b-2 px-3 pt-1.5 pb-2.5 text-sm whitespace-nowrap transition {tab === t.key ? 'border-accent font-medium text-foreground' : 'border-transparent text-muted hover:text-foreground'}"
-                onclick={() => (tab = t.key)}
-              >
-                <t.icon class="size-4" />{t.label}
-                {#if 'count' in t && t.count}<span class="text-xs text-faint">{t.count}</span>{/if}
-              </button>
-            {/if}
-          {/each}
-        </nav>
-
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-5 lg:px-6">
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        <div class="mx-auto max-w-5xl px-6 py-6 lg:px-10">
           {#if tab === 'overview'}
-            <div class="space-y-6">
+            <div class="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_15rem]">
+            <div class="min-w-0 space-y-6">
               {#if !p.pdf}
-                <div class="flex flex-wrap items-center gap-3 rounded-xl border border-wanted/40 bg-wanted/10 px-4 py-3 text-sm lg:hidden">
-                  <span class="flex-1">No PDF yet.</span>
-                  <Button size="sm" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-3.5" />Attach</Button>
+                <div
+                  class="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-wanted/60 bg-wanted/10 px-4 py-3 text-sm"
+                  role="region"
+                  data-own-drop
+                  ondragover={(e) => e.preventDefault()}
+                  ondrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer?.files[0];
+                    if (file) act('attach', () => api.attach(id, file), 'PDF attached');
+                  }}
+                >
+                  <FileUp class="size-5 text-wanted" />
+                  <span class="flex-1">No PDF yet. Drop it here, or:</span>
+                  <Button size="sm" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-3.5" />Choose file</Button>
                   {#if p.arxiv}<Button size="sm" busy={busy === 'arxiv'} onclick={() => act('arxiv', () => api.attach(id), 'Downloaded from arXiv')}><Download class="size-3.5" />From arXiv</Button>{/if}
                 </div>
               {/if}
@@ -289,13 +328,18 @@
                 </section>
               {/if}
 
+              {#if !p.summary && !p.abstract && !drafts.length}
+                <p class="text-sm text-faint">No summary or abstract yet. An AI can propose a summary over MCP; it waits here for you.</p>
+              {/if}
+            </div>
+            <aside class="space-y-6 text-sm">
               <section>
                 <h2 class="mb-2 text-xs font-semibold tracking-wide text-faint uppercase">Keywords</h2>
                 <div class="flex flex-wrap items-center gap-1.5">
                   {#each p.keywords as k}
                     <span class="group inline-flex items-center gap-1 rounded-md bg-hover px-2 py-0.5 text-xs">
                       <a href="#/?q={encodeURIComponent(`keywords:"${k}"`)}" class="hover:text-accent">{k}</a>
-                      <button class="cursor-pointer text-faint opacity-0 group-hover:opacity-100 hover:text-failed" onclick={() => act('keywords', () => api.keywords(id, p.keywords.filter((x) => x !== k)))} aria-label="Remove {k}"><X class="size-3" /></button>
+                      <button class="hidden cursor-pointer text-faint group-hover:block hover:text-failed" onclick={() => act('keywords', () => api.keywords(id, p.keywords.filter((x) => x !== k)))} aria-label="Remove {k}"><X class="size-3" /></button>
                     </span>
                   {/each}
                   <form onsubmit={addKeyword}>
@@ -310,7 +354,7 @@
                   {#each p.projects as name}
                     <span class="group inline-flex items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent">
                       <Folder class="size-3" /><a href="#/?project={encodeURIComponent(name)}" class="hover:underline">{name}</a>
-                      <button class="cursor-pointer opacity-0 group-hover:opacity-100 hover:text-failed" onclick={() => act('project', () => api.toProject(id, name, false))} aria-label="Take out of {name}"><X class="size-3" /></button>
+                      <button class="hidden cursor-pointer group-hover:block hover:text-failed" onclick={() => act('project', () => api.toProject(id, name, false))} aria-label="Take out of {name}"><X class="size-3" /></button>
                     </span>
                   {/each}
                   <form onsubmit={addProject} class="flex items-center">
@@ -336,6 +380,7 @@
                   <p class="text-sm text-faint">None. Data, code or appendices go here.</p>
                 {/if}
               </section>
+            </aside>
             </div>
           {:else if tab === 'notes'}
             {#if editingNotes || !p.notes}
@@ -360,14 +405,14 @@
             {#if fulltext === null}
               <div class="flex justify-center py-10"><Spinner class="size-6 text-faint" /></div>
             {:else}
-              <div class="prose max-w-none">{@html markdown(shownText, figure)}</div>
+              <div class="prose mx-auto max-w-3xl">{@html markdown(shownText, figure)}</div>
               {@const end = Math.max(fullShown, at === null ? 0 : at + 20_000)}
               {#if fulltext.length > end}
                 <div class="mt-6 flex justify-center"><Button onclick={() => (fullShown = end + 300_000)}>Show more ({Math.round((fulltext.length - end) / 1000)}k characters left)</Button></div>
               {/if}
             {/if}
           {:else if tab === 'figures'}
-            <div class="grid grid-cols-2 gap-3 2xl:grid-cols-3">
+            <div class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
               {#each p.figures as f}
                 <a href={api.fileUrl(id, 'figures', f)} target="_blank" rel="noreferrer" class="group overflow-hidden rounded-xl border bg-white">
                   <img src={api.fileUrl(id, 'figures', f)} alt={f} loading="lazy" class="aspect-[4/3] w-full object-contain p-2 transition group-hover:scale-[1.02]" />
@@ -388,9 +433,9 @@
             </div>
           {/if}
         </div>
-      </section>
+      </div>
     </div>
-  </div>
+  {/if}
 
   <Dialog bind:open={removing} title="Delete {p.id}?">
     <p class="text-sm text-muted">This deletes the paper and all its files: PDF, text, figures and notes. Other machines move their copy to <code>.carrel/trash</code> at their next sync.</p>

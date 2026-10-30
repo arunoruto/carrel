@@ -13,7 +13,8 @@ It is for this machine only, like the [TUI](tui.md): it works on your local libr
 ## What it has
 
 - **Library**: all papers or one project's, newest first or by year or title. Search as you type, by words (with the same `author:`, `year:`, `keywords:` filters as `carrel search`) or by [meaning](semantic-search.md). `/` or `Ctrl-K` jumps to the search.
-- **A paper**: its PDF next to tabs for the overview (summary, abstract, keywords, projects, supplementary files), your notes, the extracted text with its figures, the figures alone, its references, the papers citing it, and its BibTeX. Keywords and projects change with a click; notes are Markdown, saved with `Ctrl-S`.
+- **A paper**: tabs for the overview (summary and abstract, with keywords, projects and supplementary files beside them), your notes, the extracted text with its figures, the figures alone, its references, the papers citing it, and its BibTeX. Keywords and projects change with a click; notes are Markdown, saved with `Ctrl-S`.
+- **Reading**: *Read* opens the PDF over the whole page next to the sidebar, in the browser's own reader, with your notes beside it if you want them.
 - **Adding**: by DOI, arXiv id, URL or title, or by dropping PDFs anywhere on the page. A paper without a PDF takes one dropped on its page, or downloads it from arXiv.
 - **Inbox**: the new PDFs in your [Downloads](adding-papers.md#from-your-downloads), as `carrel consume` would offer them, to add or skip.
 - **Drafts**: what an AI proposed, next to what it would change, to approve or reject.
