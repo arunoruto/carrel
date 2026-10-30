@@ -342,10 +342,17 @@ impl Library {
         fs::create_dir_all(&carrel)?;
         // Held until the sync returns; two at once would download into the same parts and state.
         let lock = fs::File::create(carrel.join("sync.lock"))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(fs::TryLockError::WouldBlock) => bail!("another sync is running in this library; try again later"),
-            Err(fs::TryLockError::Error(e)) => return Err(e).context("cannot lock .carrel/sync.lock"),
+        // A moment's patience: a process this one starts (an extractor, from another thread) holds a copy of the
+        // lock from fork to exec, which is no sync at all.
+        let mut tries = 0;
+        loop {
+            match lock.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) if tries < 40 => tries += 1,
+                Err(fs::TryLockError::WouldBlock) => bail!("another sync is running in this library; try again later"),
+                Err(fs::TryLockError::Error(e)) => return Err(e).context("cannot lock .carrel/sync.lock"),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let name = remote.name();
         let mut state: State = fs::read(self.state_path())
