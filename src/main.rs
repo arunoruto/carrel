@@ -230,6 +230,9 @@ enum Cmd {
         /// Don't open the browser
         #[arg(long)]
         no_open: bool,
+        /// Only print the link with the token, for a `carrel web` running as a service, and exit
+        #[arg(long, conflicts_with = "no_open")]
+        get_url: bool,
     },
     /// Run the library on a server: MCP over HTTP at /mcp, plus syncing, extraction and reference
     /// lookups every few minutes
@@ -610,7 +613,8 @@ fn main() -> Result<()> {
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Serve { listen, every } => serve::run(lib, listen, every)?,
-        Cmd::Web { listen, no_open } => web::run(lib, listen, !no_open)?,
+        Cmd::Web { listen, get_url: true, .. } => println!("{}", web::url(listen)?),
+        Cmd::Web { listen, no_open, .. } => web::run(lib, listen, !no_open)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
     }
     Ok(())

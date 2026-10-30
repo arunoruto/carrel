@@ -6,7 +6,7 @@ Run `carrel <command> --help` for every option.
 |---|---|
 | `carrel` | the config's `default`: the [TUI](tui.md) unless set |
 | `tui` | the [TUI](tui.md) |
-| `web [--listen addr] [--no-open]` | the [web UI](web.md), on this machine |
+| `web [--listen addr] [--no-open] [--get-url]` | the [web UI](web.md), on this machine; `--get-url` only prints the login link |
 | `add <source>…` | add papers by PDF, DOI, arXiv id/URL or exact title |
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |

@@ -28,18 +28,34 @@ type Body = BoxBody<Bytes, Infallible>;
 /// Uploads (PDFs, supplementary files) up to this size.
 const MAX_BODY: usize = 512 << 20;
 
-pub fn run(lib: Library, listen: Option<String>, open: bool) -> Result<()> {
+/// The address `--listen` means, checked to be on this machine.
+fn address(listen: Option<String>) -> Result<SocketAddr> {
     let listen = listen.unwrap_or_else(|| "127.0.0.1:7700".into());
     let addr: SocketAddr = listen.parse().with_context(|| format!("cannot listen on {listen:?}"))?;
     if !addr.ip().is_loopback() {
         bail!("carrel web is for this machine only; to share the library, see `carrel serve`");
     }
+    Ok(addr)
+}
+
+fn link(port: u16, token: &str) -> String {
+    format!("http://127.0.0.1:{port}/?token={token}")
+}
+
+/// The link to open, with the token a running (or later started) `carrel web` on that address uses:
+/// `carrel web --get-url`, for machines without a journal to find it in.
+pub fn url(listen: Option<String>) -> Result<String> {
+    let addr = address(listen)?;
+    Ok(link(addr.port(), &token()?))
+}
+
+pub fn run(lib: Library, listen: Option<String>, open: bool) -> Result<()> {
+    let addr = address(listen)?;
     let token = token()?;
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
-        let port = listener.local_addr()?.port();
-        let url = format!("http://127.0.0.1:{port}/?token={token}");
+        let url = link(listener.local_addr()?.port(), &token);
         println!("carrel web: {url}");
         if assets::FILES.is_empty() {
             println!("This carrel was built without the web UI; only the API under /api answers.");

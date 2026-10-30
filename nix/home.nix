@@ -37,7 +37,7 @@ in
       listen = lib.mkOption {
         type = lib.types.str;
         default = "127.0.0.1:7700";
-        description = "Where to serve it; loopback only. `journalctl --user -u carrel-web` shows the link to open.";
+        description = "Where to serve it; loopback only. `carrel web --get-url` prints the link to open.";
       };
     };
   };

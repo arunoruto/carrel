@@ -471,12 +471,15 @@ fn web_ui() {
     assert_eq!(std::fs::read_to_string(&token_file).unwrap(), token, "kept for the next start");
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&token_file).unwrap().permissions().mode() & 0o777, 0o600);
+    // `--get-url` tells the same link without starting anything, as the service's port is known.
+    let port = addr.rsplit(':').next().unwrap();
+    assert_eq!(c.ok(&["web", "--get-url", "--listen", &format!("127.0.0.1:{port}")]).trim(), link);
+    assert!(c.fails(&["web", "--get-url", "--listen", "0.0.0.0:7700"]).contains("this machine only"));
 
     let get = |path: &str, headers: &[&str]| http(&addr, "GET", path, headers, b"");
     // Strangers: no cookie, another site's name (DNS rebinding), a wrong link.
     assert_eq!(get("/api/info", &[]).0, 401);
     assert_eq!(get("/", &["Host: evil.example:80"]).0, 403);
-    let port = addr.rsplit(':').next().unwrap();
     assert_eq!(get("/api/info", &[&format!("Host: attacker.example:{port}")]).0, 403);
     assert_eq!(get("/?token=guess", &[]).0, 403);
 

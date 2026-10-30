@@ -6,7 +6,7 @@
 carrel web
 ```
 
-It prints a link like `http://127.0.0.1:7700/?token=…` and opens it. The browser keeps a cookie from that link, so later `http://127.0.0.1:7700` is enough, also after a restart. Stop it with `Ctrl-C`.
+It prints a link like `http://127.0.0.1:7700/?token=…` and opens it. The browser keeps a cookie from that link, so later `http://127.0.0.1:7700` is enough, also after a restart. Stop it with `Ctrl-C`. `carrel web --get-url` prints that link again without starting anything, for a second browser or when carrel runs as a service.
 
 It is for this machine only, like the [TUI](tui.md): it works on your local library and listens on `127.0.0.1`. To share a library with others, [sync it](sharing.md) or [run a server](server.md).
 
@@ -54,7 +54,7 @@ imports = [ inputs.carrel.homeManagerModules.default ];
 services.carrel.web.enable = true;   # http://127.0.0.1:7700
 ```
 
-`journalctl --user -u carrel-web` shows the link with the token, for the first visit.
+`carrel web --get-url` prints the link with the token for the first visit, without starting a second server (pass the same `--listen` if you changed it).
 
 ## Safety
 
