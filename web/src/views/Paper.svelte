@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     ArrowLeft, BookOpen, Check, Copy, Download, ExternalLink, FileText, FileUp, Folder, FolderPlus, Image,
-    Link, NotebookPen, Paperclip, Quote, RefreshCw, ScanText, Trash2, X,
+    Link, Network, NotebookPen, Paperclip, Quote, RefreshCw, ScanText, Trash2, X,
   } from '@lucide/svelte';
   import { api, type FieldName, type Paper } from '../lib/api';
   import Badge from '../lib/components/Badge.svelte';
@@ -14,6 +14,7 @@
   import { tick } from 'svelte';
   import { app } from '../lib/state.svelte';
   import { toasts } from '../lib/toast.svelte';
+  import Connections from './Connections.svelte';
   import References from './References.svelte';
 
   // `reading`: the PDF over the whole area, at #/paper/<id>/read.
@@ -21,7 +22,7 @@
 
   let paper = $state<Paper | null>(null);
   let error = $state('');
-  let tab = $state<'overview' | 'notes' | 'text' | 'figures' | 'references' | 'cited' | 'bibtex'>('overview');
+  let tab = $state<'overview' | 'notes' | 'text' | 'figures' | 'references' | 'cited' | 'connections' | 'bibtex'>('overview');
   let busy = $state<string | null>(null);
   let removing = $state(false);
   let notes = $state('');
@@ -158,6 +159,7 @@
     { key: 'figures', label: 'Figures', icon: Image, count: paper?.figures.length, hidden: !paper?.figures.length },
     { key: 'references', label: 'References', icon: Quote },
     { key: 'cited', label: 'Cited by', icon: Link },
+    { key: 'connections', label: 'Connections', icon: Network },
     { key: 'bibtex', label: 'BibTeX', icon: FileText },
   ] as const);
 </script>
@@ -424,6 +426,8 @@
             <References {id} />
           {:else if tab === 'cited'}
             <References {id} citedBy />
+          {:else if tab === 'connections'}
+            <Connections {id} />
           {:else if tab === 'bibtex'}
             <div class="relative">
               <Button size="sm" class="absolute top-2 right-2" onclick={copyBib}>

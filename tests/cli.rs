@@ -542,6 +542,46 @@ fn web_ui() {
     assert_eq!(api("GET", &format!("/api/papers/{id}/files/drafts/summary.md"), b"").0, 404);
     assert_eq!(api("GET", "/api/papers/..%2F..%2Fetc/pdf", b"").0, 400);
 
+    // The library as a network, its people, a paper's citation tree, the doctor and BibTeX to save.
+    let (_, other) = api("POST", "/api/upload?name=Other.pdf", FAKE_PDF);
+    let other = json(&other)["id"].as_str().unwrap().to_string();
+    c.tmp.write(
+        &format!("lib/{id}/{id}.bib"),
+        format!("@article{{{id},\n  title = {{Regolith Optics}},\n  author = {{Hapke, Bruce and Wells, Eddie}},\n}}\n"),
+    );
+    c.tmp.write(
+        &format!("lib/{other}/{other}.bib"),
+        format!(
+            "@article{{{other},\n  title = {{More Regolith}},\n  author = {{Hapke, Bruce and Nelson, Robert}},\n}}\n"
+        ),
+    );
+    c.tmp.write(&format!("lib/{other}/references.json"), r#"[{"title": "Regolith Optics", "source": "openalex"}]"#);
+    let (status, map) = api("GET", "/api/map", b"");
+    assert_eq!(status, 200, "{map}");
+    let map = json(&map);
+    assert_eq!(map["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(map["cites"], serde_json::json!([[other, id]]), "the reference matched by its title");
+    assert_eq!(map["authors"][0][2], serde_json::json!(["Hapke, Bruce"]));
+    assert_eq!(map["similar"], serde_json::json!([]), "no embeddings, no likeness");
+    let tree = json(&api("GET", &format!("/api/papers/{other}/tree"), b"").1);
+    assert_eq!(tree, serde_json::json!([{"level": 1, "id": id, "again": false}]));
+    let up = json(&api("GET", &format!("/api/papers/{id}/tree?cited_by"), b"").1);
+    assert_eq!(up[0]["id"], other.as_str());
+    assert_eq!(api("GET", &format!("/api/papers/{id}/similar"), b"").1, "[]");
+    let people = json(&api("GET", "/api/people", b"").1);
+    assert_eq!(people[0]["name"], "Hapke, Bruce");
+    assert_eq!(people[0]["papers"].as_array().unwrap().len(), 2);
+    let (status, same) = api("POST", "/api/people/same", br#"{"spellings": ["Hapke, Bruce", "B. Hapke"]}"#);
+    assert_eq!(status, 200, "{same}");
+    assert!(c.tmp.path("lib/people").read_dir().unwrap().count() == 1, "confirmed into people/");
+    assert_eq!(api("GET", "/api/people/drafts", b"").1, "[]");
+    assert_eq!(api("GET", "/api/doctor", b"").0, 200);
+    let (status, head, bib) = http(&addr, "GET", "/api/bib?project=thesis", &[&cookie], b"");
+    assert_eq!(status, 200);
+    assert!(head.contains("attachment; filename=\"thesis.bib\""), "{head}");
+    assert!(String::from_utf8_lossy(&bib).contains("Regolith Optics"));
+    assert_eq!(api("DELETE", &format!("/api/papers/{other}"), b"").0, 200);
+
     // Writes from another site's page are refused even with the cookie.
     let (status, _, _) =
         http(&addr, "DELETE", &format!("/api/papers/{id}"), &[&cookie, "Origin: http://evil.example"], b"");

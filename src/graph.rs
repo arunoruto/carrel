@@ -234,6 +234,11 @@ impl Graph {
         Ok(out)
     }
 
+    /// Every citation between library papers, as (citing, cited).
+    pub fn citations(&self) -> Vec<(&str, &str)> {
+        self.cites.iter().flat_map(|(a, cited)| cited.iter().map(move |b| (a.as_str(), b.as_str()))).collect()
+    }
+
     /// A library paper's title.
     pub fn title(&self, id: &str) -> String {
         self.papers.iter().find(|p| p.id == id).map(|p| p.bib.title()).unwrap_or_default()

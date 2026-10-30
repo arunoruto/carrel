@@ -147,6 +147,12 @@ impl Web {
                 response.headers_mut().insert(header::CONTENT_TYPE, "text/markdown; charset=utf-8".parse().unwrap());
                 response
             }
+            Ok(Ok(Reply::Download(name, content))) => {
+                let mut response = text(StatusCode::OK, content);
+                let disposition = format!("attachment; filename=\"{}\"", name.replace(['"', '\\'], "_"));
+                response.headers_mut().insert(header::CONTENT_DISPOSITION, disposition.parse().unwrap());
+                response
+            }
             Ok(Err(e)) if e.is::<NotFound>() => json_status(StatusCode::NOT_FOUND, json!({"error": format!("{e:#}")})),
             Ok(Err(e)) => json_status(StatusCode::BAD_REQUEST, json!({"error": format!("{e:#}")})),
             Err(e) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()})),
@@ -182,6 +188,8 @@ enum Reply {
     Json(Value),
     File(PathBuf),
     Text(String),
+    /// A file to save, with its name.
+    Download(String, String),
 }
 
 fn ok(value: Value) -> Result<Reply> {
@@ -258,6 +266,43 @@ fn api_call(
             ok(json!(suggestions))
         }
         (m, ["inbox"]) if *m == get => ok(inbox()?),
+        (m, ["map"]) if *m == get => ok(map(lib, query.get("project").filter(|p| !p.is_empty()))?),
+        (m, ["doctor"]) if *m == get => ok(json!(lib.doctor())),
+        // A project's (or the library's) BibTeX, to save.
+        (m, ["bib"]) if *m == get => {
+            let project = query.get("project").filter(|p| !p.is_empty());
+            let papers = match project {
+                Some(name) => lib.project_papers(name)?.0,
+                None => lib.papers().0,
+            };
+            let bib: String = papers.iter().map(|p| p.bibtex().trim_end().to_string() + "\n\n").collect();
+            Ok(Reply::Download(format!("{}.bib", project.map_or("carrel", String::as_str)), bib))
+        }
+        (m, ["people"]) if *m == get => {
+            let graph = lib.graph()?;
+            let people = graph.authors.people(query.get("q").map(String::as_str).filter(|q| !q.is_empty()));
+            ok(json!(people))
+        }
+        (m, ["people", "drafts"]) if *m == get => {
+            let drafts = lib
+                .people_drafts()
+                .into_iter()
+                .map(|d| json!({"id": d.id, "same": d.same, "spellings": d.spellings, "reason": d.reason}));
+            ok(Value::Array(drafts.collect()))
+        }
+        (m, ["people", "drafts", draft, action @ ("approve" | "reject")]) if *m == post => {
+            lib.decide_people(draft, *action == "approve")?;
+            ok(json!({}))
+        }
+        // Confirm that spellings are one person, or different people.
+        (m, ["people", how @ ("same" | "different")]) if *m == post => {
+            let spellings: Vec<String> =
+                serde_json::from_value(form()?["spellings"].clone()).context("expected {\"spellings\": [...]}")?;
+            match *how {
+                "same" => ok(json!({"id": lib.same_person(&spellings)?})),
+                _ => ok(json!({"ids": lib.different_people(&spellings)?})),
+            }
+        }
         (m, ["inbox", action @ ("add" | "skip")]) if *m == post => {
             let path = PathBuf::from(field("path")?);
             // Only files the inbox lists: the API never reads or deletes any other path.
@@ -357,6 +402,17 @@ fn paper_call(
             ok(Value::Array(found.collect()))
         }
         (m, ["neighbors"]) if *m == get => ok(json!(lib.graph()?.neighbors(id)?)),
+        // The library papers it cites (or with `cited_by`, that cite it), and theirs in turn.
+        (m, ["tree"]) if *m == get => {
+            let depth = query.get("depth").and_then(|d| d.parse().ok()).unwrap_or(3);
+            let tree = lib.graph()?.tree(id, depth, query.contains_key("cited_by"))?;
+            let tree = tree.into_iter().map(|(level, id, again)| json!({"level": level, "id": id, "again": again}));
+            ok(Value::Array(tree.collect()))
+        }
+        (m, ["similar"]) if *m == get => {
+            let similar = lib.similar(12)?.remove(id).unwrap_or_default();
+            ok(Value::Array(similar.into_iter().map(|(id, score)| json!({"id": id, "score": score})).collect()))
+        }
         (m, ["drafts", field, action @ ("approve" | "reject")]) if *m == post => {
             let field: Field = serde_json::from_value(json!(field)).context("no such field")?;
             match *action {
@@ -398,7 +454,7 @@ fn info(lib: &Library) -> Value {
         "library": lib.root,
         "remote": config.remote.is_some(),
         "embeddings": embeddings,
-        "drafts": lib.drafts().len(),
+        "drafts": lib.drafts().len() + lib.people_drafts().len(),
         "ui": !assets::FILES.is_empty(),
     })
 }
@@ -433,6 +489,53 @@ fn details(lib: &Library, p: &Paper) -> Value {
     d["url"] = json!(p.bib.get("url"));
     d.as_object_mut().map(|o| o.remove("files"));
     d
+}
+
+/// The library as a network: papers, the citations between them, the authors they share and, from the
+/// embeddings, which are most alike.
+fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
+    let papers = match project {
+        Some(name) => lib.project_papers(name)?.0,
+        None => lib.papers().0,
+    };
+    let shown: std::collections::HashSet<&str> = papers.iter().map(|p| p.id.as_str()).collect();
+    let graph = lib.graph()?;
+    let nodes = papers.iter().map(|p| {
+        json!({
+            "id": p.id,
+            "title": p.bib.title(),
+            "authors": p.short_authors(),
+            "year": p.bib.year(),
+            "venue": p.bib.venue(),
+            "keywords": p.bib.keywords(),
+            "projects": lib.projects_of(&p.id),
+        })
+    });
+    let cites = graph.citations().into_iter().filter(|(a, b)| shown.contains(a) && shown.contains(b));
+    let mut authors = vec![];
+    for p in &papers {
+        for (other, names) in graph.authors.shared(&p.id) {
+            if p.id < other && shown.contains(other.as_str()) {
+                authors.push(json!([p.id, other, names]));
+            }
+        }
+    }
+    // Each paper's three nearest, once per pair.
+    let mut similar: Vec<(String, String, f32)> = vec![];
+    for (id, near) in lib.similar(3)?.into_iter().filter(|(id, _)| shown.contains(id.as_str())) {
+        for (other, score) in near.into_iter().filter(|(other, _)| shown.contains(other.as_str())) {
+            let (a, b) = if id < other { (id.clone(), other) } else { (other, id.clone()) };
+            if !similar.iter().any(|(x, y, _)| *x == a && *y == b) {
+                similar.push((a, b, score));
+            }
+        }
+    }
+    Ok(json!({
+        "nodes": nodes.collect::<Vec<_>>(),
+        "cites": cites.map(|(a, b)| json!([a, b])).collect::<Vec<_>>(),
+        "authors": authors,
+        "similar": similar.into_iter().map(|(a, b, s)| json!([a, b, s])).collect::<Vec<_>>(),
+    }))
 }
 
 /// The PDFs `carrel consume` would offer, with what became of each so far.

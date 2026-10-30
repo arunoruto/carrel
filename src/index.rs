@@ -109,6 +109,26 @@ pub fn nearest(path: &Path, papers: &[Paper], model: &str, query: &[f32]) -> Res
     Ok(hits)
 }
 
+/// Vectors by paper id.
+pub type Vectors = HashMap<String, Vec<f32>>;
+
+/// Each paper's first passage vector (its title, authors, keywords, abstract and summary), by `model`, or
+/// by the model most papers were embedded with. Returns that model too; none without embeddings.
+pub fn heads(path: &Path, papers: &[Paper], model: Option<&str>) -> Result<Option<(String, Vectors)>> {
+    let mut conn = open(path)?;
+    sync(&mut conn, papers)?;
+    let most = "SELECT model FROM passages WHERE start IS NULL GROUP BY model ORDER BY COUNT(*) DESC LIMIT 1";
+    let Some(model) = model.map(String::from).or_else(|| conn.query_row(most, [], |r| r.get(0)).ok()) else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare("SELECT paper, vector FROM passages WHERE model = ?1 AND start IS NULL")?;
+    let rows = stmt.query_map([&model], |r| {
+        let vector: Vec<u8> = r.get(1)?;
+        Ok((r.get::<_, String>(0)?, vector.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect()))
+    })?;
+    Ok(Some((model, rows.collect::<rusqlite::Result<_>>()?)))
+}
+
 /// Open the index, rebuilding it when the file is damaged; it is only a cache.
 fn open(path: &Path) -> Result<Connection> {
     if let Some(dir) = path.parent() {

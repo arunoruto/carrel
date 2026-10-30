@@ -238,6 +238,26 @@ impl Library {
         Ok(true)
     }
 
+    /// For each embedded paper, the `k` others most alike in title, abstract and keywords, with the cosine
+    /// similarity, best first. Works from the stored vectors alone, without Ollama.
+    pub fn similar(&self, k: usize) -> Result<std::collections::HashMap<String, Vec<(String, f32)>>> {
+        let papers = self.papers().0;
+        let model = self.embeddings.as_ref().and_then(|c| c.model.as_deref());
+        let Some((_, heads)) = crate::index::heads(&self.index, &papers, model)? else { return Ok(Default::default()) };
+        // ponytail: every pair is compared, fine for thousands of papers.
+        let similar = heads.iter().map(|(id, v)| {
+            let mut scores: Vec<(String, f32)> = heads
+                .iter()
+                .filter(|(other, _)| *other != id)
+                .map(|(other, w)| (other.clone(), v.iter().zip(w).map(|(a, b)| a * b).sum()))
+                .collect();
+            scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+            scores.truncate(k);
+            (id.clone(), scores)
+        });
+        Ok(similar.collect())
+    }
+
     /// Papers whose passages are closest in meaning to `query`, best first, each with its closest passage.
     /// `project:name` searches within a project. Papers without embeddings by `ollama`'s model are missed.
     pub fn semantic_search(&self, ollama: &Ollama, query: &str, limit: usize) -> Result<Vec<(Paper, String)>> {

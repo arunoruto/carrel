@@ -619,6 +619,12 @@ fn semantic_search() {
     assert_eq!(lib.semantic_search(&ollama, "Lunar regolith", 10).unwrap()[0].1.split(' ').nth(1), Some("title"));
     let within = lib.semantic_search(&ollama, "space weathering project:thesis", 10).unwrap();
     assert_eq!(within.iter().map(|(p, _)| p.id.as_str()).collect::<Vec<_>>(), ["graphs"]);
+
+    // Alike papers come from the stored vectors alone: each paper's nearest, scored.
+    let similar = lib.similar(5).unwrap();
+    assert_eq!(similar["moon"].iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["graphs"]);
+    assert!((-1.0..=1.0).contains(&similar["moon"][0].1));
+    assert_eq!(similar["graphs"][0].0, "moon");
     assert!(lib.semantic_search(&ollama, "project:thesis", 10).is_err(), "nothing to search for");
 
     // A new text, or another model, makes them out of date.

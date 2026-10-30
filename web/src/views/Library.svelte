@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FileText, Plus, Search, Sparkles, X } from '@lucide/svelte';
+  import { Download, FileText, Plus, Search, Sparkles, X } from '@lucide/svelte';
   import { api, type PaperSummary } from '../lib/api';
   import AddDialog from '../lib/components/AddDialog.svelte';
   import Badge from '../lib/components/Badge.svelte';
@@ -62,8 +62,23 @@
     return { score: m[1], place: m[2], at, text: m[3].replace(/[*_#`]+|!?\[\]\([^)]*\)/g, '').replace(/\s+/g, ' ') };
   }
 
+  // j/k move through the list as in the TUI, Enter opens.
+  let cursor = $state(-1);
+  $effect(() => {
+    void shown;
+    cursor = -1;
+  });
+  $effect(() => {
+    if (cursor >= 0) document.getElementById(`row-${cursor}`)?.scrollIntoView({ block: 'nearest' });
+  });
+
   function keys(e: KeyboardEvent) {
     const typing = (e.target as HTMLElement).closest('input, textarea, [contenteditable]');
+    if (!typing && !e.metaKey && !e.ctrlKey) {
+      if (e.key === 'j' || e.key === 'ArrowDown') return (e.preventDefault(), (cursor = Math.min(shown.length - 1, cursor + 1)));
+      if (e.key === 'k' || e.key === 'ArrowUp') return (e.preventDefault(), (cursor = Math.max(0, cursor - 1)));
+      if (e.key === 'Enter' && shown[cursor]) return (location.hash = paperHref(shown[cursor].id).slice(1));
+    }
     if ((e.key === '/' && !typing) || (e.key === 'k' && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
       input.focus();
@@ -83,7 +98,10 @@
         {#if project}· <a class="text-accent hover:underline" href="#/">all papers</a>{/if}
       </p>
     </div>
-    <Button variant="primary" onclick={() => (adding = true)}><Plus class="size-4" />Add paper</Button>
+    <div class="flex gap-2">
+      <a href={api.bibUrl(project)} download title="BibTeX of {project ?? 'every paper'}"><Button><Download class="size-4" />.bib</Button></a>
+      <Button variant="primary" onclick={() => (adding = true)}><Plus class="size-4" />Add paper</Button>
+    </div>
   </header>
 
   <div class="flex flex-wrap items-center gap-2">
@@ -126,9 +144,13 @@
   {/if}
 
   <div class="overflow-hidden rounded-xl border bg-card shadow-sm">
-    {#each shown as p (p.id)}
+    {#each shown as p, i (p.id)}
       {@const hitAt = p.snippet ? semanticHit(p.snippet)?.at : undefined}
-      <a href={hitAt ? `${paperHref(p.id)}?at=${hitAt}` : paperHref(p.id)} class="group flex gap-4 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-hover/50">
+      <a
+        id="row-{i}"
+        href={hitAt ? `${paperHref(p.id)}?at=${hitAt}` : paperHref(p.id)}
+        class="group flex gap-4 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-hover/50 {cursor === i ? 'bg-hover/70 shadow-[inset_3px_0_0_var(--accent)]' : ''}"
+      >
         <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg {p.pdf ? 'bg-accent/10 text-accent' : 'bg-hover text-faint'}">
           <FileText class="size-4.5" />
         </div>

@@ -89,6 +89,60 @@ export interface Inbox {
   files: InboxFile[];
 }
 
+export interface Person {
+  id?: string;
+  name: string;
+  variants: string[];
+  papers: string[];
+  coauthors: [string, number][];
+  maybe: { name: string; papers: string[]; spellings: string[]; with: string[] }[];
+}
+
+export interface PeopleDraft {
+  id: string;
+  same: boolean;
+  spellings: string[];
+  reason: string;
+}
+
+export interface TreeNode {
+  level: number;
+  id: string;
+  again: boolean;
+}
+
+export interface MapNode {
+  id: string;
+  title: string;
+  authors: string;
+  year: number | null;
+  venue: string | null;
+  keywords: string[];
+  projects: string[];
+}
+
+export interface LibraryMap {
+  nodes: MapNode[];
+  cites: [string, string][];
+  authors: [string, string, string[]][];
+  similar: [string, string, number][];
+}
+
+export interface Issue {
+  level: 'error' | 'warning' | 'info';
+  check: string;
+  id: string;
+  message: string;
+  fix: string | null;
+}
+
+export interface Neighbors {
+  cites: string[];
+  cited_by: string[];
+  shared_authors: Record<string, string[]>;
+  references_known: boolean;
+}
+
 export interface Added {
   id: string;
   messages: string[];
@@ -156,6 +210,17 @@ export const api = {
   consume: (path: string) => call<Added>('POST', 'inbox/add', JSON.stringify({ path })),
   skip: (path: string) => call<{}>('POST', 'inbox/skip', JSON.stringify({ path })),
   sync: () => call<{ summary: string; failed: string[] }>('POST', 'sync'),
+  tree: (id: string, citedBy: boolean, depth: number) => call<TreeNode[]>('GET', `${paper(id)}/tree${q({ cited_by: citedBy, depth })}`),
+  similar: (id: string) => call<{ id: string; score: number }[]>('GET', `${paper(id)}/similar`),
+  neighbors: (id: string) => call<Neighbors>('GET', `${paper(id)}/neighbors`),
+  map: (project?: string) => call<LibraryMap>('GET', `map${q({ project })}`),
+  people: () => call<Person[]>('GET', 'people'),
+  peopleDrafts: () => call<PeopleDraft[]>('GET', 'people/drafts'),
+  decidePeople: (draft: string, approve: boolean) => call<{}>('POST', `people/drafts/${draft}/${approve ? 'approve' : 'reject'}`),
+  samePerson: (spellings: string[]) => call<{ id: string }>('POST', 'people/same', JSON.stringify({ spellings })),
+  differentPeople: (spellings: string[]) => call<{ ids: string[] }>('POST', 'people/different', JSON.stringify({ spellings })),
+  doctor: () => call<Issue[]>('GET', 'doctor'),
+  bibUrl: (project?: string) => `/api/bib${q({ project })}`,
   pdfUrl: (id: string) => `/api/${paper(id)}/pdf`,
   fileUrl: (id: string, folder: 'figures' | 'supplementary', name: string) =>
     `/api/${paper(id)}/files/${folder}/${encodeURIComponent(name)}`,

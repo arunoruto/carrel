@@ -1,4 +1,4 @@
-import { api, ApiError, type Info, type Project } from './api';
+import { api, ApiError, type Info, type PaperSummary, type Project } from './api';
 import { toasts } from './toast.svelte';
 
 // What the sidebar shows everywhere, refreshed after anything that changes it.
@@ -7,6 +7,8 @@ class App {
   projects = $state<Project[]>([]);
   inbox = $state(0);
   total = $state(0);
+  /** Every paper by id, for views that only get ids (people, trees, the map). */
+  papers = $state<Record<string, PaperSummary>>({});
   loggedOut = $state(false);
   /** Bumped whenever papers change, so open lists reload. */
   version = $state(0);
@@ -19,6 +21,7 @@ class App {
       await info;
       this.projects = projects;
       this.total = papers.length;
+      this.papers = Object.fromEntries(papers.map((p) => [p.id, p]));
       this.loggedOut = false;
       api
         .inbox()

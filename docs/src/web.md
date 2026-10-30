@@ -12,13 +12,17 @@ It is for this machine only, like the [TUI](tui.md): it works on your local libr
 
 ## What it has
 
-- **Library**: all papers or one project's, newest first or by year or title. Search as you type, by words (with the same `author:`, `year:`, `keywords:` filters as `carrel search`) or by [meaning](semantic-search.md). `/` or `Ctrl-K` jumps to the search.
+- **Library**: all papers or one project's, newest first or by year or title. Search as you type, by words (with the same `author:`, `year:`, `keywords:` filters as `carrel search`) or by [meaning](semantic-search.md). `/` or `Ctrl-K` jumps to the search, `j`/`k` move through the list and `Enter` opens a paper, as in the TUI. *.bib* saves the BibTeX of the papers shown (the project's, or all).
 - **A paper**: tabs for the overview (summary and abstract, with keywords, projects and supplementary files beside them), your notes, the extracted text with its figures, the figures alone, its references, the papers citing it, and its BibTeX. Keywords and projects change with a click; notes are Markdown, saved with `Ctrl-S`.
+- **Connections** (a paper's tab): its [citation tree](citations.md) among library papers, what it cites or what cites it a few levels deep; the papers most alike by their [embeddings](semantic-search.md); the papers sharing its authors; and *Show on the map*.
 - **Reading**: *Read* opens the PDF over the whole page next to the sidebar, in the browser's own reader, with your notes beside it if you want them.
 - **Adding**: by DOI, arXiv id, URL or title, or by dropping PDFs anywhere on the page. A paper without a PDF takes one dropped on its page, or downloads it from arXiv.
 - **Inbox**: the new PDFs in your [Downloads](adding-papers.md#from-your-downloads), as `carrel consume` would offer them, to add or skip.
 - **Drafts**: what an AI proposed, next to what it would change, to approve or reject.
 - **Discover**: the papers your library, or a project, cites most but doesn't have.
+- **Map**: the library as a network. Papers are dots, coloured by their project or by year and bigger the more links they have. Lines join a paper to those it cites (blue arrows), to those sharing authors (orange, thicker the more authors they share), and, if you want, to those most alike by their embeddings (green, dashed, above a threshold you set). Hover a line to see who the shared authors are; click a paper to light up its neighbours; double-click to open it. Scroll zooms, dragging moves.
+- **People**: everyone who wrote a library paper, most papers first: their spellings, papers and co-authors, and anyone who might be the same person, to confirm as one person or as different people ([who is who](citations.md#who-is-who)). Proposals about people from an AI wait in *Drafts*.
+- **Health**: what [`carrel doctor`](maintenance.md) finds, with the command that fixes each, and pairs of papers so alike by their embeddings that one may be a copy of the other.
 - **Sync** with the remote, a dark and a light theme (Catppuccin, like the TUI), and a layout that works on a phone.
 
 The TUI and the web UI cover the same ground; each has what suits it:
@@ -32,7 +36,11 @@ The TUI and the web UI cover the same ground; each has what suits it:
 | notes, keywords, projects | ✓ (in your editor) | ✓ |
 | add by DOI, title or file | ✓ | ✓, and drag and drop |
 | references, citing papers, adding them | ✓ | ✓ |
-| citation tree, people and who is who | ✓ | not yet |
+| citation tree | ✓ | ✓ |
+| people and who is who | ✓ | ✓ |
+| the library as a network | `carrel graph --dot` | ✓ map |
+| papers most alike, likely duplicates | | ✓ |
+| library health | `carrel doctor` | ✓ |
 | drafts | ✓ | ✓ |
 | Downloads inbox | `carrel consume` | ✓ |
 | sync | ✓ | ✓ |
@@ -60,4 +68,4 @@ The token is kept in `~/.local/state/carrel/web-token`. Delete that file and res
 
 ## The API
 
-The UI uses a JSON API under `/api`, which scripts can use too, with the cookie (`curl -b "carrel-7700=$(cat ~/.local/state/carrel/web-token)" http://127.0.0.1:7700/api/papers`). `src/web.rs` lists its calls; the main ones are `GET /api/papers`, `GET /api/search?q=…&semantic=1`, `GET /api/papers/<id>` and its `pdf`, `fulltext` and `references`, and `POST /api/add`.
+The UI uses a JSON API under `/api`, which scripts can use too, with the cookie (`curl -b "carrel-7700=$(cat ~/.local/state/carrel/web-token)" http://127.0.0.1:7700/api/papers`). `src/web.rs` lists its calls; the main ones are `GET /api/papers`, `GET /api/search?q=…&semantic=1`, `GET /api/papers/<id>` and its `pdf`, `fulltext`, `references`, `tree` and `similar`, `GET /api/map`, `GET /api/people`, `GET /api/bib?project=…` and `POST /api/add`.

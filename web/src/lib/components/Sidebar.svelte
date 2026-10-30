@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Compass, FilePen, Folder, Inbox, Library, Moon, RefreshCw, Sparkles, Sun } from '@lucide/svelte';
+  import { Compass, FilePen, Folder, HeartPulse, Inbox, Library, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
   import { api } from '../api';
   import { href, router } from '../router.svelte';
   import { app } from '../state.svelte';
@@ -37,6 +37,9 @@
     { href: '#/inbox', icon: Inbox, label: 'Inbox', count: app.inbox, active: router.path === '/inbox', loud: true },
     { href: '#/drafts', icon: FilePen, label: 'Drafts', count: app.info?.drafts ?? 0, active: router.path === '/drafts', loud: true },
     { href: '#/discover', icon: Compass, label: 'Discover', count: 0, active: router.path === '/discover' },
+    { href: '#/map', icon: Network, label: 'Map', count: 0, active: router.path === '/map' },
+    { href: '#/people', icon: Users, label: 'People', count: 0, active: router.path === '/people' },
+    { href: '#/health', icon: HeartPulse, label: 'Health', count: 0, active: router.path === '/health' },
   ]);
 </script>
 

@@ -7,6 +7,9 @@
   import { app } from './lib/state.svelte';
   import Discover from './views/Discover.svelte';
   import Drafts from './views/Drafts.svelte';
+  import Health from './views/Health.svelte';
+  import Map from './views/Map.svelte';
+  import People from './views/People.svelte';
   import Inbox from './views/Inbox.svelte';
   import Library from './views/Library.svelte';
   import Login from './views/Login.svelte';
@@ -50,6 +53,12 @@
           <Drafts />
         {:else if router.path === '/discover'}
           <Discover />
+        {:else if router.path === '/map'}
+          <Map />
+        {:else if router.path === '/people'}
+          <People />
+        {:else if router.path === '/health'}
+          <Health />
         {:else}
           {#key router.params.toString()}<Library />{/key}
         {/if}
