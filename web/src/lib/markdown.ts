@@ -5,8 +5,11 @@ import { marked } from 'marked';
 export function markdown(text: string, base?: (src: string) => string): string {
   let html = marked.parse(text, { async: false, gfm: true }) as string;
   if (base) html = html.replace(/(<img[^>]*\ssrc=")(?!https?:|data:|\/)([^"]+)"/g, (_, start, src) => `${start}${base(src)}"`);
-  return DOMPurify.sanitize(html);
+  return DOMPurify.sanitize(html, FORBID);
 }
+
+/** Drafts come from any AI over MCP: no controls or styles that could dress up as this page's own. */
+const FORBID = { FORBID_TAGS: ['form', 'button', 'input', 'textarea', 'select', 'style'], FORBID_ATTR: ['style'] };
 
 /** "Vaswani, Shazeer, Parmar et al." */
 export function authors(list: string[], max = 3): string {

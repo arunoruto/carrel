@@ -61,8 +61,11 @@ services.carrel.web.enable = true;   # http://127.0.0.1:7700
 Any website you visit can make your browser send requests to `localhost`, so carrel doesn't trust a request just because it comes from this machine:
 
 - it answers only to requests addressed to `127.0.0.1`, `localhost` or `[::1]`, which stops websites that point their own name at your machine (DNS rebinding);
-- everything under `/api` needs the cookie that only the printed link sets, so other websites and other users of the machine can't read your library;
-- the cookie isn't sent along with other sites' requests (`SameSite=Strict`), and changes coming from another site's page are refused.
+- everything under `/api` needs the token, as the cookie the printed link sets, so other websites can't read your library;
+- the cookie isn't sent along with other sites' requests (`SameSite=Strict`), and changes coming from another site's page are refused;
+- the page can't post forms, be framed by another page or run scripts other than its own (a Content-Security-Policy), and paper texts, notes and AI drafts are shown without forms, buttons or styles of their own, so a draft can't dress up as the page.
+
+On a machine you share, the port is open to every user on it, and browsers send a cookie for `127.0.0.1` to any port there, so the cookie's isolation doesn't keep other users out: only not knowing the token does. The token file is readable by you alone, but don't run `carrel web` where you wouldn't trust the other users with that token.
 
 The token is kept in `~/.local/state/carrel/web-token`. Delete that file and restart `carrel web` to log every browser out.
 

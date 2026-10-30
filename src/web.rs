@@ -17,6 +17,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
 mod assets {
@@ -133,7 +134,15 @@ impl Web {
             response.headers_mut().insert(header::SET_COOKIE, cookie.parse().expect("a valid header"));
             return response;
         }
-        let Some(api) = path.strip_prefix("/api/") else { return asset(&path) };
+        let Some(api) = path.strip_prefix("/api/") else {
+            // Paper texts, notes and AI drafts are shown as HTML: should one slip past the sanitizer, it
+            // still can't run scripts, post forms or frame the page. PDFs come from /api, without this.
+            let mut response = asset(&path);
+            let csp =
+                "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+            response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, csp.parse().unwrap());
+            return response;
+        };
         if !self.logged_in(&request) {
             return json_status(StatusCode::UNAUTHORIZED, json!({"error": "open the link `carrel web` printed"}));
         }
@@ -572,6 +581,8 @@ fn inbox() -> Result<Value> {
     Ok(json!({"folders": folders, "days": config.days(), "files": found.collect::<Vec<_>>()}))
 }
 
+static UPLOADS: AtomicUsize = AtomicUsize::new(0);
+
 /// A file sent by the browser, in a folder of its own that goes away with it.
 struct Upload {
     dir: PathBuf,
@@ -581,11 +592,17 @@ struct Upload {
 impl Upload {
     fn new(name: &str, bytes: &[u8]) -> Result<Self> {
         let name = Path::new(name).file_name().context("no file name")?.to_string_lossy().into_owned();
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static COUNT: AtomicUsize = AtomicUsize::new(0);
-        let n = COUNT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("carrel-upload-{}-{n}", std::process::id()));
-        fs::create_dir_all(&dir)?;
+        // A new folder only we can enter: in a shared /tmp, another user could have made the folder, or a
+        // symlink by that name, first.
+        let dir = loop {
+            let n = UPLOADS.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("carrel-upload-{}-{n}", std::process::id()));
+            match std::os::unix::fs::DirBuilderExt::mode(&mut fs::DirBuilder::new(), 0o700).create(&dir) {
+                Ok(()) => break dir,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        };
         let path = dir.join(name);
         fs::write(&path, bytes)?;
         Ok(Self { dir, path })
@@ -710,6 +727,25 @@ fn mime(path: &Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upload_folders() {
+        use std::os::unix::fs::PermissionsExt;
+        let next = |k| {
+            let n = UPLOADS.load(Ordering::Relaxed) + k;
+            std::env::temp_dir().join(format!("carrel-upload-{}-{n}", std::process::id()))
+        };
+        // Another user got there first: a folder by the next name, a symlink to it by the one after.
+        let (theirs, link) = (next(0), next(1));
+        fs::create_dir(&theirs).unwrap();
+        std::os::unix::fs::symlink(&theirs, &link).unwrap();
+        let upload = Upload::new("x.pdf", b"private").unwrap();
+        assert!(!theirs.join("x.pdf").exists() && upload.path.exists());
+        assert_eq!(fs::metadata(&upload.dir).unwrap().permissions().mode() & 0o777, 0o700);
+        drop(upload);
+        fs::remove_file(link).unwrap();
+        fs::remove_dir(theirs).unwrap();
+    }
 
     #[test]
     fn decoding() {

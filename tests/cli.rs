@@ -482,6 +482,14 @@ fn web_ui() {
     assert_eq!(get("/", &["Host: evil.example:80"]).0, 403);
     assert_eq!(get("/api/info", &[&format!("Host: attacker.example:{port}")]).0, 403);
     assert_eq!(get("/?token=guess", &[]).0, 403);
+    // The page can't be framed, post forms or run scripts but its own, whatever HTML a draft holds.
+    let (_, head, _) = get("/", &[]);
+    let csp = head.lines().find_map(|l| l.strip_prefix("content-security-policy: ")).expect("a CSP");
+    for rule in
+        ["script-src 'self'", "form-action 'none'", "frame-ancestors 'none'", "base-uri 'none'", "object-src 'none'"]
+    {
+        assert!(csp.contains(rule), "{csp}");
+    }
 
     // The link trades the token for a cookie and leaves the address bar clean.
     let (status, head, _) = get(&format!("/?token={token}"), &[]);
