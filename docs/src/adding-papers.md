@@ -59,24 +59,9 @@ With [Home Manager](https://github.com/nix-community/home-manager), carrel's mod
 }
 ```
 
-It notifies through the config's [notifiers](configuration.md#notifications) and adds papers only with `[consume] auto = true` there. `journalctl --user -u carrel-consume` shows what each run did.
+It notifies through the config's [notifiers](configuration.md#notifications) and adds papers only with `[consume] auto = true` there. On Linux, `journalctl --user -u carrel-consume` shows what each run did. On macOS, it runs as a launchd agent that logs to `~/Library/Logs/carrel-consume.log`.
 
-Without Home Manager, the same as plain systemd user units:
-
-```ini
-# ~/.config/systemd/user/carrel-consume.service
-[Service]
-Type=oneshot
-ExecStart=%h/.nix-profile/bin/carrel consume
-
-# ~/.config/systemd/user/carrel-consume.path
-[Path]
-PathChanged=%h/Downloads
-[Install]
-WantedBy=default.target
-```
-
-`systemctl --user enable --now carrel-consume.path` starts it.
+Without Home Manager, `carrel service install consume` sets up the same thing ([Running in the background](installation.md#running-in-the-background)). It watches the config's `[consume] folders`, or Downloads.
 
 ## Duplicates
 

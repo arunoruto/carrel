@@ -53,7 +53,7 @@ The TUI and the web UI cover the same ground; each has what suits it:
 
 ## Keeping it running
 
-With [Home Manager](https://github.com/nix-community/home-manager), carrel's module runs it as a user service:
+`carrel service install web` runs it at every login: a systemd user unit on Linux, a launchd agent on macOS ([Running in the background](installation.md#running-in-the-background)). With [Home Manager](https://github.com/nix-community/home-manager), carrel's module does it:
 
 ```nix
 imports = [ inputs.carrel.homeManagerModules.default ];

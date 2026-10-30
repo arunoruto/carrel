@@ -20,10 +20,10 @@ carrel show vaswani2017attention
 carrel                                             # the TUI
 ```
 
-Connect your AI assistant (here Claude Code; see [Working with an AI](ai.md) for others):
+Connect your AI assistant ([Working with an AI](ai.md) has the details):
 
 ```sh
-claude mcp add --scope user carrel -- carrel mcp
+carrel integrate claude                            # or opencode, codex, gemini, cursor
 ```
 
 and ask it: *"Read the papers in my library that have no summary yet and propose summaries and keywords."* Its proposals arrive as drafts:

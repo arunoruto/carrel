@@ -1,4 +1,4 @@
-# Home Manager: carrel as user services.
+# Home Manager: carrel as user services: systemd on Linux, launchd agents on macOS.
 # - services.carrel.consume: `carrel consume` whenever a file lands in the watched folders, and hourly in
 #   case one slipped by. Without a terminal it adds nothing unless `[consume] auto = true`, and tells you
 #   through the config's [notify] what it found or added.
@@ -7,6 +7,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 
@@ -15,6 +16,16 @@ let
   carrel = lib.getExe cfg.package;
   docling = lib.getExe cfg.docling.package;
   environment = lib.optional (cfg.docling.package != null) "CARREL_DOCLING=${docling}";
+  inherit (pkgs.stdenv.hostPlatform) isDarwin;
+  # launchd's counterparts: environment, and where output goes (systemd has the journal).
+  agent = name: {
+    EnvironmentVariables = lib.optionalAttrs (cfg.docling.package != null) {
+      CARREL_DOCLING = docling;
+    };
+    StandardOutPath = "${config.home.homeDirectory}/Library/Logs/carrel-${name}.log";
+    StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/carrel-${name}.log";
+    RunAtLoad = true;
+  };
 in
 {
   options.services.carrel = {
@@ -34,7 +45,7 @@ in
     };
 
     consume = {
-      enable = lib.mkEnableOption "carrel consume on new PDFs in your Downloads (Linux, systemd)";
+      enable = lib.mkEnableOption "carrel consume on new PDFs in your Downloads";
 
       folders = lib.mkOption {
         type = lib.types.listOf lib.types.str;
@@ -45,7 +56,7 @@ in
     };
 
     web = {
-      enable = lib.mkEnableOption "carrel web, the library in your browser (Linux, systemd)";
+      enable = lib.mkEnableOption "carrel web, the library in your browser";
 
       listen = lib.mkOption {
         type = lib.types.str;
@@ -63,7 +74,39 @@ in
       home.sessionVariables.CARREL_DOCLING = docling;
     })
 
-    (lib.mkIf cfg.consume.enable {
+    (lib.mkIf (cfg.consume.enable && isDarwin) {
+      # macOS asks before carrel may read Downloads; allow it under Privacy & Security if it doesn't.
+      launchd.agents.carrel-consume = {
+        enable = true;
+        config = agent "consume" // {
+          ProgramArguments = [
+            carrel
+            "consume"
+          ]
+          ++ cfg.consume.folders;
+          WatchPaths = cfg.consume.folders;
+          StartInterval = 3600;
+        };
+      };
+    })
+
+    (lib.mkIf (cfg.web.enable && isDarwin) {
+      launchd.agents.carrel-web = {
+        enable = true;
+        config = agent "web" // {
+          ProgramArguments = [
+            carrel
+            "web"
+            "--no-open"
+            "--listen"
+            cfg.web.listen
+          ];
+          KeepAlive.SuccessfulExit = false; # restarted when it fails
+        };
+      };
+    })
+
+    (lib.mkIf (cfg.consume.enable && !isDarwin) {
       systemd.user.services.carrel-consume = {
         Unit.Description = "carrel: pick up new papers";
         Service = {
@@ -90,7 +133,7 @@ in
       };
     })
 
-    (lib.mkIf cfg.web.enable {
+    (lib.mkIf (cfg.web.enable && !isDarwin) {
       systemd.user.services.carrel-web = {
         Unit.Description = "carrel: the library in your browser";
         Service = {

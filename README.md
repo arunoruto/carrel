@@ -120,11 +120,16 @@ Outside of Nix and the Docker image, text extraction needs [uv](https://docs.ast
 
 Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [releases page][release-url].
 
+* Install script, for Linux and macOS
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | sh
+  ```
+* Your AI agent: ask it to *"install carrel and set it up for me, following https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md"*
 * Nix
   ```sh
   nix run github:arunoruto/carrel
   ```
-  or add `github:arunoruto/carrel` as a flake input: its package, a Home Manager module that watches Downloads, and a NixOS module for a server.
+  or add `github:arunoruto/carrel` as a flake input: its package, a Home Manager module for the background services (systemd on Linux, launchd on macOS), and a NixOS module for a server.
 * [bin](https://github.com/marcosnils/bin)
   ```sh
   bin install github.com/arunoruto/carrel
@@ -146,7 +151,8 @@ carrel search -s "how do shadows hide between grains"   # by meaning
 carrel consume                                     # new PDFs in Downloads
 carrel                                             # the TUI
 carrel web                                         # the web UI, in your browser
-claude mcp add --scope user carrel -- carrel mcp   # let Claude Code use your library
+carrel integrate claude                            # let Claude Code use your library (or opencode, codex, …)
+carrel service install web                         # keep the web UI running (systemd or launchd)
 carrel project sync thesis ~/thesis/*.tex && carrel bib -p thesis > ~/thesis/refs.bib
 carrel sync                                        # share through the remote
 ```

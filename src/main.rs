@@ -1,3 +1,4 @@
+mod install;
 mod mcp;
 mod serve;
 mod theme;
@@ -222,6 +223,19 @@ enum Cmd {
     Rm { id: String },
     /// Serve the library to AI assistants over MCP (stdio)
     Mcp,
+    /// Connect an AI agent to the library over MCP; without one, which agents have it
+    Integrate {
+        agent: Option<install::Agent>,
+        /// Disconnect it instead
+        #[arg(long, requires = "agent")]
+        remove: bool,
+    },
+    /// Run `carrel web` or `carrel consume` in the background (systemd on Linux, launchd on macOS);
+    /// without a command, what runs
+    Service {
+        #[command(subcommand)]
+        cmd: Option<ServiceCmd>,
+    },
     /// The library in your browser, on this machine: prints the link to open and opens it
     Web {
         /// Address to listen on, on loopback [default: 127.0.0.1:7700]
@@ -265,6 +279,19 @@ enum AuthorsCmd {
 }
 
 #[derive(Subcommand)]
+enum ServiceCmd {
+    /// Start it now and at every login
+    Install {
+        service: install::Service,
+        /// Where `carrel web` listens, on loopback
+        #[arg(long, default_value = "127.0.0.1:7700")]
+        listen: String,
+    },
+    /// Stop it and remove it
+    Remove { service: install::Service },
+}
+
+#[derive(Subcommand)]
 enum ProjectCmd {
     /// List projects (the default)
     List,
@@ -303,6 +330,45 @@ fn main() -> Result<()> {
             None => Cmd::Tui,
         },
     };
+    // Setting up the machine needs no library.
+    match cmd {
+        Cmd::Integrate { agent: Some(agent), remove } => return Ok(println!("{}", install::integrate(agent, remove)?)),
+        Cmd::Integrate { agent: None, .. } => {
+            for agent in install::AGENTS {
+                let state = match install::integrated(agent)? {
+                    Some(true) => "connected",
+                    Some(false) => "not connected; `carrel integrate {}`",
+                    None => "not installed",
+                };
+                println!("{:<9} {}", agent.name(), state.replace("{}", agent.name()));
+            }
+            return Ok(());
+        }
+        Cmd::Service { cmd: Some(ServiceCmd::Install { service, listen }) } => {
+            install::install(service, &listen)?.iter().for_each(|f| println!("wrote {}", f.display()));
+            println!("{}", install::status(service)?);
+            if service == install::Service::Web {
+                println!("`carrel web --get-url` prints the link to open");
+            }
+            if cfg!(target_os = "macos") && service == install::Service::Consume {
+                println!(
+                    "macOS asks before carrel may read Downloads; if it doesn't, allow it under Privacy & Security"
+                );
+            }
+            return Ok(());
+        }
+        Cmd::Service { cmd: Some(ServiceCmd::Remove { service }) } => {
+            let removed = install::remove(service)?;
+            return Ok(println!("{}", if removed { "removed" } else { "wasn't installed" }));
+        }
+        Cmd::Service { cmd: None } => {
+            for service in [install::Service::Web, install::Service::Consume] {
+                println!("{}", install::status(service)?);
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
     let lib = Library::open_default()?;
     match cmd {
         Cmd::Tui => tui::run(lib)?,
@@ -626,6 +692,7 @@ fn main() -> Result<()> {
         Cmd::Web { listen, get_url: true, .. } => println!("{}", web::url(listen)?),
         Cmd::Web { listen, no_open, .. } => web::run(lib, listen, !no_open)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
+        Cmd::Integrate { .. } | Cmd::Service { .. } => unreachable!("handled before the library opens"),
     }
     Ok(())
 }

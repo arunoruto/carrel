@@ -4,17 +4,24 @@
 
 ## Connecting
 
-Claude Code:
-
 ```sh
-claude mcp add --scope user carrel -- carrel mcp
+carrel integrate claude           # or opencode, codex, gemini, cursor
+carrel integrate                  # which agents have carrel
+carrel integrate claude --remove
 ```
 
-Claude Desktop, and other clients configured with JSON:
+For Claude Code this runs `claude mcp add --scope user`. For the others it adds carrel to their config file and keeps everything else in it: `~/.config/opencode/opencode.json`, `~/.codex/config.toml`, `~/.gemini/settings.json` or `~/.cursor/mcp.json`. It leaves a JSON config with comments alone, so add the entry by hand there, and for other clients:
 
-```json
-{ "mcpServers": { "carrel": { "command": "carrel", "args": ["mcp"] } } }
-```
+| Client | Entry |
+|---|---|
+| Claude Code | `claude mcp add --scope user carrel -- carrel mcp` |
+| opencode | `"mcp": { "carrel": { "type": "local", "command": ["carrel", "mcp"], "enabled": true } }` |
+| Codex | `[mcp_servers.carrel]` with `command = "carrel"` and `args = ["mcp"]` |
+| Claude Desktop, Gemini CLI, Cursor and most others | `"mcpServers": { "carrel": { "command": "carrel", "args": ["mcp"] } }` |
+
+For a library on a [server](server.md#connecting-an-ai), clients connect over HTTP instead.
+
+To have your agent install and set up carrel itself, point it at [install-ai.md](https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md).
 
 Clients that don't pass your shell's environment on need settings in carrel's [config file](configuration.md) rather than in environment variables.
 

@@ -41,3 +41,5 @@ Run `carrel <command> --help` for every option.
 | `serve [--listen addr] [--every minutes]` | [run the library on a server](server.md): MCP over HTTP, syncing and background work |
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](ai.md) on stdin/stdout |
+| `integrate [agent] [--remove]` | [connect an AI agent](ai.md#connecting): claude, opencode, codex, gemini, cursor |
+| `service [install\|remove web\|consume]` | [run in the background](installation.md#running-in-the-background): systemd on Linux, launchd on macOS |
