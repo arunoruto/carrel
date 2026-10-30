@@ -200,9 +200,9 @@
       </div>
     </header>
 
-    <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+    <div class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
       <!-- The PDF, in the browser's own reader. -->
-      <section class="hidden min-h-0 border-r bg-hover/30 xl:block" data-own-drop>
+      <section class="hidden min-h-0 border-r bg-hover/30 lg:block" data-own-drop>
         {#if p.pdf}
           <iframe title="PDF of {p.title}" src="{api.pdfUrl(id)}#navpanes=0&view=FitH" class="h-full w-full"></iframe>
         {:else}
@@ -230,7 +230,7 @@
       </section>
 
       <section class="flex min-h-0 flex-col">
-        <nav class="flex gap-1 overflow-x-auto border-b px-4 pt-2 lg:px-6">
+        <nav class="flex gap-1 overflow-x-auto border-b px-4 pt-2 [scrollbar-width:none] lg:px-6">
           {#each tabs as t}
             {#if !('hidden' in t && t.hidden)}
               <button
@@ -248,7 +248,7 @@
           {#if tab === 'overview'}
             <div class="space-y-6">
               {#if !p.pdf}
-                <div class="flex flex-wrap items-center gap-3 rounded-xl border border-wanted/40 bg-wanted/10 px-4 py-3 text-sm xl:hidden">
+                <div class="flex flex-wrap items-center gap-3 rounded-xl border border-wanted/40 bg-wanted/10 px-4 py-3 text-sm lg:hidden">
                   <span class="flex-1">No PDF yet.</span>
                   <Button size="sm" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-3.5" />Attach</Button>
                   {#if p.arxiv}<Button size="sm" busy={busy === 'arxiv'} onclick={() => act('arxiv', () => api.attach(id), 'Downloaded from arXiv')}><Download class="size-3.5" />From arXiv</Button>{/if}

@@ -51,7 +51,7 @@
         {:else if router.path === '/discover'}
           <Discover />
         {:else}
-          {#key router.params.get('project')}<Library />{/key}
+          {#key router.params.toString()}<Library />{/key}
         {/if}
       </div>
     </main>
