@@ -41,6 +41,13 @@
           services.carrel.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.carrel;
         };
 
+      homeManagerModules.default =
+        { lib, pkgs, ... }:
+        {
+          imports = [ ./nix/home.nix ];
+          services.carrel.consume.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.carrel;
+        };
+
       # The module in a VM: the service starts and answers, and keeps strangers out.
       checks.x86_64-linux.module = nixpkgs.legacyPackages.x86_64-linux.testers.runNixOSTest {
         name = "carrel-module";

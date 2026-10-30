@@ -640,6 +640,9 @@ fn consuming() {
     tmp.write("Downloads/plain.PDF", FAKE_PDF);
     tmp.write("Downloads/with-doi.pdf", b"%PDF-1.4\n<prism:doi>10.1029/2000JE001402</prism:doi>\n");
     tmp.write("Downloads/sub/deeper.pdf", FAKE_PDF);
+    tmp.write("Downloads/empty.pdf", "");
+    tmp.write("Downloads/loading.pdf", FAKE_PDF);
+    tmp.write("Downloads/loading.pdf.part", FAKE_PDF);
     let old = tmp.write("Downloads/old.pdf", FAKE_PDF);
     let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86400);
     fs::File::options().write(true).open(&old).unwrap().set_modified(month_ago).unwrap();

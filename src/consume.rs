@@ -48,7 +48,8 @@ pub struct Found {
     pub clue: Option<String>,
 }
 
-/// The PDFs in `folders` (not their subfolders) changed in the last `days` days, oldest first.
+/// The PDFs in `folders` (not their subfolders) changed in the last `days` days, oldest first, leaving out
+/// downloads that haven't finished.
 pub fn find(folders: &[PathBuf], days: u64) -> Vec<Found> {
     let since = SystemTime::now() - Duration::from_secs(days.saturating_mul(86400).min(1 << 40));
     let mut found: Vec<Found> = folders
@@ -56,10 +57,14 @@ pub fn find(folders: &[PathBuf], days: u64) -> Vec<Found> {
         .flat_map(|dir| fs::read_dir(dir).into_iter().flatten().flatten())
         .filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("pdf")))
         .filter_map(|e| {
-            let meta = e.metadata().ok().filter(|m| m.is_file())?;
+            let meta = e.metadata().ok().filter(|m| m.is_file() && m.len() > 0)?;
             let modified = meta.modified().ok().filter(|m| *m >= since)?;
             let modified = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
             let path = e.path();
+            // Still downloading: Firefox keeps an empty `x.pdf` next to the `x.pdf.part` it writes.
+            if Path::new(&format!("{}.part", path.display())).exists() {
+                return None;
+            }
             Some(Found { clue: clue(&path), path, size: meta.len(), modified })
         })
         .collect();

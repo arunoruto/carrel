@@ -15,7 +15,7 @@ Run `carrel <command> --help` for every option.
 | `search <query>…` | full-text search, with `field:` and `project:` filters |
 | `search -s <query>…` | [semantic search](semantic-search.md): by meaning |
 | `embed [ids…] [--all]` | compute the embeddings for semantic search |
-| `consume [--yes] [--again] [--days n]` | move new PDFs from [Downloads](adding-papers.md#from-your-downloads) into the library |
+| `consume [folders…] [--yes] [--again] [--days n]` | move new PDFs from [Downloads](adding-papers.md#from-your-downloads) into the library |
 | `notify [message]` | try the [notifiers](configuration.md#notifications) |
 | `show <id> [--json]` | a paper's details |
 | `open <id>` | open its PDF |

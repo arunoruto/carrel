@@ -198,6 +198,8 @@ enum Cmd {
     /// Without a terminal (from a timer) it doesn't ask: it tells through the notifiers, or with
     /// `auto = true` adds the PDFs it can identify as papers
     Consume {
+        /// Folders to look in [default: the config's, else Downloads]
+        folders: Vec<String>,
         /// Add the PDFs it can identify as papers without asking
         #[arg(short, long)]
         yes: bool,
@@ -580,7 +582,7 @@ fn main() -> Result<()> {
             };
             println!("embeddings: {embeddings}");
         }
-        Cmd::Consume { yes, again, days } => consume(&lib, yes, again, days)?,
+        Cmd::Consume { folders, yes, again, days } => consume(&lib, folders, yes, again, days)?,
         Cmd::Notify { message } => {
             let config = Config::load()?.notify;
             let notifiers = carrel::notify::notifiers(&config);
@@ -630,12 +632,15 @@ fn spinning<T>(message: &str, work: impl FnOnce() -> T) -> T {
     })
 }
 
-fn consume(lib: &Library, yes: bool, again: bool, days: Option<u64>) -> Result<()> {
+fn consume(lib: &Library, folders: Vec<String>, yes: bool, again: bool, days: Option<u64>) -> Result<()> {
     use carrel::consume::{self, Mark, Seen};
     use std::io::IsTerminal;
     let config = Config::load()?;
     let mut settings = config.consume.unwrap_or_default();
     settings.days = days.or(settings.days);
+    if !folders.is_empty() {
+        settings.folders = folders;
+    }
     let folders = settings.folders();
     if folders.is_empty() {
         bail!("no folder to look in; set [consume] folders in the config");

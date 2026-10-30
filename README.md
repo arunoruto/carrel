@@ -55,7 +55,7 @@
 - **AI writes drafts, you decide**: proposed summaries, keywords and notes wait for your approval.
 - **Projects** whose bibliographies follow the citations in your LaTeX or Typst files.
 - **Full-text search** with field filters, and **semantic search** by meaning, with embeddings from [Ollama](https://ollama.com) (bge-m3 or a model you pick).
-- **Picks papers up from Downloads** (`carrel consume`), asking first or on its own, and emails you what it did.
+- **Picks papers up from Downloads** (`carrel consume`), asking first, or watching the folder with the Home Manager module and emailing you what it found.
 - **Citation graphs**, a **TUI**, and a health check (`carrel doctor`).
 - **Shared by a group**: `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder, and `carrel serve` on a server (Docker image or NixOS module) for MCP over HTTP and background work.
 
@@ -117,7 +117,7 @@ Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [release
   ```sh
   nix run github:arunoruto/carrel
   ```
-  or add `github:arunoruto/carrel` as a flake input and use its package, or its NixOS module for a server.
+  or add `github:arunoruto/carrel` as a flake input: its package, a Home Manager module that watches Downloads, and a NixOS module for a server.
 * [bin](https://github.com/marcosnils/bin)
   ```sh
   bin install github.com/arunoruto/carrel

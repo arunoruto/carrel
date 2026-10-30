@@ -40,21 +40,42 @@ days = 30
 auto = false
 ```
 
-Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. A systemd user timer every 10 minutes:
+Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. Unfinished downloads (empty files, or Firefox's `.part` next to them) wait for the next run.
+
+`carrel consume ~/Papers ~/Downloads` looks in those folders instead of the config's.
+
+### Watching the folder
+
+With [Home Manager](https://github.com/nix-community/home-manager), carrel's module runs `carrel consume` whenever something lands in Downloads, and hourly in case it missed one:
+
+```nix
+{
+  inputs.carrel.url = "github:arunoruto/carrel";
+  # in your Home Manager modules:
+  imports = [ inputs.carrel.homeManagerModules.default ];
+  services.carrel.consume.enable = true;
+  # services.carrel.consume.folders = [ "/home/you/Downloads" "/home/you/Papers" ];  # Downloads by default
+}
+```
+
+It notifies through the config's [notifiers](configuration.md#notifications) and adds papers only with `[consume] auto = true` there. `journalctl --user -u carrel-consume` shows what each run did.
+
+Without Home Manager, the same as plain systemd user units:
 
 ```ini
 # ~/.config/systemd/user/carrel-consume.service
 [Service]
+Type=oneshot
 ExecStart=%h/.nix-profile/bin/carrel consume
 
-# ~/.config/systemd/user/carrel-consume.timer
-[Timer]
-OnCalendar=*:0/10
+# ~/.config/systemd/user/carrel-consume.path
+[Path]
+PathChanged=%h/Downloads
 [Install]
-WantedBy=timers.target
+WantedBy=default.target
 ```
 
-`systemctl --user enable --now carrel-consume.timer` starts it.
+`systemctl --user enable --now carrel-consume.path` starts it.
 
 ## Duplicates
 

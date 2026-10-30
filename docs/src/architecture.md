@@ -38,7 +38,7 @@ Since the remote only stores files, any S3 storage works, and it never needs upg
 | extract text and figures | when a PDF is added | for every PDF still without `fulltext.md` |
 | look up references | `carrel refs` | for every paper still without `references.json` |
 | compute embeddings | `carrel embed`, with `[embeddings]` | for every paper not yet embedded with its model, with `[embeddings]` |
-| pick up new PDFs (`[consume]`) | from your Downloads, asking first, or from a timer | from a drop folder, only with `auto = true` |
+| pick up new PDFs (`[consume]`) | from your Downloads, asking first, or watched by the [Home Manager module](adding-papers.md#watching-the-folder) | from a drop folder, only with `auto = true` |
 | notify | about your own Downloads | about its own trouble (Ollama unreachable), never about others' papers |
 | search | its own index | its own index, for the AIs using it |
 

@@ -388,6 +388,11 @@ fn consuming_downloads() {
     c.tmp.write("Downloads/2301.01234v2.pdf", FAKE_PDF);
     c.tmp.write("Downloads/invoice.pdf", FAKE_PDF);
     c.tmp.write("Downloads/notes.txt", "not a pdf");
+    // Folders on the command line beat the config's.
+    c.tmp.write("Elsewhere/2301.01234v2.pdf", FAKE_PDF);
+    c.tmp.write("config/carrel/config.toml", format!("[consume]\nfolders = [\"{}\"]\n", downloads.display()));
+    let out = c.ok(&["consume", "--days", "1", &c.tmp.path("Elsewhere").to_string_lossy()]);
+    assert!(out.contains("Elsewhere/2301.01234v2.pdf") && !out.contains("invoice"), "{out}");
     let config = format!(
         "[consume]\nfolders = [\"{}\"]\n\n[notify.email]\nserver = \"{smtp}\"\nfrom = \"carrel@x.org\"\nto = \"me@x.org\"\n",
         downloads.display()
