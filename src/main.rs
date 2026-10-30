@@ -177,9 +177,9 @@ enum Cmd {
         ids: Vec<String>,
         #[arg(short, long)]
         project: Option<String>,
-        /// Point each entry at its PDF (a `file` field), for JabRef and other reference managers
-        #[arg(long)]
-        files: bool,
+        /// For JabRef: link each entry's PDF and supplementary files (`file`), and write projects as groups
+        #[arg(long, alias = "files")]
+        jabref: bool,
     },
     /// Projects: named lists of papers, each with its own bibliography
     Project {
@@ -534,24 +534,15 @@ fn main() -> Result<()> {
         }
         Cmd::Approve { id, field } => lib.approve(&id, field)?,
         Cmd::Reject { id, field } => lib.reject(&id, field)?,
-        Cmd::Bib { ids, project, files } => {
-            let papers = match project {
+        Cmd::Bib { ids, project, jabref } => {
+            let papers: Vec<Paper> = match project {
                 Some(name) => project_papers(&lib, &name)?,
                 None if ids.is_empty() => lib.papers().0,
                 None => ids.iter().map(|id| lib.get(id)).collect::<Result<_>>()?,
             };
-            for p in papers {
-                match p.pdf().filter(|_| files) {
-                    // JabRef's format, `description:path:type`, with `:` and `;` in the path escaped.
-                    Some(pdf) => {
-                        let path =
-                            pdf.display().to_string().replace('\\', "\\\\").replace(':', "\\:").replace(';', "\\;");
-                        let mut bib = p.bib.clone();
-                        bib.set("file", Some(&format!(":{path}:PDF")));
-                        println!("{}", bib.to_bib(&p.id));
-                    }
-                    None => println!("{}", p.bibtex()),
-                }
+            match jabref {
+                true => print!("{}", lib.jabref_bib(&papers)),
+                false => papers.iter().for_each(|p| println!("{}", p.bibtex())),
             }
         }
         Cmd::Project { cmd } => match cmd.unwrap_or(ProjectCmd::List) {

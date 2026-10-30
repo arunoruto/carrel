@@ -115,6 +115,125 @@ fn importing_bib_files() {
     assert_eq!(parsed.len(), 6);
     assert!(parsed.iter().all(|e| e.is_ok()), "the joined bibliography parses");
     assert!(lib.import_bib(&tmp.path("nope.bib"), false).is_err());
+    assert_eq!(lib.projects(), ["thesis"], "no JabRef metadata, no projects from it");
+}
+
+#[test]
+fn importing_from_jabref() {
+    let tmp = Tmp::new("jabref-import");
+    let lib = library(&tmp);
+    tmp.write("refs/pdfs/a.pdf", FAKE_PDF);
+    tmp.write("refs/pdfs/we:ird;name.pdf", FAKE_PDF);
+    tmp.write("refs/pdfs/data.csv", "x\n");
+    tmp.write("refs/Über café.pdf", FAKE_PDF); // next to the .bib, not in fileDirectory
+    let elsewhere = tmp.write("elsewhere/b.pdf", FAKE_PDF);
+    let bib = tmp.write(
+        "refs/library.bib",
+        format!(
+            r"@article{{a, title = {{A}}, file = {{Paper:a.pdf:PDF;Appendix:we\:ird\;name.pdf:PDF;:data.csv:CSV;:missing.pdf:PDF}},
+  groups = {{Chapter 1, Methods, old, a;b}}}}
+@article{{b, title = {{B}}, file = {{:{}:PDF;:C:\papers\b.pdf:PDF}}, groups = {{Methods}}}}
+@article{{c, title = {{C}}, file = {{:Über café.pdf:PDF}}, groups = {{}}}}
+@article{{d, title = {{D}}, file = {{:C:\Users\me\d.pdf:PDF}}}}
+
+@Comment{{jabref-meta: databaseType:biblatex;}}
+@Comment{{jabref-meta: fileDirectory:pdfs;}}
+@Comment{{jabref-meta: grouping:
+0 AllEntriesGroup:;
+1 StaticGroup:Chapter 1\;0\;1\;\;\;\;;
+2 StaticGroup:Methods\;0\;1\;\;\;\;;
+1 StaticGroup:Chapter 2\;0\;1\;\;\;\;;
+2 StaticGroup:Methods\;0\;1\;\;\;\;;
+2 StaticGroup:Methods, old\;0\;1\;\;\;\;;
+2 StaticGroup:a\\\;b\;0\;1\;\;\;\;;
+1 StaticGroup:Empty\;0\;1\;\;\;\;;
+1 KeywordGroup:ml\;0\;keywords\;ml\;0\;0\;1\;\;\;\;;
+1 ExplicitGroup:Old\;0\;c\;nokey\;;
+}}
+",
+            elsewhere.display()
+        ),
+    );
+    let (ids, messages) = lib.import_bib(&bib, false).unwrap();
+    assert_eq!(ids, ["a", "b", "c", "d"]);
+    for expected in [
+        "a: skipped missing.pdf: no such file",
+        r"b: skipped C:\papers\b.pdf: no such file",
+        r"d: skipped C:\Users\me\d.pdf: no such file",
+        "group \"Chapter 1\" is now project Chapter-1",
+        "group \"Methods, old\" is now project Methods-old",
+        "skipped 1 JabRef groups",
+    ] {
+        assert!(messages.iter().any(|m| m.contains(expected)), "{expected:?} not in {messages:?}");
+    }
+    let a = lib.get("a").unwrap();
+    assert!(a.pdf().is_some(), "the first PDF");
+    assert_eq!(a.supplementary(), ["data.csv", "we:ird;name-figures", "we:ird;name.md", "we:ird;name.pdf"]);
+    assert!(a.bib.raw("file").is_none() && a.bib.raw("groups").is_none(), "carrel keeps these itself");
+    assert!(lib.get("b").unwrap().pdf().is_some(), "an absolute path");
+    assert!(lib.get("c").unwrap().pdf().is_some(), "unicode, next to the .bib");
+    assert!(lib.get("d").unwrap().pdf().is_none());
+    assert_eq!(lib.projects(), ["Chapter-1", "Chapter-2", "Empty", "Methods", "Methods-old", "Old", "ab"]);
+    assert_eq!(lib.project("Methods").unwrap(), ["b"], "both Methods groups are one project");
+    assert_eq!(lib.project("Methods-old").unwrap(), ["a"], "a name with a comma");
+    assert_eq!(lib.project("ab").unwrap(), ["a"]);
+    assert_eq!(lib.project("Chapter-1").unwrap(), ["a"]);
+    assert_eq!(lib.project("Old").unwrap(), ["c"], "old JabRef files list the keys in the group");
+    assert!(lib.project("Empty").unwrap().is_empty());
+    assert_eq!(lib.projects_of("a"), ["Chapter-1", "Methods-old", "ab"]);
+
+    // Importing again matches the papers and adds no duplicates to the projects.
+    let (again, _) = lib.import_bib(&bib, false).unwrap();
+    assert_eq!(again, ids);
+    assert_eq!(lib.project("Methods").unwrap(), ["b"]);
+}
+
+#[test]
+fn jabref_round_trip() {
+    let tmp = Tmp::new("jabref-round-trip");
+    let lib = library(&tmp);
+    paper(&lib, "smith:2020", "title = {With a colon}, journal = {J}, year = 2020");
+    paper(&lib, "b", "title = {B}");
+    paper(&lib, "c", "title = {C}");
+    lib.attach("smith:2020", Some(&tmp.write("x.pdf", FAKE_PDF))).unwrap();
+    let sources = [tmp.write("Anhang ü.pdf", FAKE_PDF), tmp.write("data.csv", "1,2\n")];
+    lib.add_supplementary("smith:2020", &sources.map(|s| s.to_string_lossy().into_owned())).unwrap();
+    lib.add_to_project("thesis", &["smith:2020".into(), "b".into()]).unwrap();
+    lib.add_to_project("talk", &["smith:2020".into()]).unwrap();
+    lib.add_to_project("empty", &[]).unwrap();
+
+    let bib = lib.jabref_bib(&lib.papers().0);
+    assert!(bib.contains(r"{:smith\:2020/smith\:2020.pdf:PDF;:smith\:2020/supplementary/Anhang ü.pdf:PDF;:smith\:2020/supplementary/data.csv:}"), "{bib}");
+    assert!(bib.contains("groups  = {talk, thesis}"), "{bib}");
+    assert!(bib.contains(&format!("@Comment{{jabref-meta: fileDirectory:{};}}", lib.root.display())));
+    assert!(bib.contains("1 StaticGroup:thesis\\;0\\;1\\;\\;\\;\\;;\n"));
+    assert!(!bib.contains("databaseType"), "the entries are BibTeX, not biblatex");
+    assert!(!bib.contains("Anhang ü.md"), "carrel's extracted text isn't linked");
+    assert_eq!(carrel::bib::Entry::parse_all(&bib).len(), 3, "the comments aren't entries");
+    paper(&lib, "d", "title = {D}, date = {2020-01-01}");
+    assert!(lib.jabref_bib(&[lib.get("d").unwrap()]).contains("databaseType:biblatex"));
+    fs::remove_dir_all(lib.root.join("d")).unwrap();
+
+    let file = tmp.write("export/carrel.bib", &bib);
+    let mut other = Library::open(tmp.path("other")).unwrap();
+    other.index = tmp.path("other.sqlite");
+    other.extractor = lib.extractor.clone();
+    let (ids, messages) = other.import_bib(&file, false).unwrap();
+    assert_eq!(ids, ["b", "c", "smith:2020"], "{messages:?}");
+    let p = other.get("smith:2020").unwrap();
+    assert!(p.pdf().is_some());
+    assert_eq!(p.supplementary(), lib.get("smith:2020").unwrap().supplementary());
+    assert_eq!(p.bib, lib.get("smith:2020").unwrap().bib);
+    assert_eq!(other.projects(), lib.projects());
+    for name in lib.projects() {
+        // JabRef's groups have no order: the members come in the file's order.
+        let sorted = |lib: &Library| -> Vec<String> {
+            let mut ids = lib.project(&name).unwrap();
+            ids.sort();
+            ids
+        };
+        assert_eq!(sorted(&other), sorted(&lib), "{name}");
+    }
 }
 
 #[test]

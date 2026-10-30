@@ -78,9 +78,12 @@ fn papers() {
     assert!(c.ok(&["show", "graphtheory"]).contains("graph-theory"));
     assert!(c.ok(&["search", "plain", "text"]).contains("graphtheory"));
     assert!(c.ok(&["bib"]).starts_with("@misc{graphtheory,"));
-    let pdf_path = c.tmp.path("lib/graphtheory/graphtheory.pdf").canonicalize().unwrap().display().to_string(); // /var is /private/var on macOS
-    assert!(c.ok(&["bib", "--files"]).contains(&format!("{{:{pdf_path}:PDF}}")), "JabRef's file field");
-    assert!(!c.ok(&["bib"]).contains("file ="), "only when asked");
+    let root = c.tmp.path("lib").canonicalize().unwrap().display().to_string(); // /var is /private/var on macOS
+    let jabref = c.ok(&["bib", "--jabref"]);
+    assert!(jabref.contains("{:graphtheory/graphtheory.pdf:PDF}"), "JabRef's file field: {jabref}");
+    assert!(jabref.contains(&format!("@Comment{{jabref-meta: fileDirectory:{root};}}")), "{jabref}");
+    assert_eq!(c.ok(&["bib", "--files"]), jabref, "the old name still works");
+    assert!(!c.ok(&["bib"]).contains("file ") && !c.ok(&["bib"]).contains("jabref"), "only when asked");
     assert!(c.fails(&["show", "nope"]).contains("no paper"));
     assert!(c.fails(&["show", "../etc"]).contains("invalid paper id"));
 

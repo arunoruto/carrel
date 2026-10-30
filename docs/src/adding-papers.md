@@ -108,6 +108,14 @@ carrel import ~/thesis/refs.bib -p thesis --pdfs
 
 Every entry becomes a paper with its key unchanged, so your documents' citations keep working. Entries already in the library are matched instead, `@string` macros are expanded, keys that can't name a folder get a new one (reported), and with `--pdfs` entries with an arXiv id get their PDF.
 
+### From JabRef
+
+A JabRef library comes over with its files and groups:
+
+- The `file` field's links (`Description:path:PDF;…`) are followed, relative to the `fileDirectory` the file names (also a user-specific one) or else to the `.bib`'s folder. The first PDF becomes the paper's PDF, the other files its supplementary files, with their text extracted. Missing files (and Windows paths on another system) are reported and skipped. Zotero's and Mendeley's `file` fields work the same way.
+- Static groups become projects, with the entries their `groups` field puts in them. Projects are flat, so a nested group becomes a project of its own name; groups of the same name in different branches become one project, and names are made into valid project names (`Chapter 1` → `Chapter-1`, reported). Keyword, search and other dynamic groups are skipped.
+- `file` and `groups` aren't kept in the paper's `.bib`: carrel keeps the files and projects itself, and `carrel bib --jabref` [writes them back](projects.md#jabref).
+
 ## Moving from I, Librarian
 
 [I, Librarian](https://github.com/mkucej/i-librarian-free) keeps its library in a data folder: an SQLite database (`database/main.db`) and the PDFs (`pdfs/`). carrel reads it directly, which keeps more than a BibTeX export would:

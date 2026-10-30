@@ -22,15 +22,22 @@ carrel bib vaswani2017attention ho2020denoising    # just these
 carrel bib                                         # the whole library
 ```
 
-### JabRef and other reference managers
+### JabRef
 
-JabRef (or any tool that reads BibTeX) can browse the library through one generated file. `--files` adds each PDF's path in JabRef's `file` field, so it opens the PDFs too:
+[JabRef](https://www.jabref.org) (or any tool that reads BibTeX) can browse the library through one generated file. `--jabref` adds what JabRef needs to open the PDFs and show your projects:
 
 ```sh
-carrel bib --files > ~/Documents/carrel.bib
+carrel bib --jabref > ~/Documents/carrel.bib
+carrel bib --jabref -p thesis > thesis-jabref.bib   # a project's papers, still with every project as a group
 ```
 
-carrel's own files stay the source: regenerate the file after changes, and edit metadata with `carrel edit`, since JabRef's edits stay in the generated file. Don't commit it to a [shared library](sharing.md): the paths are absolute.
+- Each entry's `file` field links its PDF and supplementary files, relative to the library, which the file names as its `fileDirectory` (`@Comment{jabref-meta: fileDirectory:…}`).
+- Its projects go into `groups`, and every project is a static group in JabRef's group tree.
+- `databaseType:biblatex` is set only when the entries use biblatex fields (`journaltitle`, `date`, …); carrel itself writes BibTeX.
+
+Without `--jabref` (`--files` is its old name), `carrel bib` prints the `.bib` files as they are, so a thesis bibliography stays minimal; biber and BibTeX would ignore the extra fields anyway. carrel's own files stay the source: regenerate the file after changes, and edit metadata with `carrel edit`, since JabRef's edits stay in the generated file. Don't commit it to a [shared library](sharing.md): the library's path in it is this machine's.
+
+Going the other way, `carrel import` reads a JabRef library: see [importing a .bib](adding-papers.md#importing-a-bib). Exporting with `--jabref` and importing that file into an empty library gives back the papers, their files and the projects.
 
 ## Keeping a project in step with your writing
 

@@ -10,7 +10,7 @@ Run `carrel <command> --help` for every option.
 | `add <source>…` | add papers by PDF, DOI, arXiv id/URL or exact title |
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |
-| `import <file.bib> [-p project] [--pdfs]` | import a `.bib`, keeping its keys |
+| `import <file.bib> [-p project] [--pdfs]` | import a `.bib`, keeping its keys; [from JabRef](adding-papers.md#from-jabref) with its files and groups |
 | `import-ilibrarian <data folder>` | move an [I, Librarian](adding-papers.md#moving-from-i-librarian) library over |
 | `list [-p project] [--json]` | all papers, or a project's |
 | `search <query>…` | full-text search, with `field:` and `project:` filters |
@@ -34,7 +34,7 @@ Run `carrel <command> --help` for every option.
 | `approve <id> <summary\|keywords\|notes\|references>` | accept a draft |
 | `reject <id> <summary\|keywords\|notes\|references>` | discard a draft |
 | `project [list\|show\|add\|remove\|delete\|sync]` | [projects](projects.md) |
-| `bib [ids…] [-p project] [--files]` | BibTeX for papers, a project, or the library; `--files` adds the PDFs' paths for JabRef |
+| `bib [ids…] [-p project] [--jabref]` | BibTeX for papers, a project, or the library; `--jabref` adds [file links and projects as groups](projects.md#jabref) |
 | `doctor [--all] [--json]` | [check the library](maintenance.md) |
 | `rm <id>` | delete a paper and its files |
 | `sync [-n] [--keep local\|remote]` | [share the library](sharing.md) through the config's remote |
