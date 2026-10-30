@@ -8,12 +8,14 @@
 //!   figures/                   extracted figures
 //!   summary.md  notes.md
 //!   references.json            what it cites, each with its source (graph.rs)
+//!   affiliations.json          where its authors worked, from OpenAlex (affiliations.rs)
 //!   drafts/                    AI proposals waiting for review
 //! ```
 //!
 //! The files are the source of truth; the search index in the cache directory is rebuilt from them.
 //! Every frontend (CLI, TUI, MCP) goes through [`Library`].
 
+pub mod affiliations;
 pub mod authors;
 pub mod bib;
 pub mod consume;
@@ -489,6 +491,9 @@ impl Library {
             match refs::sources().and_then(|sources| graph::look_up(&sources, &known, &bib.title())) {
                 Ok(found) => graph::write(&tmp.0, &found)?,
                 Err(e) => messages.push(format!("references: {e:#}")),
+            }
+            if let Ok(authors) = affiliations::look_up(&known) {
+                affiliations::write(&tmp.0, &authors)?;
             }
         }
         let id = self.unique_id(&citekey(&self.key, &bib)?);

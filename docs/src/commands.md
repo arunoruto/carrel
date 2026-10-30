@@ -23,7 +23,7 @@ Run `carrel <command> --help` for every option.
 | `edit <id>` | edit its `.bib` |
 | `rename <id> [new-id]` | change its key everywhere; without a new id, from the key template |
 | `update <id> [source]` / `update --all` | fetch metadata again |
-| `refs <id> [--cited-by] [--refresh]` / `refs --all` | its [references](citations.md), or the papers citing it |
+| `refs <id> [--cited-by] [--refresh]` / `refs --all` | its [references](citations.md), or the papers citing it; `--all` also looks up where the authors worked, for the map |
 | `graph [id] [-p project] [--dot] [--json]` | how a paper connects to the library, or what the library cites most but lacks |
 | `authors [name] [--json]` | the people behind the papers: spellings, papers, co-authors ([who is who](citations.md#who-is-who)) |
 | `authors same\|different <spelling>…` | confirm that spellings are one person, or different people |

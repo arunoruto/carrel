@@ -78,7 +78,7 @@ enum Cmd {
         /// Look its references up again
         #[arg(long)]
         refresh: bool,
-        /// Look up the references of every paper that has none yet
+        /// Look up the references (and authors' institutions) of every paper that has none yet
         #[arg(long, conflicts_with_all = ["id", "cited_by", "refresh"])]
         all: bool,
     },
@@ -359,6 +359,16 @@ fn main() -> Result<()> {
             println!("{} entries imported or matched", ids.len());
         }
         Cmd::Refs { all: true, .. } => {
+            // Only papers OpenAlex can find: by DOI or arXiv id.
+            let missing = |p: &carrel::Paper| {
+                carrel::affiliations::read(&p.dir).is_none() && (p.bib.doi().is_some() || p.bib.arxiv().is_some())
+            };
+            for p in lib.papers().0.into_iter().filter(|p| p.dir.join(carrel::graph::FILE).exists() && missing(p)) {
+                match lib.look_up_affiliations(&p) {
+                    Ok(n) => println!("{}: {n} institutions", p.id),
+                    Err(e) => println!("{}: institutions: {e:#}", p.id),
+                }
+            }
             let papers = lib.papers().0.into_iter().filter(|p| !p.dir.join(carrel::graph::FILE).exists());
             for p in papers {
                 match lib.look_up_references(&p) {

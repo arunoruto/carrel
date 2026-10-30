@@ -332,6 +332,10 @@ impl Library {
         let n = found.len();
         let from_ai = read(&p.dir)?.unwrap_or_default().into_iter().filter(|r| r.source == AI);
         write(&p.dir, &merge(found, from_ai))?;
+        if crate::affiliations::read(&p.dir).is_none() {
+            // Best effort: the map's institution links, not worth failing the references for.
+            let _ = self.look_up_affiliations(p);
+        }
         Ok((n, note))
     }
 

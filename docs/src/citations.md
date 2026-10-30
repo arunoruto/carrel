@@ -110,3 +110,7 @@ carrel authors reject 1
 ```
 
 The references live in `<key>/references.json`, a plain JSON list, so they travel with the library when you [share it](sharing.md).
+
+## Institutions
+
+Whenever carrel looks up a paper's references, it also asks OpenAlex where its authors worked when they wrote it, and keeps that in `<key>/affiliations.json`: each author with their institutions, named and with their [ROR](https://ror.org) id. The [web UI's map](web.md) links papers through the institutions they share. Papers added before this need `carrel refs --all` once; a [server](server.md) fills them in by itself. Only papers with a DOI or arXiv id can be found.

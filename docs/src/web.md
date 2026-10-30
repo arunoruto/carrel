@@ -20,7 +20,13 @@ It is for this machine only, like the [TUI](tui.md): it works on your local libr
 - **Inbox**: the new PDFs in your [Downloads](adding-papers.md#from-your-downloads), as `carrel consume` would offer them, to add or skip.
 - **Drafts**: what an AI proposed, next to what it would change, to approve or reject.
 - **Discover**: the papers your library, or a project, cites most but doesn't have.
-- **Map**: the library as a network. Papers are dots, coloured by their project or by year and bigger the more links they have. Lines join a paper to those it cites (blue arrows), to those sharing authors (orange, thicker the more authors they share), and, if you want, to those most alike by their embeddings (green, dashed, above a threshold you set). Hover a line to see who the shared authors are; click a paper to light up its neighbours; double-click to open it. Scroll zooms, dragging moves.
+- **Map**: the library as a network. Papers are dots, coloured by their project or by year and bigger the more links they have. Choose which links to draw; the choice is remembered, and only citations are on at first:
+  - **citations**, blue arrows from the citing paper to the cited one;
+  - **authors**, orange, thicker the more authors two papers share;
+  - **institutions**, lavender squares for the institutions two or more papers come from, linked to their papers ([from OpenAlex](citations.md#institutions));
+  - **alike**, green and dashed, the papers most alike by their embeddings, above a threshold you set.
+
+  Two papers linked several ways get their links side by side, so a citation between papers by the same people shows next to their author link, and hovering it says it is a self-citation. Hover a line to see who the shared authors are or who worked where; click a paper to light up its neighbours; double-click to open it. Scroll zooms, dragging moves.
 - **People**: everyone who wrote a library paper, most papers first: their spellings, papers and co-authors, and anyone who might be the same person, to confirm as one person or as different people ([who is who](citations.md#who-is-who)). Proposals about people from an AI wait in *Drafts*.
 - **Health**: what [`carrel doctor`](maintenance.md) finds, with the command that fixes each, and pairs of papers so alike by their embeddings that one may be a copy of the other.
 - **Sync** with the remote, a dark and a light theme (Catppuccin, like the TUI), and a layout that works on a phone.

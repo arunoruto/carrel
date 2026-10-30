@@ -125,6 +125,8 @@ export interface LibraryMap {
   nodes: MapNode[];
   cites: [string, string][];
   authors: [string, string, string[]][];
+  /** Institutions two or more of the papers share: each paper with its authors who were there. */
+  institutions: { name: string; country: string | null; ror: string | null; papers: Record<string, string[]> }[];
   similar: [string, string, number][];
 }
 

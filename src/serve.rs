@@ -126,6 +126,12 @@ fn round(lib: &Library, jobs: &Jobs, state: &mut State) -> Result<()> {
                 let note = note.map_or(String::new(), |note| format!("{note}; "));
                 log(&format!("{}: {note}{n} references", p.id));
             }
+        } else if carrel::affiliations::read(&p.dir).is_none()
+            && tried.insert(("institutions", p.id.clone()))
+            && let Ok(n) = lib.look_up_affiliations(&p)
+        {
+            changed = true;
+            log(&format!("{}: {n} institutions", p.id));
         }
     }
     if let Some(config) = &lib.embeddings {

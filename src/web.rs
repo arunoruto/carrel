@@ -11,7 +11,7 @@ use carrel::{Config, Field, Library, Paper, consume};
 use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
 use hyper::{Method, Request, Response, StatusCode, header};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::fs;
 use std::net::SocketAddr;
@@ -546,10 +546,25 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
             }
         }
     }
+    // Institutions shared by two or more of these papers, each with its papers and who wrote them there.
+    let mut places: BTreeMap<String, (carrel::affiliations::Institution, BTreeMap<String, Vec<String>>)> =
+        BTreeMap::new();
+    for p in &papers {
+        for author in carrel::affiliations::read(&p.dir).unwrap_or_default() {
+            for place in author.institutions {
+                let entry = places.entry(place.key()).or_insert_with(|| (place, BTreeMap::new()));
+                entry.1.entry(p.id.clone()).or_default().push(author.name.clone());
+            }
+        }
+    }
+    let institutions = places.into_values().filter(|(_, papers)| papers.len() > 1).map(
+        |(place, papers)| json!({"name": place.name, "country": place.country, "ror": place.ror, "papers": papers}),
+    );
     Ok(json!({
         "nodes": nodes.collect::<Vec<_>>(),
         "cites": cites.map(|(a, b)| json!([a, b])).collect::<Vec<_>>(),
         "authors": authors,
+        "institutions": institutions.collect::<Vec<_>>(),
         "similar": similar.into_iter().map(|(a, b, s)| json!([a, b, s])).collect::<Vec<_>>(),
     }))
 }

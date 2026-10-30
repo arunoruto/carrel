@@ -42,7 +42,7 @@ pub struct OpenAlex {
 }
 
 impl OpenAlex {
-    fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Value> {
+    pub(crate) fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Value> {
         let mut request = fetch::agent().get(&format!("https://api.openalex.org/{path}"));
         for (key, value) in query {
             request = request.query(key, value);
