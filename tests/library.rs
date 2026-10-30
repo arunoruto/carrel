@@ -564,12 +564,89 @@ fn sharing_through_a_remote() {
     sync(&a, None);
     assert_eq!(sync(&b, None), [(format!("{id}/notes.md"), Action::Upload)]);
     assert_eq!(sync(&a, None), [(format!("{id}/notes.md"), Action::Download)]);
+    tmp.write("lib/reading-list.txt", "keeps the remote from emptying");
+    sync(&a, None);
+    sync(&b, None);
     a.remove(&id).unwrap();
     assert!(sync(&a, None).iter().all(|(_, action)| *action == Action::DeleteRemote));
     assert!(sync(&b, None).iter().all(|(_, action)| *action == Action::DeleteLocal));
     assert!(!b.root.join(&id).exists(), "no empty folder is left behind");
     assert!(b.papers().0.is_empty());
     assert!(b.root.join(".carrel/trash").join(&id).join(format!("{id}.pdf")).exists());
+
+    // A remote that suddenly holds nothing (a wrong prefix, a wiped bucket) is refused, not mirrored.
+    fs::remove_file(a.root.join("reading-list.txt")).unwrap();
+    sync(&a, None);
+    let refused = b.sync(&remote, None, false, |_, _| {}).unwrap_err().to_string();
+    assert!(refused.contains("is empty, but 1 files here were synced with it"), "{refused}");
+    assert!(b.root.join("reading-list.txt").exists());
+}
+
+/// Hands out a made-up listing, or edits a file while it uploads to a folder.
+struct Rigged<'a> {
+    folder: &'a carrel::remote::Folder,
+    listing: Vec<&'a str>,
+    edit: Option<std::path::PathBuf>,
+}
+
+impl carrel::remote::Remote for Rigged<'_> {
+    fn name(&self) -> String {
+        self.folder.name()
+    }
+    fn list(&self) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+        let mut files = self.folder.list()?;
+        files.extend(self.listing.iter().map(|key| (key.to_string(), "etag".to_string())));
+        Ok(files)
+    }
+    fn download(&self, path: &str, to: &std::path::Path) -> anyhow::Result<()> {
+        match self.listing.contains(&path) {
+            true => Ok(fs::write(to, "from the remote")?),
+            false => self.folder.download(path, to),
+        }
+    }
+    fn upload(&self, path: &str, bytes: Vec<u8>) -> anyhow::Result<String> {
+        if let Some(file) = &self.edit {
+            fs::write(file, "edited during the upload").unwrap();
+        }
+        self.folder.upload(path, bytes)
+    }
+    fn delete(&self, path: &str) -> anyhow::Result<()> {
+        self.folder.delete(path)
+    }
+}
+
+#[test]
+fn syncing_safely() {
+    use carrel::remote::{Action, Folder};
+    let tmp = Tmp::new("sync-safely");
+    let lib = library(&tmp);
+    let folder = Folder(tmp.path("remote"));
+    fs::create_dir(&folder.0).unwrap();
+    let sync = |remote: &Rigged| lib.sync(remote, None, false, |_, _| {});
+
+    // Keys are checked before they become paths: nothing lands outside the library or in `.carrel`.
+    let bad = ["", "../escaped", "./a", "/abs", "a/../../escaped", "a//b", "a\\b", "folder/"]; // as listed: sorted
+    let listing = [&bad[..], &[".carrel/sync.json", "a2020/notes.md"]].concat();
+    let report = sync(&Rigged { folder: &folder, listing, edit: None }).unwrap();
+    assert_eq!(report.done, [("a2020/notes.md".to_string(), Action::Download)]);
+    assert_eq!(report.skipped, bad, "hidden keys are skipped quietly, like hidden files here");
+    assert!(!tmp.path("escaped").exists() && !tmp.path("lib/folder").exists());
+    assert!(!fs::read_to_string(lib.root.join(".carrel/sync.json")).unwrap().contains("escaped"));
+
+    // A file edited while it uploads goes up again at the next sync.
+    let notes = tmp.write("lib/b2021/notes.md", "first");
+    let edit = Rigged { folder: &folder, listing: vec!["a2020/notes.md"], edit: Some(notes) };
+    assert_eq!(sync(&edit).unwrap().done, [("b2021/notes.md".to_string(), Action::Upload)]);
+    let plain = Rigged { folder: &folder, listing: vec!["a2020/notes.md"], edit: None };
+    assert_eq!(sync(&plain).unwrap().done, [("b2021/notes.md".to_string(), Action::Upload)]);
+    assert_eq!(fs::read_to_string(folder.0.join("b2021/notes.md")).unwrap(), "edited during the upload");
+
+    // One sync at a time.
+    let lock = fs::File::open(lib.root.join(".carrel/sync.lock")).unwrap();
+    lock.lock().unwrap();
+    assert!(sync(&plain).unwrap_err().to_string().contains("another sync is running"));
+    drop(lock);
+    assert!(sync(&plain).unwrap().done.is_empty());
 }
 
 #[test]

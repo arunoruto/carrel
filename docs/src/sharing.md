@@ -43,6 +43,12 @@ carrel remembers what both sides held after each sync, in `.carrel/sync.json` in
 
 Nothing carrel deletes or overwrites locally is lost: it goes to `.carrel/trash`, keeping its path, and you can empty that folder whenever you like.
 
+A few things carrel refuses:
+
+- a remote that is suddenly empty while files here were synced with it before. That is more likely a wrong bucket or prefix, or a wiped remote, than everyone deleting everything, so carrel stops instead of moving the whole library to the trash. If the remote really is meant to be empty, delete the files here yourself; to fill it again from here, delete `.carrel/sync.json`;
+- names on the remote that aren't plain paths inside the library (`../x`, `/x`, `a//b`, folder markers like `papers/` that some S3 tools create): skipped, with a warning. Hidden ones (`.carrel/...`) are skipped quietly, as hidden files here are;
+- two syncs of one library at once (say `carrel sync` while `carrel serve` syncs): the second stops with "another sync is running".
+
 ## With Git
 
 Git keeps history, at the price of committing by hand. PDFs, figures and supplementary files go to [Git LFS](https://git-lfs.com), which GitHub, GitLab, Gitea and Forgejo all support. Don't sync the same library through Git and a bucket.
