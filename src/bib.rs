@@ -195,7 +195,7 @@ pub fn family(author: &str) -> &str {
 }
 
 /// Byte index of the delimiter closing the `{` or `"` that starts `s`.
-fn closing(s: &str) -> Option<usize> {
+pub(crate) fn closing(s: &str) -> Option<usize> {
     let quoted = s.starts_with('"');
     let (mut depth, mut escaped) = (0, false);
     for (i, c) in s.char_indices().skip(1) {

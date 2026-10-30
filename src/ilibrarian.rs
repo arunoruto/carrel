@@ -5,7 +5,7 @@
 //! downloaded: text extraction and references come afterwards (`carrel extract --all`, `carrel refs --all`).
 
 use crate::bib::Entry;
-use crate::{Library, citekey, copy_pdf, fetch, same_paper, valid_id};
+use crate::{Library, citekey, copy_pdf, fetch, same_paper};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
@@ -189,16 +189,7 @@ impl Library {
             if ids.is_empty() {
                 continue;
             }
-            let slug: String =
-                name.trim().chars().map(|c| if c.is_whitespace() || "/\\".contains(c) { '-' } else { c }).collect();
-            let slug = if valid_id(&slug) {
-                slug
-            } else {
-                deunicode::deunicode(&slug)
-                    .chars()
-                    .filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c))
-                    .collect()
-            };
+            let slug = crate::projects::slug(&name);
             self.add_to_project(&slug, &ids)?;
             if slug != name {
                 messages.push(format!("project {name:?} is now {slug}"));

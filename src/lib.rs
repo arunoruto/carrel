@@ -25,6 +25,7 @@ pub mod fetch;
 pub mod graph;
 mod ilibrarian;
 mod index;
+mod jabref;
 pub mod notify;
 mod projects;
 pub mod refs;
@@ -533,12 +534,19 @@ impl Library {
 
     /// Import the entries of a .bib file (from a LaTeX project, Zotero, JabRef, ...) as they are, keeping
     /// their keys so existing citations still work. Papers already in the library are matched instead.
-    /// With `pdfs`, papers with an arXiv id get their PDF. Returns the ids in file order and messages.
+    /// With `pdfs`, papers with an arXiv id get their PDF. JabRef's `file` links of new papers become
+    /// their PDF (the first linked PDF) and supplementary files, and its static groups become projects.
+    /// Returns the ids in file order and messages.
     pub fn import_bib(&self, path: &Path, pdfs: bool) -> Result<(Vec<String>, Vec<String>)> {
         let src = fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
         let (mut ids, mut messages) = (vec![], vec![]);
         let mut known = self.papers().0;
         let macros = Entry::macros(&src);
+        let meta = jabref::meta(&src);
+        let base = path.parent().unwrap_or(Path::new(""));
+        let dirs: Vec<PathBuf> = meta.dirs.iter().map(|d| base.join(d)).chain([base.to_path_buf()]).collect();
+        let groups: Vec<String> = meta.groups.iter().map(|(name, _)| name.clone()).collect();
+        let (mut members, mut key_ids) = (vec![], HashMap::new());
         for entry in Entry::parse_all(&src) {
             let (key, mut bib) = match entry {
                 Ok(entry) => entry,
@@ -548,31 +556,94 @@ impl Library {
                 }
             };
             bib.expand(&macros);
-            if let Some(old) = known.iter().find(|p| same_paper(&p.bib, &bib)) {
-                messages.push(format!("{key}: already in the library as {}", old.id));
-                ids.push(old.id.clone());
-                continue;
-            }
-            let id = match valid_id(&key) && !self.root.join(&key).exists() {
-                true => key.clone(),
-                false => {
-                    let id = self.unique_id(&citekey(&self.key, &bib)?);
-                    messages.push(format!("{key}: imported as {id}, since {key:?} is taken or can't name a folder"));
+            // carrel keeps the files and projects itself.
+            let links = bib.raw("file").map(jabref::files).unwrap_or_default();
+            let in_groups = bib.raw("groups").map(|g| jabref::group_names(g, &groups)).unwrap_or_default();
+            bib.set("file", None);
+            bib.set("groups", None);
+            let id = match known.iter().find(|p| same_paper(&p.bib, &bib)) {
+                Some(old) => {
+                    messages.push(format!("{key}: already in the library as {}", old.id));
+                    old.id.clone()
+                }
+                None => {
+                    let id = self.import_entry(&key, &bib, &links, &dirs, pdfs, &mut messages)?;
+                    known.push(self.get(&id)?);
                     id
                 }
             };
-            fs::create_dir_all(self.root.join(&id))?;
-            fs::write(self.root.join(&id).join(format!("{id}.bib")), bib.to_bib(&id))?;
-            if pdfs
-                && bib.arxiv().is_some()
-                && let Err(e) = self.attach(&id, None)
-            {
-                messages.push(format!("{id}: no PDF: {e:#}"));
-            }
-            known.push(self.get(&id)?);
+            members.extend(in_groups.into_iter().map(|g| (g, id.clone())));
+            key_ids.insert(key, id.clone());
             ids.push(id);
         }
+        for (group, keys) in &meta.groups {
+            members.extend(keys.iter().filter_map(|k| key_ids.get(k)).map(|id| (group.clone(), id.clone())));
+        }
+        // Every static group, empty ones too; a name JabRef has twice (in different branches) is one project.
+        let mut names: Vec<&String> = vec![];
+        for group in groups.iter().chain(members.iter().map(|(g, _)| g)) {
+            if !names.contains(&group) {
+                names.push(group);
+            }
+        }
+        for group in names {
+            let project = projects::slug(group);
+            let ids: Vec<String> = members.iter().filter(|(g, _)| g == group).map(|(_, id)| id.clone()).collect();
+            match self.add_to_project(&project, &ids) {
+                Ok(()) if project != *group => messages.push(format!("group {group:?} is now project {project}")),
+                Ok(()) => {}
+                Err(e) => messages.push(format!("group {group:?}: {e:#}")),
+            }
+        }
+        if meta.dynamic > 0 {
+            messages.push(format!("skipped {} JabRef groups that aren't static (keyword, search, ...)", meta.dynamic));
+        }
         Ok((ids, messages))
+    }
+
+    /// Write one new entry of an imported .bib into the library, with the files it links to.
+    fn import_entry(
+        &self,
+        key: &str,
+        bib: &Entry,
+        links: &[(String, String)],
+        dirs: &[PathBuf],
+        pdfs: bool,
+        messages: &mut Vec<String>,
+    ) -> Result<String> {
+        let id = match valid_id(key) && !self.root.join(key).exists() {
+            true => key.to_string(),
+            false => {
+                let id = self.unique_id(&citekey(&self.key, bib)?);
+                messages.push(format!("{key}: imported as {id}, since {key:?} is taken or can't name a folder"));
+                id
+            }
+        };
+        fs::create_dir_all(self.root.join(&id))?;
+        fs::write(self.root.join(&id).join(format!("{id}.bib")), bib.to_bib(&id))?;
+        let mut has_pdf = false;
+        for (link, kind) in links {
+            let Some(file) = jabref::resolve(link, dirs) else {
+                messages.push(format!("{id}: skipped {link}: no such file"));
+                continue;
+            };
+            let result = match !has_pdf && (kind.eq_ignore_ascii_case("pdf") || link.to_lowercase().ends_with(".pdf")) {
+                true => self.attach(&id, Some(&file)).inspect(|_| has_pdf = true),
+                false => self.add_supplementary(&id, &[file.to_string_lossy().into_owned()]),
+            };
+            match result {
+                Ok(m) => messages.extend(m.into_iter().map(|m| format!("{id}: {m}"))),
+                Err(e) => messages.push(format!("{id}: {e:#}")),
+            }
+        }
+        if pdfs
+            && !has_pdf
+            && bib.arxiv().is_some()
+            && let Err(e) = self.attach(&id, None)
+        {
+            messages.push(format!("{id}: no PDF: {e:#}"));
+        }
+        Ok(id)
     }
 
     /// Note which candidates (search results, citations) are already in the library.

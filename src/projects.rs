@@ -194,6 +194,19 @@ fn uncommented(line: &str, typst: bool) -> &str {
     line
 }
 
+/// A project name from another tool's (an I, Librarian project, a JabRef group): spaces and slashes
+/// become `-`, other characters ASCII.
+pub(crate) fn slug(name: &str) -> String {
+    let slug: String =
+        name.trim().chars().map(|c| if c.is_whitespace() || "/\\".contains(c) { '-' } else { c }).collect();
+    match valid_id(&slug) {
+        true => slug,
+        false => {
+            deunicode::deunicode(&slug).chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect()
+        }
+    }
+}
+
 fn line_id(line: &str) -> &str {
     line.split('#').next().unwrap_or("").trim()
 }
