@@ -72,7 +72,7 @@ impl Entry {
 
     /// The `@string{name = "text"}` macros of a .bib file, with their raw values.
     pub fn macros(src: &str) -> Vec<(String, String)> {
-        let lower = src.to_lowercase();
+        let lower = src.to_ascii_lowercase(); // same length, so its offsets slice `src`
         let found = lower.match_indices("@string").filter_map(|(i, _)| {
             let body = src[i + 7..].trim_start().strip_prefix(['{', '('])?;
             let (name, value) = body.split_once('=')?;
@@ -411,5 +411,8 @@ mod tests {
         let mut a = entries[0].as_ref().unwrap().1.clone();
         a.expand(&Entry::macros(src));
         assert_eq!(a.get("journal").as_deref(), Some("Nature"));
+        // "İ" grows when lowercased: offsets into the lowercased text would miss or split characters.
+        let macros = Entry::macros("% İİİ Straße\n@STRING{ist = {İstanbul}}");
+        assert_eq!(macros, [("ist".to_string(), "{İstanbul}".to_string())]);
     }
 }

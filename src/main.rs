@@ -752,6 +752,9 @@ fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>) -> Res
     if conflicts > 0 {
         println!("{conflicts} changed on both sides and left alone; settle them with --keep local or --keep remote");
     }
+    for path in &report.skipped {
+        eprintln!("warning: skipped {path:?} on the remote: not a file path inside the library");
+    }
     for (path, error) in &report.failed {
         eprintln!("failed: {path}: {error}");
     }

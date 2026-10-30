@@ -40,7 +40,7 @@ days = 30
 auto = false
 ```
 
-Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. Unfinished downloads (empty files, or Firefox's `.part` next to them) wait for the next run.
+Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. Unfinished downloads, PDFs that don't yet end in `%%EOF` (as curl and wget leave them, and Firefox's empty placeholder), wait for the next run.
 
 `carrel consume ~/Papers ~/Downloads` looks in those folders instead of the config's.
 

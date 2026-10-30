@@ -96,6 +96,9 @@ fn round(lib: &Library, jobs: &Jobs, state: &mut State) -> Result<()> {
         if !report.done.is_empty() || !report.failed.is_empty() {
             log(&format!("synced: {}", report.summary()));
         }
+        for path in &report.skipped {
+            log(&format!("sync skipped {path:?} on the remote: not a file path inside the library"));
+        }
         for (path, error) in &report.failed {
             log(&format!("sync failed for {path}: {error}"));
         }

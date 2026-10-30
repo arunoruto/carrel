@@ -5,13 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>carrel</title>
-    <script>
-      // The theme before the first paint, so a dark page doesn't flash white.
-      try {
-        const t = localStorage.getItem('theme');
-        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark');
-      } catch {}
-    </script>
+    <!-- A file, not inline, for the Content-Security-Policy carrel sends; blocking, so no flash of white. -->
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="app"></div>

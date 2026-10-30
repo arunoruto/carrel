@@ -44,8 +44,8 @@ pub trait Remote: Sync {
     /// Every file and its version tag (its ETag: for files uploaded in one piece, their MD5).
     fn list(&self) -> Result<BTreeMap<String, String>>;
     fn download(&self, path: &str, to: &Path) -> Result<()>;
-    /// Uploads `from` and returns the new version tag.
-    fn upload(&self, path: &str, from: &Path) -> Result<String>;
+    /// Uploads `bytes` and returns the new version tag.
+    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String>;
     fn delete(&self, path: &str) -> Result<()>;
 }
 
@@ -138,11 +138,11 @@ impl Remote for S3 {
         Ok(())
     }
 
-    fn upload(&self, path: &str, from: &Path) -> Result<String> {
+    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String> {
         let key = format!("{}{path}", self.prefix);
         let url = self.bucket.put_object(Some(&self.credentials), &key).sign(SIGNED_FOR);
         // ponytail: one PUT per file (S3 allows 5 GB); multipart when someone shares bigger files.
-        let response = Self::agent().put(url.as_str()).send(fs::read(from)?).map_err(s3_error)?;
+        let response = Self::agent().put(url.as_str()).send(bytes).map_err(s3_error)?;
         let etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).unwrap_or_default();
         Ok(etag.trim_matches('"').to_string())
     }
@@ -184,11 +184,11 @@ impl Remote for Folder {
         Ok(())
     }
 
-    fn upload(&self, path: &str, from: &Path) -> Result<String> {
+    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String> {
         let to = self.0.join(path);
         fs::create_dir_all(to.parent().unwrap())?;
-        fs::copy(from, &to)?;
-        md5_file(&to)
+        fs::write(&to, &bytes)?;
+        Ok(md5_hex(&bytes))
     }
 
     fn delete(&self, path: &str) -> Result<()> {
@@ -223,7 +223,11 @@ fn local_files(root: &Path) -> Result<Vec<String>> {
 }
 
 fn md5_file(path: &Path) -> Result<String> {
-    Ok(Md5::digest(fs::read(path)?).iter().map(|b| format!("{b:02x}")).collect())
+    Ok(md5_hex(&fs::read(path)?))
+}
+
+fn md5_hex(bytes: &[u8]) -> String {
+    Md5::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn remove_empty_parents(file: &Path, root: &Path) {
@@ -302,6 +306,8 @@ fn decide(local: Option<&str>, remote: Option<&str>, base: Option<&Synced>, keep
 pub struct Report {
     pub done: Vec<(String, Action)>,
     pub failed: Vec<(String, String)>,
+    /// Remote keys that aren't plain paths inside the library (`../x`, `/x`, folder markers `x/`).
+    pub skipped: Vec<String>,
 }
 
 impl Report {
@@ -332,6 +338,15 @@ impl Library {
         dry_run: bool,
         mut progress: impl FnMut(&str, Action) + Send,
     ) -> Result<Report> {
+        let carrel = self.root.join(".carrel");
+        fs::create_dir_all(&carrel)?;
+        // Held until the sync returns; two at once would download into the same parts and state.
+        let lock = fs::File::create(carrel.join("sync.lock"))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => bail!("another sync is running in this library; try again later"),
+            Err(fs::TryLockError::Error(e)) => return Err(e).context("cannot lock .carrel/sync.lock"),
+        }
         let name = remote.name();
         let mut state: State = fs::read(self.state_path())
             .ok()
@@ -350,7 +365,27 @@ impl Library {
             };
             local.insert(path, (md5, size, mtime));
         }
-        let remote_files = remote.list()?;
+        let mut outcome = Report::default();
+        let mut remote_files = remote.list()?;
+        // Anyone with the bucket's keys picks the keys: never let one point outside the library.
+        remote_files.retain(|path, _| {
+            if path.contains('\\') || path.split('/').any(|c| matches!(c, "" | "." | "..")) {
+                outcome.skipped.push(path.clone());
+                return false;
+            }
+            // Hidden files stay local on both sides, `.carrel/` above all.
+            !path.split('/').any(|c| c.starts_with('.'))
+        });
+        // An empty remote would trash every file synced before: more likely a wrong bucket or prefix,
+        // or a wiped remote, than everyone deleting everything.
+        let synced_here = state.files.keys().filter(|p| local.contains_key(*p)).count();
+        if remote_files.is_empty() && synced_here > 0 {
+            bail!(
+                "{} is empty, but {synced_here} files here were synced with it; check the bucket and prefix. \
+                 To delete them here too, delete them yourself; to upload them again, delete .carrel/sync.json",
+                remote.name()
+            );
+        }
 
         let paths: BTreeSet<String> =
             local.keys().chain(remote_files.keys()).chain(state.files.keys()).cloned().collect();
@@ -374,7 +409,6 @@ impl Library {
         }
 
         let (listed, plan): (Vec<_>, Vec<_>) = plan.into_iter().partition(|(_, a)| dry_run || *a == Action::Conflict);
-        let mut outcome = Report::default();
         for (path, action) in listed {
             progress(&path, action);
             outcome.done.push((path, action));
@@ -411,7 +445,7 @@ impl Library {
         let (state, outcome, _) = shared.into_inner().unwrap();
         if !dry_run {
             self.save_state(&state)?;
-            let _ = fs::remove_dir_all(self.root.join(".carrel").join("parts"));
+            let _ = fs::remove_dir_all(carrel.join("parts"));
         }
         Ok(outcome)
     }
@@ -428,12 +462,17 @@ impl Library {
         let file = self.root.join(path);
         match action {
             Action::Upload => {
-                let etag = remote.upload(path, &file)?;
-                return synced(&file, etag).map(Some);
+                // Record what was sent, and the metadata from before reading it: an edit meanwhile then
+                // shows as a change at the next sync.
+                let meta = fs::metadata(&file)?;
+                let bytes = fs::read(&file)?;
+                let md5 = md5_hex(&bytes);
+                let etag = remote.upload(path, bytes)?;
+                return Ok(Some(Synced { md5, etag, size: meta.len(), mtime: mtime(&meta) }));
             }
             Action::Download => {
                 fs::create_dir_all(file.parent().unwrap())?;
-                let part = self.root.join(".carrel").join("parts").join(n.to_string());
+                let part = self.root.join(".carrel").join("parts").join(format!("{}-{n}", std::process::id()));
                 fs::create_dir_all(part.parent().unwrap())?;
                 remote.download(path, &part)?;
                 // Whatever was here goes to the trash, so a sync never loses a file for good.
