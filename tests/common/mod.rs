@@ -41,7 +41,7 @@ impl Drop for Tmp {
 }
 
 /// Starts like a PDF, which is all carrel checks; the fake extractor does the rest.
-pub const FAKE_PDF: &[u8] = b"%PDF-1.4\n% test file\n";
+pub const FAKE_PDF: &[u8] = b"%PDF-1.4\n% test file\n%%EOF\n";
 
 /// An extractor that writes `text` (no single quotes) and one figure: no Python, no internet.
 pub fn fake_extractor(text: &str) -> String {

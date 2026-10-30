@@ -721,11 +721,11 @@ fn consuming() {
     let dirs = [tmp.path("Downloads")];
     tmp.write("Downloads/2301.01234v2.pdf", FAKE_PDF);
     tmp.write("Downloads/plain.PDF", FAKE_PDF);
-    tmp.write("Downloads/with-doi.pdf", b"%PDF-1.4\n<prism:doi>10.1029/2000JE001402</prism:doi>\n");
+    tmp.write("Downloads/with-doi.pdf", b"%PDF-1.4\n<prism:doi>10.1029/2000JE001402</prism:doi>\n%%EOF");
     tmp.write("Downloads/sub/deeper.pdf", FAKE_PDF);
     tmp.write("Downloads/empty.pdf", "");
-    tmp.write("Downloads/loading.pdf", FAKE_PDF);
-    tmp.write("Downloads/loading.pdf.part", FAKE_PDF);
+    tmp.write("Downloads/loading.pdf", [FAKE_PDF, &[b'x'; 2000]].concat()); // still being written
+    tmp.write("Downloads/firefox.pdf", ""); // next to the firefox.pdf.part it writes
     let old = tmp.write("Downloads/old.pdf", FAKE_PDF);
     let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86400);
     fs::File::options().write(true).open(&old).unwrap().set_modified(month_ago).unwrap();

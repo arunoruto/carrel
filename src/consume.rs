@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -61,8 +62,8 @@ pub fn find(folders: &[PathBuf], days: u64) -> Vec<Found> {
             let modified = meta.modified().ok().filter(|m| *m >= since)?;
             let modified = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
             let path = e.path();
-            // Still downloading: Firefox keeps an empty `x.pdf` next to the `x.pdf.part` it writes.
-            if Path::new(&format!("{}.part", path.display())).exists() {
+            // Still downloading (curl and wget write in place); consuming it would delete it half-written.
+            if !ends_with_eof(&path, meta.len()) {
                 return None;
             }
             Some(Found { clue: clue(&path), path, size: meta.len(), modified })
@@ -70,6 +71,18 @@ pub fn find(folders: &[PathBuf], days: u64) -> Vec<Found> {
         .collect();
     found.sort_by_key(|f| f.modified);
     found
+}
+
+/// Whether the last KiB of a PDF holds its `%%EOF` marker, as a complete one's does.
+fn ends_with_eof(path: &Path, len: u64) -> bool {
+    let tail = || -> std::io::Result<Vec<u8>> {
+        let mut file = fs::File::open(path)?;
+        file.seek(SeekFrom::Start(len.saturating_sub(1024)))?;
+        let mut tail = vec![];
+        file.read_to_end(&mut tail)?;
+        Ok(tail)
+    };
+    tail().is_ok_and(|tail| tail.windows(5).any(|w| w == b"%%EOF"))
 }
 
 /// An arXiv id in the file name (`2301.01234v2.pdf`), or a DOI or "arXiv" in the parts of the file that
