@@ -24,6 +24,7 @@ impl Carrel {
             .env("XDG_STATE_HOME", self.tmp.path("state"))
             .env("CARREL_EXTRACTOR", fake_extractor("Plain text without a heading or identifier."))
             .env("VISUAL", "true")
+            .env_remove("CARREL_DOCLING")
             .env_remove("S2_API_KEY")
             .env_remove("ADS_API_TOKEN")
             .env_remove("ADS_DEV_KEY")
@@ -188,6 +189,10 @@ fn config_file() {
 /// PATH without the folders holding uv or docling, with `first` in front.
 fn path_without_extractors(first: &std::path::Path) -> std::ffi::OsString {
     let path = std::env::var_os("PATH").unwrap_or_default();
+    // The folder with uv can be the one with sh too (NixOS's system profile); keep sh.
+    let sh = std::env::split_paths(&path).map(|dir| dir.join("sh")).find(|sh| sh.exists()).unwrap();
+    std::fs::create_dir_all(first).unwrap();
+    let _ = std::os::unix::fs::symlink(sh, first.join("sh"));
     let others = std::env::split_paths(&path).filter(|dir| !dir.join("uv").exists() && !dir.join("docling").exists());
     std::env::join_paths(std::iter::once(first.to_path_buf()).chain(others)).unwrap()
 }
