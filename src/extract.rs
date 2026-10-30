@@ -118,10 +118,15 @@ impl Extractor for Docling {
             bail!("docling failed: {}", stderr.trim().lines().last().unwrap_or("it wrote no Markdown"));
         };
         let artifacts = format!("{}_artifacts", md.file_stem().unwrap_or_default().to_string_lossy());
-        let text = fs::read_to_string(&md)?.replace(&format!("]({artifacts}/"), "](figures/");
+        // Older versions (2.69) put the images next to the .md; newer ones (2.118) one `docling/` deeper,
+        // with the links saying so.
+        let text = fs::read_to_string(&md)?.replace(&format!("](docling/{artifacts}/"), "](figures/");
+        let text = text.replace(&format!("]({artifacts}/"), "](figures/").replace('\0', NOT_A_CHARACTER);
         fs::write(out.join("fulltext.md"), text)?;
-        if work.join(&artifacts).is_dir() {
-            fs::rename(work.join(&artifacts), out.join("figures"))?;
+        if let Some(images) =
+            [work.join(&artifacts), work.join("docling").join(&artifacts)].into_iter().find(|d| d.is_dir())
+        {
+            fs::rename(images, out.join("figures"))?;
         }
         fs::remove_dir_all(&work)?;
         Ok(())
@@ -160,10 +165,14 @@ impl Extractor for DoclingServe {
         let Some(md) = md.filter(|_| matches!(reply["status"].as_str(), Some("success" | "partial_success"))) else {
             bail!("docling at {} failed: {}", self.0, reply["errors"]);
         };
-        fs::write(out.join("fulltext.md"), unembed(md, out)?)?;
+        fs::write(out.join("fulltext.md"), unembed(&md.replace('\0', NOT_A_CHARACTER), out)?)?;
         Ok(())
     }
 }
+
+/// For a glyph a PDF doesn't map to text: Docling writes NUL, which makes tools take the file for binary;
+/// PyMuPDF writes this.
+const NOT_A_CHARACTER: &str = "\u{FFFD}";
 
 /// Docling's embedded images, `](data:image/png;base64,…)`, as files in `figures/` linked from there.
 fn unembed(md: &str, out: &Path) -> Result<String> {
@@ -219,19 +228,22 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("carrel-docling-{}", std::process::id()));
         let out = tmp.join("out");
         fs::create_dir_all(&out).unwrap();
-        // What docling writes for `My Paper.pdf`, links relative to the .md.
+        // What docling 2.118 writes for `My Paper.pdf` (tests/cli.rs has the older layout).
         let fake = tmp.join("docling");
         fs::write(
             &fake,
-            "#!/bin/sh\nmkdir -p 'docling/My Paper_artifacts'\nprintf png > 'docling/My Paper_artifacts/image_000000_ab12.png'\n\
-             printf '# Title\\n\\n![Image](My Paper_artifacts/image_000000_ab12.png)\\n' > 'docling/My Paper.md'\n",
+            "#!/bin/sh\nmkdir -p 'docling/docling/My Paper_artifacts'\nprintf png > 'docling/docling/My Paper_artifacts/image_000000_ab12.png'\n\
+             printf '# Title\\000\\n\\n![Image](My Paper_artifacts/image_000000_ab12.png)\\n![Image](docling/My Paper_artifacts/image_000000_ab12.png)\\n' > 'docling/My Paper.md'\n",
         )
         .unwrap();
         std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
 
         Docling(fake.clone()).extract(&tmp.join("My Paper.pdf"), &out).unwrap();
         let text = fs::read_to_string(out.join("fulltext.md")).unwrap();
-        assert_eq!(text, "# Title\n\n![Image](figures/image_000000_ab12.png)\n");
+        assert_eq!(
+            text,
+            "# Title\u{FFFD}\n\n![Image](figures/image_000000_ab12.png)\n![Image](figures/image_000000_ab12.png)\n"
+        );
         assert!(out.join("figures/image_000000_ab12.png").exists());
         assert!(!out.join("docling").exists(), "its folder is cleaned up");
 
