@@ -5,7 +5,8 @@ Settings live in `~/.config/carrel/config.toml` (or `$XDG_CONFIG_HOME/carrel/con
 ```toml
 library = "~/Documents/carrel"
 key = "{{ author | lower }}{{ year }}{{ word | lower }}"
-# extractor = "..."
+# extractor = "auto"
+# docling = "/path/to/docling"
 # default = "tui"
 # theme = "catppuccin-mocha"
 
@@ -56,9 +57,22 @@ For *He, Zhang, Ren and Sun (2016), Deep Residual Learning for Image Recognition
 
 ## The extractor
 
-`extractor` is the shell command that turns a PDF into text and figures. It runs in an empty folder with the PDF's path in `$PDF` and must write `fulltext.md` there, and optionally figure images into `figures/`. `CARREL_EXTRACTOR` overrides it.
+`extractor` is what turns a PDF into `fulltext.md` and its figures into `figures/`. `CARREL_EXTRACTOR` overrides it.
 
-The default runs pymupdf4llm through uv; the Nix package uses pymupdf4llm from nixpkgs instead. A wrapper around [docling](https://github.com/docling-project/docling) or [marker](https://github.com/datalab-to/marker) works too, for instance.
+| Value | Extractor |
+|---|---|
+| `auto` (the default) | Docling if it is installed, else PyMuPDF if it can run, else none |
+| `docling` | [Docling](https://github.com/docling-project/docling): better tables and reading order, but slow |
+| `pymupdf` | [pymupdf4llm](https://pypi.org/project/pymupdf4llm/): fast and good enough for most papers |
+| anything else | a shell command, see below |
+
+**PyMuPDF** runs through [uv](https://docs.astral.sh/uv/), which fetches pymupdf4llm on first use; the Nix package and the Docker image bring their own Python with it instead, so for them it is always there.
+
+**Docling** is found as `docling` on your `PATH`, or where `docling` in the config says (useful for services, whose `PATH` is short). Install it with `uv tool install docling` or `pipx install docling`; on Nix it is in nixpkgs, e.g. `home.packages = [ pkgs.docling ];` (it is not part of carrel's package: it brings PyTorch, gigabytes of it), or for the [NixOS module](server.md#on-nixos) `services.carrel.settings.docling = lib.getExe pkgs.docling;`. With `auto`, carrel then uses it. carrel runs `docling --to md --image-export-mode referenced --no-ocr`, without OCR because papers born digital don't need it and it is slow, and moves the result into carrel's layout. Docling downloads its models on first use, so the first paper takes a while, and on a CPU every paper takes tens of seconds to minutes; there is no time limit. It leaves formulas out (`<!-- formula-not-decoded -->`) unless its formula model is on: point `docling` in the config at a script that runs `docling --enrich-formula "$@"` (slower still).
+
+**Nothing installed**: papers and PDFs are still added, without their text; carrel says so once. `carrel config` shows which extractor is in use, and `carrel doctor` lists the papers without text; `carrel extract --all` extracts them once there is an extractor. An extractor asked for by name but not installed is an error.
+
+**A shell command** runs in an empty folder with the PDF's path in `$PDF` and must write `fulltext.md` there, and optionally figure images into `figures/`. A wrapper around [marker](https://github.com/datalab-to/marker) works, for instance.
 
 ## The server
 
@@ -115,7 +129,7 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | Variable | Purpose |
 |---|---|
 | `CARREL_HOME` | the library folder |
-| `CARREL_EXTRACTOR` | the extractor command |
+| `CARREL_EXTRACTOR` | the [extractor](#the-extractor): `auto`, `docling`, `pymupdf` or a command |
 | `S2_API_KEY` | a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key); without one, references, citations and some lookups are often rate-limited |
 | `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |

@@ -27,7 +27,8 @@ rustPlatform.buildRustPackage {
   };
   cargoLock.lockFile = ../Cargo.lock;
 
-  # Baked in as the default; the config's `extractor` and CARREL_EXTRACTOR still override it.
+  # PyMuPDF's command, always available; `auto` still prefers Docling (not included: it brings PyTorch)
+  # when it is on PATH, and the config's `extractor` and CARREL_EXTRACTOR override it.
   env.CARREL_DEFAULT_EXTRACTOR = ''${python}/bin/python -I -c "$CARREL_EXTRACT_PY" "$PDF"'';
   # `carrel web`'s UI, built into the binary.
   env.CARREL_WEB_DIST = web;

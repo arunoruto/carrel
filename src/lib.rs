@@ -21,6 +21,7 @@ pub mod bib;
 pub mod consume;
 mod doctor;
 pub mod embed;
+pub mod extract;
 pub mod fetch;
 pub mod graph;
 mod ilibrarian;
@@ -41,7 +42,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The parts of a paper an AI may write. Its writes land in `drafts/` until a human approves them.
@@ -177,9 +178,11 @@ pub struct Config {
     pub library: Option<String>,
     /// Template for the citation keys of new papers, which also name their folder and files.
     pub key: Option<String>,
-    /// Shell command that turns `$PDF` into `fulltext.md` (and `figures/`) in the current directory.
+    /// What turns PDFs into text: `auto`, `docling`, `pymupdf` or a shell command, see [`extract::choose`].
     /// `CARREL_EXTRACTOR` overrides it.
     pub extractor: Option<String>,
+    /// Where Docling is, when not on PATH.
+    pub docling: Option<String>,
     /// What `carrel` without arguments runs, as its arguments: `tui` (the default), `list -p thesis`, ...
     pub default: Option<String>,
     /// The TUI's colours: a built-in theme (`catppuccin-mocha`, `catppuccin-latte`) or
@@ -290,8 +293,10 @@ pub struct Library {
     pub index: PathBuf,
     /// Template for new citation keys.
     pub key: String,
-    /// Shell command extracting text and figures, see [`DEFAULT_EXTRACTOR`].
+    /// What extracts text and figures, see [`extract::choose`]: `auto` by default.
     pub extractor: String,
+    /// Where Docling is, when not on PATH.
+    pub docling: Option<PathBuf>,
     /// Where to compute embeddings for semantic search; none without `[embeddings]` in the config.
     pub embeddings: Option<embed::Config>,
 }
@@ -317,6 +322,7 @@ impl Library {
         if let Some(cmd) = std::env::var("CARREL_EXTRACTOR").ok().or(config.extractor) {
             lib.extractor = cmd;
         }
+        lib.docling = config.docling.as_deref().map(expand_home);
         lib.embeddings = config.embeddings;
         Ok(lib)
     }
@@ -329,7 +335,7 @@ impl Library {
         let mut hash = DefaultHasher::new();
         root.hash(&mut hash);
         let index = cache.join(format!("index-{:016x}.sqlite", hash.finish()));
-        Ok(Self { root, index, key: DEFAULT_KEY.into(), extractor: DEFAULT_EXTRACTOR.into(), embeddings: None })
+        Ok(Self { root, index, key: DEFAULT_KEY.into(), extractor: "auto".into(), docling: None, embeddings: None })
     }
 
     pub fn get(&self, id: &str) -> Result<Paper> {
@@ -421,8 +427,8 @@ impl Library {
             fetch::download_arxiv(id, &pdf)?;
         }
         let has_pdf = pdf.exists();
-        if has_pdf && let Err(e) = run_extractor(&self.extractor, &pdf, &tmp.0) {
-            messages.push(format!("{e:#}"));
+        if has_pdf {
+            messages.extend(self.try_extract(&pdf, &tmp.0));
         }
 
         // Identify a PDF: ids printed on its first page, else its title.
@@ -527,7 +533,7 @@ impl Library {
                 fetch::download_arxiv(&arxiv, &tmp.0.join("paper.pdf"))?;
             }
         }
-        let messages = run_extractor(&self.extractor, &tmp.0.join("paper.pdf"), &tmp.0).err().map(|e| format!("{e:#}"));
+        let messages = self.try_extract(&tmp.0.join("paper.pdf"), &tmp.0);
         move_outputs(&tmp.0, &p.dir, id)?;
         Ok(messages.into_iter().collect())
     }
@@ -698,14 +704,15 @@ impl Library {
                 messages.push(format!("{name}: not extracting its text, {stem}.md already exists"));
             } else if fs::read(&target)?.starts_with(b"%PDF") {
                 let tmp = Staging::new(&self.root)?;
-                match run_extractor(&self.extractor, &target, &tmp.0) {
-                    Ok(()) => {
+                match self.try_extract(&target, &tmp.0) {
+                    Some(e) => messages.push(format!("{name}: {e}")),
+                    None if tmp.0.join("fulltext.md").exists() => {
                         fs::rename(tmp.0.join("fulltext.md"), dir.join(format!("{stem}.md")))?;
                         if tmp.0.join("figures").exists() {
                             fs::rename(tmp.0.join("figures"), dir.join(format!("{stem}-figures")))?;
                         }
                     }
-                    Err(e) => messages.push(format!("{name}: {e:#}")),
+                    None => {} // no extractor, and the user was told
                 }
             }
             messages.push(format!("added {name}"));
@@ -713,12 +720,28 @@ impl Library {
         Ok(messages)
     }
 
+    /// What extracts text here; `None` when nothing is installed.
+    pub fn extractor(&self) -> Result<Option<Box<dyn extract::Extractor>>> {
+        extract::choose(&self.extractor, self.docling.clone())
+    }
+
+    /// Extract text and figures into `out`; a message worth showing when that didn't work. Without an
+    /// extractor, says so only the first time, as adding papers still works.
+    fn try_extract(&self, pdf: &Path, out: &Path) -> Option<String> {
+        static TOLD: AtomicBool = AtomicBool::new(false);
+        match self.extractor() {
+            Ok(Some(extractor)) => extractor.extract(pdf, out).err().map(|e| format!("{e:#}")),
+            Ok(None) => (!TOLD.swap(true, Ordering::Relaxed)).then(|| format!("text not extracted: {NO_EXTRACTOR}")),
+            Err(e) => Some(format!("{e:#}")),
+        }
+    }
+
     /// Re-run text and figure extraction for a paper.
     pub fn extract(&self, id: &str) -> Result<()> {
         let p = self.get(id)?;
         let pdf = p.pdf().context("this paper has no PDF")?;
         let tmp = Staging::new(&self.root)?;
-        run_extractor(&self.extractor, &pdf, &tmp.0)?;
+        self.extractor()?.context(NO_EXTRACTOR)?.extract(&pdf, &tmp.0)?;
         let _ = fs::remove_dir_all(p.dir.join("figures")); // even if the new extraction has none
         move_outputs(&tmp.0, &p.dir, id)
     }
@@ -867,30 +890,9 @@ fn valid_id(id: &str) -> bool {
 /// The folder for a paper's supplementary material.
 pub const SUPPLEMENTARY: &str = "supplementary";
 
-const EXTRACT_PY: &str = include_str!("extract.py");
-
-/// Override with `CARREL_EXTRACTOR` or the config's `extractor`: any shell command that reads `$PDF`
-/// and writes `fulltext.md` (and optionally `figures/`) into the current directory. Packagers can bake
-/// in another default at build time with `CARREL_DEFAULT_EXTRACTOR` (the Nix package does).
-pub const DEFAULT_EXTRACTOR: &str = match option_env!("CARREL_DEFAULT_EXTRACTOR") {
-    Some(cmd) => cmd,
-    None => r#"uv run --quiet --no-project --with pymupdf4llm==1.28.2 python -I -c "$CARREL_EXTRACT_PY" "$PDF""#,
-};
-
-fn run_extractor(cmd: &str, pdf: &Path, out: &Path) -> Result<()> {
-    let output = Command::new("sh")
-        .args(["-c", cmd])
-        .current_dir(out)
-        .env("PDF", pdf)
-        .env("CARREL_EXTRACT_PY", EXTRACT_PY)
-        .stdin(Stdio::null())
-        .output()
-        .context("cannot run the extractor")?;
-    if !output.status.success() || !out.join("fulltext.md").exists() {
-        bail!("text extraction failed: {}", String::from_utf8_lossy(&output.stderr).trim());
-    }
-    Ok(())
-}
+/// What to do when no extractor is installed.
+pub(crate) const NO_EXTRACTOR: &str =
+    "no text extractor found; install uv or docling (see Configuration in carrel's docs), then run `carrel extract`";
 
 fn copy_pdf(from: &Path, to: &Path) -> Result<()> {
     fs::copy(from, to).with_context(|| format!("cannot read {}", from.display()))?;

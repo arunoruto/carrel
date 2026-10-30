@@ -47,7 +47,7 @@ or as a flake input, using its package or overlay:
 }
 ```
 
-The Nix package comes with its text extractor (Python with pymupdf4llm from nixpkgs), so nothing is downloaded at runtime and extraction works offline.
+The Nix package comes with its text extractor (Python with pymupdf4llm from nixpkgs), so nothing is downloaded at runtime and extraction works offline. For [Docling](configuration.md#the-extractor) instead, add `pkgs.docling` to your packages.
 
 ## Docker
 
@@ -73,4 +73,4 @@ cargo install --path .
 
 ## The text extractor
 
-Turning PDFs into text and figures is done by an external command (see [Configuration](configuration.md#the-extractor)). Outside of Nix the default runs [pymupdf4llm](https://pypi.org/project/pymupdf4llm/) through [uv](https://docs.astral.sh/uv/), so **install uv**; it fetches pymupdf4llm on first use. Without it, papers are still added, just without their text.
+Turning PDFs into text and figures is done by an external program (see [Configuration](configuration.md#the-extractor)): [Docling](https://github.com/docling-project/docling) if it is installed, else [pymupdf4llm](https://pypi.org/project/pymupdf4llm/). Outside of Nix and Docker, pymupdf4llm runs through [uv](https://docs.astral.sh/uv/), so **install uv** (or Docling); uv fetches pymupdf4llm on first use. Without either, papers are still added, just without their text.
