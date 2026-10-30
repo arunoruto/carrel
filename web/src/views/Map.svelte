@@ -10,14 +10,16 @@
   import { go, paperHref, router } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
 
-  // The library as a network: papers linked by citations, by the authors they share (thicker for more), through
-  // the institutions they come from (square hubs), and by how alike they are. Drawn on a canvas; d3-force lays it out.
+  // The library as a network: papers linked by citations, through the authors they share (diamond hubs) and the
+  // institutions they come from (square hubs), and by how alike they are. Drawn on a canvas; d3-force lays it out.
   type Place = LibraryMap['institutions'][number];
-  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place };
+  // A hub stands for an institution (`place`) or an author (`person`), linked to their papers.
+  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place; person?: string };
   type Kind = 'cites' | 'authors' | 'institutions' | 'similar';
   // `bend`: how far a link curves off the straight line, so two papers linked several ways show each link.
   // `self`: for a citation, the authors the two papers share.
   type Edge = { source: Node; target: Node; kind: Kind; names?: string[]; score?: number; bend: number; self?: string[] };
+  const hub = (n: Node) => !!(n.place || n.person);
 
   // Raw: d3 moves the nodes itself, and the selection must stay the very node object.
   let data = $state.raw<LibraryMap | null>(null);
@@ -73,7 +75,12 @@
       const id = `institution:${p.ror ?? p.name}`;
       return { id, title: p.name, authors: '', year: null, venue: p.country, keywords: [], projects: [], place: p };
     };
-    const all = [...d.nodes, ...(s.institutions ? d.institutions.map(place) : [])].map((n) => {
+    // Each author two or more shown papers share, with those papers.
+    const people = new Map<string, Set<string>>();
+    d.authors.forEach(([a, b, names]) => names.forEach((name) => people.set(name, new Set([...(people.get(name) ?? []), a, b]))));
+    const person = (name: string): MapNode & { person: string } => ({ id: `author:${name}`, title: name, authors: '', year: null, venue: null, keywords: [], projects: [], person: name });
+    const hubs = [...(s.institutions ? d.institutions.map(place) : []), ...(s.authors ? [...people.keys()].map(person) : [])];
+    const all = [...d.nodes, ...hubs].map((n) => {
       const old = before.get(n.id);
       return Object.assign(old ?? { x: (Math.random() - 0.5) * 400, y: (Math.random() - 0.5) * 400 }, n, { degree: 0 }) as Node;
     });
@@ -87,7 +94,7 @@
     const pair = (a: string, b: string) => (a < b ? `${a}\n${b}` : `${b}\n${a}`);
     const coauthors = new Map(d.authors.map(([a, b, names]) => [pair(a, b), names]));
     if (s.cites) d.cites.forEach(([a, b]) => add(a, b, 'cites', { self: coauthors.get(pair(a, b)) }));
-    if (s.authors) d.authors.forEach(([a, b, names]) => add(a, b, 'authors', { names }));
+    if (s.authors) people.forEach((ids, name) => ids.forEach((id) => add(id, `author:${name}`, 'authors')));
     if (s.institutions) d.institutions.forEach((p) => Object.entries(p.papers).forEach(([id, names]) => add(id, place(p).id, 'institutions', { names })));
     if (s.similar) d.similar.filter(([, , sc]) => sc >= threshold).forEach(([a, b, score]) => add(a, b, 'similar', { score }));
     // Papers linked more than one way get their links side by side, so a citation between co-authors stays visible.
@@ -107,12 +114,13 @@
       .force(
         'link',
         forceLink<Node, Edge>(edges)
-          .distance((e) => ({ authors: 46, cites: 70, institutions: 60, similar: 80 })[e.kind])
-          .strength((e) => (e.kind === 'authors' ? Math.min(0.9, 0.25 * (e.names?.length ?? 1)) : e.kind === 'cites' ? 0.25 : e.kind === 'institutions' ? 0.2 : 0.15)),
+          .distance((e) => ({ authors: 26, cites: 60, institutions: 32, similar: 50 })[e.kind])
+          // People and places pull hard, citations (which tie nearly everything together) loosely: groups clump.
+          .strength((e) => ({ authors: 0.8, cites: 0.12, institutions: 0.6, similar: 0.3 })[e.kind]),
       )
-      .force('charge', forceManyBody().strength(-170).distanceMax(600))
-      .force('x', forceX(0).strength(0.05))
-      .force('y', forceY(0).strength(0.05))
+      .force('charge', forceManyBody().strength(-140).distanceMax(450))
+      .force('x', forceX(0).strength(0.04))
+      .force('y', forceY(0).strength(0.04))
       .force('collide', forceCollide<Node>().radius((n) => radius(n) + 3))
       .on('tick', draw);
     // The first layout is worked out at once, so the map appears settled; later changes animate gently.
@@ -132,7 +140,7 @@
 
   $effect(() => () => sim?.stop());
 
-  const radius = (n: Node) => (n.place ? 5 + Math.sqrt(n.degree) * 2 : 4 + Math.sqrt(n.degree) * 1.8);
+  const radius = (n: Node) => (hub(n) ? 5 + Math.sqrt(n.degree) * 2 : 4 + Math.sqrt(n.degree) * 1.8);
   const palette = ['#e8586e', '#f2a33a', '#4fb06d', '#4c7ef0', '#a974e8', '#2fb5c4', '#e077b8', '#b5b83a', '#d9773a', '#7c8bd9', '#3fa38f', '#c46b4f'];
   const projects = $derived(app.projects.map((p) => p.name));
   const sizes = $derived(Object.fromEntries(app.projects.map((p) => [p.name, p.papers.length])));
@@ -188,7 +196,7 @@
       const on = !focus || e.source === focus || e.target === focus;
       ctx.globalAlpha = e === hovered ? 1 : on ? (focus ? 0.9 : e.kind === 'similar' ? 0.7 : e.kind === 'cites' ? 0.5 : 0.35) : 0.06;
       ctx.strokeStyle = kinds[e.kind];
-      const width = e.kind === 'authors' ? 0.8 + 1.4 * Math.min(6, e.names?.length ?? 1) : e.kind === 'similar' ? 1 + 6 * Math.max(0, (e.score ?? 0) - 0.6) : e.kind === 'cites' ? 1.5 : 1.2;
+      const width = e.kind === 'similar' ? 1 + 6 * Math.max(0, (e.score ?? 0) - 0.6) : e.kind === 'cites' ? 1.5 : 1.2;
       ctx.lineWidth = (width / Math.sqrt(view.k)) * (e === hovered ? 2 : 1);
       ctx.setLineDash(e.kind === 'similar' ? [4, 4] : []);
       const [ax, ay, cx, cy, bx, by] = curve(e);
@@ -208,12 +216,19 @@
       const r = radius(n);
       ctx.beginPath();
       if (n.place) ctx.roundRect(n.x! - r, n.y! - r, 2 * r, 2 * r, r / 3);
-      else ctx.arc(n.x!, n.y!, r, 0, Math.PI * 2);
-      ctx.fillStyle = n.place ? css('--card') : color(n);
+      else if (n.person) {
+        const d = r * 1.25;
+        ctx.moveTo(n.x!, n.y! - d);
+        ctx.lineTo(n.x! + d, n.y!);
+        ctx.lineTo(n.x!, n.y! + d);
+        ctx.lineTo(n.x! - d, n.y!);
+        ctx.closePath();
+      } else ctx.arc(n.x!, n.y!, r, 0, Math.PI * 2);
+      ctx.fillStyle = hub(n) ? css('--card') : color(n);
       ctx.fill();
-      if (n.place) {
+      if (hub(n)) {
         ctx.lineWidth = 2 / view.k;
-        ctx.strokeStyle = kinds.institutions;
+        ctx.strokeStyle = n.place ? kinds.institutions : kinds.authors;
         ctx.stroke();
       }
       if (n === focus || n === hovered) {
@@ -228,7 +243,7 @@
     ctx.font = `${11 / view.k}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     for (const n of nodes) {
-      if (view.k > 1.8 || (near && lit(n)) || (n.place && n.degree >= 5 && view.k > 0.7)) {
+      if (view.k > 1.8 || (near && lit(n)) || (hub(n) && n.degree >= 5 && view.k > 0.7)) {
         ctx.globalAlpha = n === focus ? 1 : 0.75;
         ctx.fillText(label(n), n.x!, n.y! + radius(n) + 12 / view.k);
       }
@@ -262,7 +277,7 @@
     ctx.fill();
   }
 
-  const label = (n: Node) => (n.place ? (n.title.length > 30 ? `${n.title.slice(0, 29)}…` : n.title) : `${n.authors.split(/[ ,]/)[0]} ${n.year ?? ''}`.trim());
+  const label = (n: Node) => (hub(n) ? (n.title.length > 30 ? `${n.title.slice(0, 29)}…` : n.title) : `${n.authors.split(/[ ,]/)[0]} ${n.year ?? ''}`.trim());
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
   // Mouse: what is under it, in the network's coordinates.
@@ -296,8 +311,8 @@
   }
 
   function describe(h: Node | Edge): string {
-    if ('degree' in h && h.place) {
-      return `<b>${esc(h.title)}</b><br><span>${esc([h.place.country, `${h.degree} papers`].filter(Boolean).join(' · '))}</span>`;
+    if ('degree' in h && hub(h)) {
+      return `<b>${esc(h.title)}</b><br><span>${esc([h.place?.country, `${h.degree} papers`].filter(Boolean).join(' · '))}</span>`;
     }
     if ('degree' in h) {
       const p = app.papers[h.id];
@@ -310,7 +325,7 @@
     }
     if (h.kind === 'institutions') return `<b>${esc(a)}</b> from <b>${esc(h.target.title)}</b>:<br>${h.names!.map(esc).join('<br>')}`;
     if (h.kind === 'similar') return `<b>${esc(a)}</b> and <b>${esc(b)}</b> are alike: ${h.score!.toFixed(2)}`;
-    return `<b>${esc(a)}</b> and <b>${esc(b)}</b> share ${h.names!.length === 1 ? 'an author' : `${h.names!.length} authors`}:<br>${h.names!.map(esc).join('<br>')}`;
+    return `<b>${esc(a)}</b> by <b>${esc(h.target.title)}</b><br><span>${esc(h.source.title)}</span>`;
   }
 
   let drag: { node?: Node; x: number; y: number; moved: boolean } | null = null;
@@ -399,7 +414,7 @@
   });
 
   const counts = $derived(
-    data ? { cites: data.cites.length, authors: data.authors.length, institutions: data.institutions.length, similar: data.similar.filter(([, , s]) => s >= alike).length } : null,
+    data ? { cites: data.cites.length, authors: new Set(data.authors.flatMap(([, , names]) => names)).size, institutions: data.institutions.length, similar: data.similar.filter(([, , s]) => s >= alike).length } : null,
   );
 </script>
 
@@ -410,7 +425,7 @@
       {#each app.projects as p}<option value={p.name}>{p.name}</option>{/each}
     </select>
     <label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={show.cites} class="accent-[var(--accent)]" /><span class="h-0.5 w-4 rounded bg-accent"></span>Citations {#if counts}<span class="text-xs text-faint">{counts.cites}</span>{/if}</label>
-    <label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={show.authors} class="accent-[var(--accent)]" /><span class="h-1 w-4 rounded bg-warning"></span>Authors {#if counts}<span class="text-xs text-faint">{counts.authors}</span>{/if}</label>
+    <label class="flex cursor-pointer items-center gap-1.5" title="Authors two or more papers share, as diamonds"><input type="checkbox" bind:checked={show.authors} class="accent-[var(--accent)]" /><span class="size-2 rotate-45 border-2 border-warning"></span>Authors {#if counts}<span class="text-xs text-faint">{counts.authors}</span>{/if}</label>
     <label class="flex cursor-pointer items-center gap-1.5" title={counts?.institutions === 0 ? 'None looked up yet: `carrel refs --all` asks OpenAlex where the authors worked' : 'Institutions two or more papers come from, as squares'}>
       <input type="checkbox" bind:checked={show.institutions} class="accent-[var(--accent)]" /><span class="size-2.5 rounded-sm border-2 border-title"></span>Institutions {#if counts}<span class="text-xs text-faint">{counts.institutions}</span>{/if}
     </label>
@@ -436,7 +451,7 @@
       ondblclick={(e) => {
         const w = world(e);
         const h = hit(w.x, w.y);
-        if (h && 'degree' in h && !h.place) go(`/paper/${encodeURIComponent(h.id)}`);
+        if (h && 'degree' in h && !hub(h)) go(`/paper/${encodeURIComponent(h.id)}`);
       }}
       onwheel={wheel}
     ></canvas>
@@ -466,10 +481,12 @@
           <button class="cursor-pointer text-faint hover:text-foreground" onclick={() => ((selected = null), draw())} aria-label="Close"><X class="size-4" /></button>
         </div>
         <div class="mt-3 flex items-center gap-3 text-xs text-muted">
-          <span class="shrink-0">{s.degree} {s.place ? 'papers' : 'links'}</span>
+          <span class="shrink-0">{s.degree} {hub(s) ? 'papers' : 'links'}</span>
           {#if s.projects.length}<span class="min-w-0 truncate">in {s.projects.join(', ')}</span>{/if}
           {#if s.place?.ror}
             <a href={s.place.ror} target="_blank" rel="noreferrer" class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">ROR<ArrowUpRight class="size-3.5" /></a>
+          {:else if s.person}
+            <a href="#/people?name={encodeURIComponent(s.person)}" class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">Their papers<ArrowUpRight class="size-3.5" /></a>
           {:else if !s.place}
             <a href={paperHref(s.id)} class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">Open<ArrowUpRight class="size-3.5" /></a>
           {/if}

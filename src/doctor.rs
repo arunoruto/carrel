@@ -2,7 +2,7 @@
 
 use crate::{Library, fetch, graph};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Serialize)]
 pub struct Issue {
@@ -40,6 +40,7 @@ impl Library {
             Err(e) => format!("; {e:#}"),
         };
         let mut seen: HashMap<String, String> = HashMap::new();
+        let mut doubled = HashSet::new();
         for p in &papers {
             let (b, id) = (&p.bib, p.id.as_str());
             let edit = Some(format!("carrel edit {id}"));
@@ -78,10 +79,16 @@ impl Library {
                 }
             }
 
-            let keys = fetch::paper_keys(&fetch::Ids { doi: b.doi(), arxiv: b.arxiv() }, &b.title());
+            let mut keys = fetch::paper_keys(&fetch::Ids { doi: b.doi(), arxiv: b.arxiv() }, &b.title());
+            // The same pages of the same venue and year: the same paper, however its title is spelled.
+            let pages = b.get("pages").filter(|p| p.contains(['-', '–']));
+            if let (Some(year), Some(venue), Some(pages)) = (b.year(), b.venue(), pages) {
+                keys.push(format!("{year} {} {}", fetch::title_key(&venue), fetch::title_key(&pages)));
+            }
             if let Some(other) = keys.iter().find_map(|k| seen.get(k)) {
                 let message = format!("the same paper as {other}; keep one (`carrel rm`) after moving over its notes");
                 report("warning", "duplicate", id, message, None);
+                doubled.extend([id.to_string(), other.clone()]);
             }
             for key in keys {
                 seen.entry(key).or_insert_with(|| id.to_string());
@@ -119,6 +126,20 @@ impl Library {
         if let Err(e) = self.people() {
             report("error", "people", crate::authors::DIR, format!("{e:#}"), None);
         }
+        // Nearly the same title, keywords and abstract: most likely one paper twice. 0.97 is above the most alike
+        // two distinct papers we've seen (two papers by one group with one title, 0.95).
+        let similar = self.similar(1).unwrap_or_default();
+        let mut similar: Vec<_> =
+            similar.into_iter().filter_map(|(id, near)| Some((id, near.into_iter().next()?))).collect();
+        similar.sort_by(|a, b| a.0.cmp(&b.0));
+        for (id, (other, score)) in similar {
+            if score >= 0.97 && id > other && !doubled.contains(&id) && !doubled.contains(&other) {
+                let message = format!(
+                    "probably the same paper as {other} ({score:.2} alike); keep one (`carrel rm`) after moving over its notes"
+                );
+                report("warning", "duplicate", &id, message, None);
+            }
+        }
         let rank = |level: &str| ["error", "warning", "info"].iter().position(|l| *l == level);
         issues.sort_by(|a, b| rank(a.level).cmp(&rank(b.level)).then(a.id.cmp(&b.id)));
         issues
@@ -145,6 +166,14 @@ mod tests {
         write("b", "@misc{b, title = {Graphs now}, author = {Roe, R.}, date = {2021}, eprint = {2101.00001}}");
         write("c", "@inproceedings{c, title = {Other}}");
         write("d", "@misc{wrong, title = {D}}");
+        write(
+            "e",
+            "@article{e, title = {Steps. I. Glass}, author = {Jaeger, C.}, year = 1994, journal = {A&A}, pages = {641--655}}",
+        );
+        write(
+            "f",
+            "@article{f, title = {Steps. 1: Glass}, author = {Jäger, C.}, year = 1994, journal = {A&A}, pages = {641--655}}",
+        );
         fs::create_dir_all(lib.root.join("projects")).unwrap();
         fs::write(lib.root.join("projects/x.txt"), "a\ngone\n").unwrap();
 
@@ -154,6 +183,7 @@ mod tests {
             ("markup", "a"),
             ("macro", "a"),
             ("duplicate", "b"),
+            ("duplicate", "f"),
             ("fields", "c"),
             ("project", "gone"),
             ("pdf", "a"),
