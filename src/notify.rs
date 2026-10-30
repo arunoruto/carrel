@@ -285,50 +285,15 @@ fn hostname() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
 
     /// A Bot API that answers each request with the next of `replies`, and hands back what it was sent.
-    fn fake_telegram(replies: Vec<(u16, &'static str)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let api = format!("http://{}", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let mut requests = vec![];
-            for (status, reply) in replies {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let (mut head, mut length) = (String::new(), 0);
-                loop {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).unwrap();
-                    if let Some(n) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                        length = n.trim().parse().unwrap();
-                    }
-                    head.push_str(&line);
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let mut body = vec![0; length];
-                reader.read_exact(&mut body).unwrap();
-                requests.push(head + &String::from_utf8(body).unwrap());
-                let response = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
-                    reply.len()
-                );
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-            requests
-        });
-        (api, server)
-    }
-
     fn bot(api: String) -> Telegram {
         Telegram { token: crate::Secret::Value("123:SECRET".into()), chat_id: ChatId::Number(42), api }
     }
 
     #[test]
     fn telegram() {
-        let (api, server) = fake_telegram(vec![
+        let (api, server) = crate::fetch::fake_server(vec![
             (429, r#"{"ok":false,"description":"Too Many Requests","parameters":{"retry_after":0}}"#),
             (200, r#"{"ok":true,"result":{}}"#),
         ]);
@@ -341,7 +306,8 @@ mod tests {
         let text = body["text"].as_str().unwrap();
         assert!(text.starts_with("2 new papers\n\nxxx") && text.chars().count() == 4096, "cut to Telegram's limit");
 
-        let (api, server) = fake_telegram(vec![(401, r#"{"ok":false,"description":"Unauthorized for 123:SECRET"}"#)]);
+        let (api, server) =
+            crate::fetch::fake_server(vec![(401, r#"{"ok":false,"description":"Unauthorized for 123:SECRET"}"#)]);
         let error = format!("{:#}", bot(api).send("s", "b").unwrap_err());
         server.join().unwrap();
         assert!(error.contains("Unauthorized") && !error.contains("SECRET"), "{error}");

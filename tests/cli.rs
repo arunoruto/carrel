@@ -227,6 +227,11 @@ printf '%s\n\n%s\n' 'Plain text from docling.' "![Image](${stem}_artifacts/image
     let out = String::from_utf8(add.env("CARREL_EXTRACTOR", "docling").env("PATH", &path).output().unwrap().stdout);
     let out = out.unwrap();
     assert!(out.contains("added graphtheory") && out.contains("no `docling` on PATH"), "{out}");
+    // Where the environment says, as the Home Manager services have it.
+    let mut config = c.command(&["config"]);
+    let config =
+        config.env("CARREL_EXTRACTOR", "docling").env("CARREL_DOCLING", bin.join("docling")).env("PATH", &path);
+    assert!(String::from_utf8_lossy(&config.output().unwrap().stdout).contains("extractor: docling"));
 
     // A build with its own Python always has PyMuPDF; otherwise it needs uv.
     if option_env!("CARREL_DEFAULT_EXTRACTOR").is_some() {

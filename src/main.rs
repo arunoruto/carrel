@@ -590,6 +590,7 @@ fn main() -> Result<()> {
                 ("ads", carrel::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())?),
                 ("s2", carrel::token(&["S2_API_KEY"], |t| t.s2.as_ref())?),
                 ("openalex", carrel::token(&["OPENALEX_API_KEY"], |t| t.openalex.as_ref())?),
+                ("docling", carrel::token(&["DOCLING_SERVE_API_KEY"], |t| t.docling.as_ref())?),
             ];
             let found: Vec<_> = tokens.iter().filter(|(_, t)| t.is_some()).map(|(name, _)| *name).collect();
             println!("tokens:  {}", if found.is_empty() { "none".into() } else { found.join(", ") });

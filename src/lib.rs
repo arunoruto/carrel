@@ -181,7 +181,7 @@ pub struct Config {
     /// What turns PDFs into text: `auto`, `docling`, `pymupdf` or a shell command, see [`extract::choose`].
     /// `CARREL_EXTRACTOR` overrides it.
     pub extractor: Option<String>,
-    /// Where Docling is, when not on PATH.
+    /// Where Docling is, when not on PATH, or the URL of a docling-serve. `CARREL_DOCLING` overrides it.
     pub docling: Option<String>,
     /// What `carrel` without arguments runs, as its arguments: `tui` (the default), `list -p thesis`, ...
     pub default: Option<String>,
@@ -230,6 +230,8 @@ pub struct Tokens {
     pub ads: Option<Secret>,
     pub s2: Option<Secret>,
     pub openalex: Option<Secret>,
+    /// For a docling-serve that wants an API key.
+    pub docling: Option<Secret>,
 }
 
 /// A secret, written in the config or kept in a file of its own.
@@ -295,8 +297,8 @@ pub struct Library {
     pub key: String,
     /// What extracts text and figures, see [`extract::choose`]: `auto` by default.
     pub extractor: String,
-    /// Where Docling is, when not on PATH.
-    pub docling: Option<PathBuf>,
+    /// Where Docling is, when not on PATH, or the URL of a docling-serve.
+    pub docling: Option<String>,
     /// Where to compute embeddings for semantic search; none without `[embeddings]` in the config.
     pub embeddings: Option<embed::Config>,
 }
@@ -322,7 +324,7 @@ impl Library {
         if let Some(cmd) = std::env::var("CARREL_EXTRACTOR").ok().or(config.extractor) {
             lib.extractor = cmd;
         }
-        lib.docling = config.docling.as_deref().map(expand_home);
+        lib.docling = std::env::var("CARREL_DOCLING").ok().filter(|d| !d.is_empty()).or(config.docling);
         lib.embeddings = config.embeddings;
         Ok(lib)
     }
@@ -722,7 +724,7 @@ impl Library {
 
     /// What extracts text here; `None` when nothing is installed.
     pub fn extractor(&self) -> Result<Option<Box<dyn extract::Extractor>>> {
-        extract::choose(&self.extractor, self.docling.clone())
+        extract::choose(&self.extractor, self.docling.as_deref())
     }
 
     /// Extract text and figures into `out`; a message worth showing when that didn't work. Without an

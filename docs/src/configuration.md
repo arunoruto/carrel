@@ -6,7 +6,7 @@ Settings live in `~/.config/carrel/config.toml` (or `$XDG_CONFIG_HOME/carrel/con
 library = "~/Documents/carrel"
 key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # extractor = "auto"
-# docling = "/path/to/docling"
+# docling = "/path/to/docling"   # or "http://gpu-box:5001", a docling-serve
 # default = "tui"
 # theme = "catppuccin-mocha"
 
@@ -68,7 +68,26 @@ For *He, Zhang, Ren and Sun (2016), Deep Residual Learning for Image Recognition
 
 **PyMuPDF** runs through [uv](https://docs.astral.sh/uv/), which fetches pymupdf4llm on first use; the Nix package and the Docker image bring their own Python with it instead, so for them it is always there.
 
-**Docling** is found as `docling` on your `PATH`, or where `docling` in the config says (useful for services, whose `PATH` is short). Install it with `uv tool install docling` or `pipx install docling`; on Nix it is in nixpkgs, e.g. `home.packages = [ pkgs.docling ];` (it is not part of carrel's package: it brings PyTorch, gigabytes of it), or for the [NixOS module](server.md#on-nixos) `services.carrel.settings.docling = lib.getExe pkgs.docling;`. With `auto`, carrel then uses it. carrel runs `docling --to md --image-export-mode referenced --no-ocr`, without OCR because papers born digital don't need it and it is slow, and moves the result into carrel's layout. Docling downloads its models on first use, so the first paper takes a while, and on a CPU every paper takes tens of seconds to minutes; there is no time limit. It leaves formulas out (`<!-- formula-not-decoded -->`) unless its formula model is on: point `docling` in the config at a script that runs `docling --enrich-formula "$@"` (slower still).
+**Docling** is found as `docling` on your `PATH`, or where `docling` in the config says (useful for services, whose `PATH` is short). Install it with `uv tool install docling` or `pipx install docling`; on Nix it is in nixpkgs, e.g. `services.carrel.docling.package = pkgs.docling;` with the [Home Manager module](adding-papers.md#watching-the-folder), which installs it and points carrel and its services at it (it is not part of carrel's package: it brings PyTorch, gigabytes of it), or for the [NixOS module](server.md#on-nixos) `services.carrel.settings.docling = lib.getExe pkgs.docling;`. With `auto`, carrel then uses it. carrel runs `docling --to md --image-export-mode referenced --no-ocr`, without OCR because papers born digital don't need it and it is slow, and moves the result into carrel's layout. Docling downloads its models on first use, so the first paper takes a while, and on a CPU every paper takes tens of seconds to minutes; there is no time limit. It leaves formulas out (`<!-- formula-not-decoded -->`) unless its formula model is on: point `docling` in the config at a script that runs `docling --enrich-formula "$@"` (slower still).
+
+**Docling on another machine**: set `docling` to the URL of a [docling-serve](https://github.com/docling-project/docling-serve), and carrel sends it the PDF instead of running Docling itself. That suits a laptop with a server or a GPU nearby, and a [carrel server](server.md) whose container leaves Docling out. Formula decoding is then the server's setting. With Docker:
+
+```sh
+docker run -d --name docling -p 5001:5001 \
+  -e DOCLING_SERVE_API_KEY=some-long-secret -e DOCLING_SERVE_MAX_SYNC_WAIT=900 \
+  quay.io/docling-project/docling-serve-cpu   # docling-serve-cu130:<version> for an NVIDIA GPU
+```
+
+`DOCLING_SERVE_MAX_SYNC_WAIT` gives a long paper on a CPU 15 minutes instead of the default 2.
+
+```toml
+docling = "http://gpu-box:5001"
+
+[tokens]
+docling = { file = "~/.config/carrel/docling-key" }   # if it wants an API key
+```
+
+Keep it on a network you trust or behind HTTPS: the PDFs go to it in full.
 
 **Nothing installed**: papers and PDFs are still added, without their text; carrel says so once. `carrel config` shows which extractor is in use, and `carrel doctor` lists the papers without text; `carrel extract --all` extracts them once there is an extractor. An extractor asked for by name but not installed is an error.
 
@@ -113,13 +132,14 @@ For Telegram, make a bot by messaging [@BotFather](https://t.me/BotFather), whic
 
 ## API tokens
 
-Tokens for ADS, Semantic Scholar and OpenAlex can go in the config instead of [environment variables](#environment-variables), either written out or kept in a file of their own (a password manager or agenix/sops can write that file):
+Tokens for ADS, Semantic Scholar, OpenAlex and a [docling-serve](#the-extractor) can go in the config instead of [environment variables](#environment-variables), either written out or kept in a file of their own (a password manager or agenix/sops can write that file):
 
 ```toml
 [tokens]
 ads = { file = "~/.config/carrel/ads-token" }
 s2 = "your-semantic-scholar-key"
 # openalex = "..."
+# docling = "..."
 ```
 
 An environment variable wins over the config. `carrel config` lists the tokens it found, never their values.
@@ -130,6 +150,8 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 |---|---|
 | `CARREL_HOME` | the library folder |
 | `CARREL_EXTRACTOR` | the [extractor](#the-extractor): `auto`, `docling`, `pymupdf` or a command |
+| `CARREL_DOCLING` | where Docling is, a program or a docling-serve's URL, like `docling` in the config |
+| `DOCLING_SERVE_API_KEY` | the API key of that docling-serve |
 | `S2_API_KEY` | a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key); without one, references, citations and some lookups are often rate-limited |
 | `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |

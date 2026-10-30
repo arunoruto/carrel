@@ -55,6 +55,7 @@ With [Home Manager](https://github.com/nix-community/home-manager), carrel's mod
   imports = [ inputs.carrel.homeManagerModules.default ];
   services.carrel.consume.enable = true;
   # services.carrel.consume.folders = [ "/home/you/Downloads" "/home/you/Papers" ];  # Downloads by default
+  # services.carrel.docling.package = pkgs.docling;  # extract text with Docling (brings PyTorch)
 }
 ```
 
