@@ -27,6 +27,7 @@
             rustfmt
             rust-analyzer
             mdbook # the docs
+            nodejs # the web UI: npm ci && npm run build in web/
             uv # the default extractor outside of Nix builds
           ];
         };
@@ -45,7 +46,7 @@
         { lib, pkgs, ... }:
         {
           imports = [ ./nix/home.nix ];
-          services.carrel.consume.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.carrel;
+          services.carrel.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.carrel;
         };
 
       # The module in a VM: the service starts and answers, and keeps strangers out.

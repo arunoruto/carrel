@@ -63,6 +63,14 @@ docker run --rm -it -v ~/Documents/carrel:/library ghcr.io/arunoruto/carrel:late
 cargo install --git https://github.com/arunoruto/carrel
 ```
 
+This carrel has no [web UI](web.md): `carrel web` serves only its API. The binaries, Nix and Docker have it. To build it in yourself, with [Node.js](https://nodejs.org):
+
+```sh
+git clone https://github.com/arunoruto/carrel && cd carrel
+(cd web && npm ci && npm run build)
+cargo install --path .
+```
+
 ## The text extractor
 
 Turning PDFs into text and figures is done by an external command (see [Configuration](configuration.md#the-extractor)). Outside of Nix the default runs [pymupdf4llm](https://pypi.org/project/pymupdf4llm/) through [uv](https://docs.astral.sh/uv/), so **install uv**; it fetches pymupdf4llm on first use. Without it, papers are still added, just without their text.

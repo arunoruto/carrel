@@ -2,7 +2,7 @@
 //! moves the ones the user picks into the library. Unattended (from a timer, or in `carrel serve`) it adds
 //! those it can identify when `auto` is on, else it only tells about them, through the notifiers.
 
-use crate::{Library, xdg_dir};
+use crate::Library;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -41,8 +41,8 @@ impl Config {
 #[derive(Debug, Clone)]
 pub struct Found {
     pub path: PathBuf,
-    size: u64,
-    modified: u64,
+    pub size: u64,
+    pub modified: u64,
     /// Why it looks like a paper (`DOI 10.1029/... in the file`), when it does. A hint only; adding
     /// decides from the text.
     pub clue: Option<String>,
@@ -113,8 +113,7 @@ pub enum Mark {
 
 impl Seen {
     fn path() -> Option<PathBuf> {
-        let dir = xdg_dir("XDG_STATE_HOME", dirs::state_dir().or_else(dirs::data_local_dir));
-        dir.map(|dir| dir.join("carrel").join("consume.json"))
+        crate::state_dir().map(|dir| dir.join("consume.json"))
     }
 
     pub fn load() -> Self {

@@ -2,10 +2,19 @@
 # `carrel serve` in a container: the library lives in /library, the config in /config/carrel/config.toml,
 # the search index in /cache. See docs/src/server.md.
 
+FROM docker.io/library/node:24-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web ./
+RUN npm run build
+
 FROM docker.io/library/rust:1-slim-trixie AS build
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
+# The web UI, embedded into the binary by build.rs.
+COPY --from=web /web/dist web/dist
 # The runtime image's Python runs the extractor, so nothing is downloaded when a PDF comes in.
 ENV CARREL_DEFAULT_EXTRACTOR='python -I -c "$CARREL_EXTRACT_PY" "$PDF"'
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

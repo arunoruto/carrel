@@ -56,7 +56,7 @@
 - **Projects** whose bibliographies follow the citations in your LaTeX or Typst files.
 - **Full-text search** with field filters, and **semantic search** by meaning, with embeddings from [Ollama](https://ollama.com) (bge-m3 or a model you pick).
 - **Picks papers up from Downloads** (`carrel consume`), asking first, or watching the folder with the Home Manager module and emailing you what it found.
-- **Citation graphs**, a **TUI**, and a health check (`carrel doctor`).
+- **A web UI** (`carrel web`) with a built-in PDF reader, a **TUI**, citation graphs, and a health check (`carrel doctor`).
 - **Shared by a group**: `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder, and `carrel serve` on a server (Docker image or NixOS module) for MCP over HTTP and background work.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -67,7 +67,7 @@ There is one program. `carrel` on your laptop is a **client**, `carrel serve` is
 
 ```text
    laptop A           laptop B                  server (carrel serve)
-   carrel · TUI       carrel · TUI              rounds every few minutes
+   carrel · TUI · web carrel · TUI · web        rounds every few minutes
         │                  │                          │
         │ carrel sync      │ carrel sync              │ sync each round
         └──────────┬───────┴──────────────────────────┘
@@ -76,13 +76,14 @@ There is one program. `carrel` on your laptop is a **client**, `carrel serve` is
              │  remote   │  Garage, MinIO, AWS: files only
              └───────────┘
 
+   you     ── carrel web (127.0.0.1) ──▶ the laptop's library
    your AI ── carrel mcp (stdio) ──▶ the laptop's library
    any AI  ── HTTPS /mcp + token ──▶ the server's library
 ```
 
 | | Client | Server |
 |---|---|---|
-| add, edit, approve drafts | you | AIs propose drafts over MCP |
+| add, edit, approve drafts | you, in the CLI, TUI or web UI | AIs propose drafts over MCP |
 | extract text, look up references, embed | on demand | for every paper still missing them, once for everyone |
 | pick up new PDFs | from your Downloads, and tells you | from a drop folder with `auto = true`, logged only |
 | notify | about your own Downloads | about its own trouble, such as Ollama going away |
@@ -95,6 +96,8 @@ A server is optional; without one, sync alone shares the library. See [Clients a
 
 * [![Rust][Rust-badge]][Rust-url]
 * [![Ratatui][Ratatui-badge]][Ratatui-url]
+* [![Svelte][Svelte-badge]][Svelte-url]
+* [![Tailwind CSS][Tailwind-badge]][Tailwind-url]
 * [![SQLite][SQLite-badge]][SQLite-url]
 * [![Python][Python-badge]][Python-url] (text extraction with PyMuPDF)
 * [![Ollama][Ollama-badge]][Ollama-url]
@@ -107,7 +110,7 @@ A server is optional; without one, sync alone shares the library. See [Clients a
 
 ### Prerequisites
 
-Outside of Nix and the Docker image, text extraction needs [uv](https://docs.astral.sh/uv/). Semantic search needs an [Ollama](https://ollama.com) with an embedding model (`ollama pull bge-m3`); everything else works without it.
+Outside of Nix and the Docker image, text extraction needs [uv](https://docs.astral.sh/uv/). Semantic search needs an [Ollama](https://ollama.com) with an embedding model (`ollama pull bge-m3`); everything else works without it. Building from source with the web UI needs [Node.js](https://nodejs.org) (`npm ci && npm run build` in `web/` before `cargo build`); without it, `carrel web` serves only its API.
 
 ### Installation
 
@@ -138,6 +141,7 @@ carrel search attention author:vaswani
 carrel search -s "how do shadows hide between grains"   # by meaning
 carrel consume                                     # new PDFs in Downloads
 carrel                                             # the TUI
+carrel web                                         # the web UI, in your browser
 claude mcp add --scope user carrel -- carrel mcp   # let Claude Code use your library
 carrel project sync thesis ~/thesis/*.tex && carrel bib -p thesis > ~/thesis/refs.bib
 carrel sync                                        # share through the remote
@@ -174,6 +178,10 @@ Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-M
 [Rust-url]: https://www.rust-lang.org
 [Ratatui-badge]: https://img.shields.io/badge/Ratatui-1E1E2E?style=for-the-badge&logo=ratatui&logoColor=white
 [Ratatui-url]: https://ratatui.rs
+[Svelte-badge]: https://img.shields.io/badge/Svelte-FF3E00?style=for-the-badge&logo=svelte&logoColor=white
+[Svelte-url]: https://svelte.dev
+[Tailwind-badge]: https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white
+[Tailwind-url]: https://tailwindcss.com
 [SQLite-badge]: https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white
 [SQLite-url]: https://sqlite.org
 [Python-badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white

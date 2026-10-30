@@ -145,7 +145,8 @@ impl Paper {
         fs::read_to_string(self.bib_path()).unwrap_or_else(|_| self.bib.to_bib(&self.id))
     }
 
-    fn save(&self) -> Result<()> {
+    /// Write its .bib.
+    pub fn save(&self) -> Result<()> {
         fs::write(self.bib_path(), self.bib.to_bib(&self.id))?;
         Ok(())
     }
@@ -155,6 +156,11 @@ impl Paper {
 /// `dirs` crate ignores them on macOS); otherwise `fallback`.
 fn xdg_dir(var: &str, fallback: Option<PathBuf>) -> Option<PathBuf> {
     std::env::var_os(var).map(PathBuf::from).filter(|dir| dir.is_absolute()).or(fallback)
+}
+
+/// Where carrel keeps what it remembers on this machine: what `consume` saw, the web UI's token.
+pub fn state_dir() -> Option<PathBuf> {
+    xdg_dir("XDG_STATE_HOME", dirs::state_dir().or_else(dirs::data_local_dir)).map(|dir| dir.join("carrel"))
 }
 
 /// The default citation key: `vaswani2017attention`.

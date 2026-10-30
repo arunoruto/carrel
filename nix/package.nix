@@ -1,5 +1,6 @@
 {
   lib,
+  callPackage,
   rustPlatform,
   python3,
 }:
@@ -8,6 +9,7 @@ let
   cargoToml = (lib.importTOML ../Cargo.toml).package;
   # The extractor's Python, from nixpkgs instead of downloaded by uv at runtime: works offline.
   python = python3.withPackages (ps: [ ps.pymupdf4llm ]);
+  web = callPackage ./web.nix { };
 in
 rustPlatform.buildRustPackage {
   pname = cargoToml.name;
@@ -18,6 +20,7 @@ rustPlatform.buildRustPackage {
     fileset = lib.fileset.unions [
       ../Cargo.toml
       ../Cargo.lock
+      ../build.rs
       ../src
       ../tests
     ];
@@ -26,6 +29,10 @@ rustPlatform.buildRustPackage {
 
   # Baked in as the default; the config's `extractor` and CARREL_EXTRACTOR still override it.
   env.CARREL_DEFAULT_EXTRACTOR = ''${python}/bin/python -I -c "$CARREL_EXTRACT_PY" "$PDF"'';
+  # `carrel web`'s UI, built into the binary.
+  env.CARREL_WEB_DIST = web;
+
+  passthru = { inherit web; };
 
   # `cargo test` runs the offline tests; the ones needing internet are #[ignore]d.
 

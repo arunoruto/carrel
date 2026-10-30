@@ -1,6 +1,6 @@
 # Contributing
 
-carrel is written in Rust. The code is a library (`src/lib.rs` and its modules) with three frontends: the CLI (`src/main.rs`), the TUI (`src/tui.rs`) and the MCP server (`src/mcp.rs`).
+carrel is written in Rust. The code is a library (`src/lib.rs` and its modules) with four frontends: the CLI (`src/main.rs`), the TUI (`src/tui.rs`), the web UI (`src/web.rs` and `web/`) and the MCP server (`src/mcp.rs`).
 
 ## Adding a backend
 
@@ -18,6 +18,19 @@ With Nix, `nix develop` gives you Rust, clippy, rustfmt, rust-analyzer, mdBook a
 cargo run -- --help
 cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
+
+## The web UI
+
+The [web UI](web.md) is a Svelte 5 app with Tailwind CSS in `web/`. `build.rs` embeds its built files (`web/dist`, or `$CARREL_WEB_DIST`) into the binary; without them carrel still builds, and `carrel web` serves only the API. The JSON API is in `src/web.rs`.
+
+```sh
+cd web && npm ci
+npm run build             # then cargo build embeds it
+npm run dev               # hot reload on :5173, passing /api to a running `carrel web`
+npm run check             # types
+```
+
+For `npm run dev`, start `carrel web` and open its link with port 5173 instead of 7700 once, for the cookie. After changing `web/package-lock.json`, update `npmDepsHash` in `nix/web.nix` (`nix run nixpkgs#prefetch-npm-deps web/package-lock.json`).
 
 ## Tests
 

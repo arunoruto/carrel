@@ -2,3 +2,5 @@ target
 result
 docs/book
 .git
+web/node_modules
+web/dist

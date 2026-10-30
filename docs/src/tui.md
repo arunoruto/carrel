@@ -1,6 +1,6 @@
 # The TUI
 
-`carrel` without a command opens the terminal UI (unless your [config](configuration.md#what-carrel-alone-does) says otherwise); `carrel tui` always does. It has four tabs, each with up to three panes that narrow from left to right, and a *Selected* bar below them. The focused pane has the accent border; `h`/`l` move the focus.
+The [web UI](web.md) covers the same ground in the browser. `carrel` without a command opens the terminal UI (unless your [config](configuration.md#what-carrel-alone-does) says otherwise); `carrel tui` always does. It has four tabs, each with up to three panes that narrow from left to right, and a *Selected* bar below them. The focused pane has the accent border; `h`/`l` move the focus.
 
 - **Library**: shelves (all papers, your projects, and keywords on at least two papers) › the papers on that shelf, each with its status › the selected paper: authors, venue, keywords, summary, abstract, notes.
 - **Graph**: for the paper selected in the Library, the library papers it cites and theirs in turn, the ones citing it, and the papers the library (or the project shown) cites most but doesn't have.

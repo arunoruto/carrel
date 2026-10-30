@@ -4,7 +4,7 @@ There is one program. `carrel` on your laptop is a **client**; `carrel serve` on
 
 ```text
    laptop A                laptop B                       server (carrel serve)
-   carrel · TUI            carrel · TUI                   rounds every few minutes
+   carrel · TUI · web      carrel · TUI · web                  rounds every few minutes
    ~/Documents/carrel      ~/Documents/carrel             /library
         │                       │                              │
         │ carrel sync           │ carrel sync                  │ sync each round
@@ -14,6 +14,7 @@ There is one program. `carrel` on your laptop is a **client**; `carrel serve` on
                   │  remote   │  Garage, MinIO, AWS: files only, no logic
                   └───────────┘
 
+   you     ── carrel web (127.0.0.1) ──▶ the laptop's library
    your AI ── carrel mcp (stdio) ──▶ the laptop's library
    any AI  ── HTTPS /mcp + token ──▶ the server's library
 ```
@@ -49,6 +50,7 @@ A server is optional. Without one, each client does all of this itself, and sync
 ## How they connect
 
 - **Client or server ↔ remote:** `carrel sync`, over the S3 API (HTTPS) with the bucket's key, or file copies to a folder. Each side remembers what both held at the last sync, in `.carrel/sync.json`, so changes go the right way and conflicts are caught: see [Sharing a library](sharing.md#through-a-bucket). The server syncs at the start of each round and again when the round changed anything.
+- **Browser ↔ client:** `carrel web` serves the [web UI](web.md) and its JSON API on `127.0.0.1` only, guarded by a cookie from the link it prints. The server has no web UI (yet).
 - **AI ↔ client:** `carrel mcp`, started by the AI app, over stdin and stdout. Nothing is listening on the network. See [Working with an AI](ai.md).
 - **AI ↔ server:** MCP over HTTP at `https://<server>/mcp`, with the token in an `Authorization: Bearer` header, or without one from a [trusted network](server.md#networks-without-a-token). Put the server behind a reverse proxy with HTTPS.
 - **Both ↔ the internet:** metadata from doi.org, Crossref, Semantic Scholar, arXiv, OpenAlex and ADS; embeddings from the Ollama named in `[embeddings]`; mail through the server in `[notify.email]`.

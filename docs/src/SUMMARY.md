@@ -13,6 +13,7 @@
 - [Working with an AI](ai.md)
 - [Semantic search](semantic-search.md)
 - [The TUI](tui.md)
+- [The web UI](web.md)
 - [Keeping the library healthy](maintenance.md)
 - [Sharing a library](sharing.md)
 - [Running a server](server.md)

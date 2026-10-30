@@ -2,6 +2,7 @@ mod mcp;
 mod serve;
 mod theme;
 mod tui;
+mod web;
 
 use anyhow::{Context, Result, bail};
 use carrel::{Config, Field, Library, Paper};
@@ -221,6 +222,15 @@ enum Cmd {
     Rm { id: String },
     /// Serve the library to AI assistants over MCP (stdio)
     Mcp,
+    /// The library in your browser, on this machine: prints the link to open and opens it
+    Web {
+        /// Address to listen on, on loopback [default: 127.0.0.1:7700]
+        #[arg(long)]
+        listen: Option<String>,
+        /// Don't open the browser
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Run the library on a server: MCP over HTTP at /mcp, plus syncing, extraction and reference
     /// lookups every few minutes
     Serve {
@@ -600,6 +610,7 @@ fn main() -> Result<()> {
         }
         Cmd::Rm { id } => lib.remove(&id)?,
         Cmd::Serve { listen, every } => serve::run(lib, listen, every)?,
+        Cmd::Web { listen, no_open } => web::run(lib, listen, !no_open)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
     }
     Ok(())

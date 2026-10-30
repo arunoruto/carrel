@@ -23,14 +23,14 @@ Add papers by PDF, DOI, arXiv id or title. carrel finds their metadata, turns ea
 - **Search by meaning** with [semantic search](semantic-search.md): embeddings from Ollama find papers that say the same in other words or languages.
 - **Papers from your Downloads** move into the library with [`carrel consume`](adding-papers.md#from-your-downloads), asking first or on their own, with an email about what happened.
 - **Follow citations**: the references and the citing papers of any paper, marked when they are already in your library.
-- **A TUI, a CLI and an MCP server** on one core library, so other frontends can follow.
+- **A [web UI](web.md), a TUI, a CLI and an MCP server** on one core library: read PDFs in the browser, or stay in the terminal.
 
 ## How it fits together
 
 ```text
         you                         your AI assistant
          │                                  │
-   TUI · CLI                         MCP server (carrel mcp)
+   TUI · CLI · web UI                MCP server (carrel mcp)
          └──────────────┬───────────────────┘
                         │
                  carrel library  ── doi.org, Crossref, Semantic Scholar, arXiv

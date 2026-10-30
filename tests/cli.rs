@@ -426,3 +426,126 @@ fn consuming_downloads() {
     c.tmp.write("config/carrel/config.toml", "");
     assert!(c.fails(&["notify"]).contains("no notifiers"));
 }
+
+/// One HTTP/1.1 request on a fresh connection, written out by hand so the Host header can lie.
+fn http(addr: &str, method: &str, path: &str, headers: &[&str], body: &[u8]) -> (u16, String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    let mut head = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n", body.len());
+    if !headers.iter().any(|h| h.to_lowercase().starts_with("host:")) {
+        head.push_str(&format!("Host: {addr}\r\n"));
+    }
+    for h in headers {
+        head.push_str(&format!("{h}\r\n"));
+    }
+    stream.write_all(format!("{head}\r\n").as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut response = vec![];
+    stream.read_to_end(&mut response).unwrap();
+    let split = response.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&response[..split]).into_owned();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let mut body = response[split + 4..].to_vec();
+    // hyper sends bodies of unknown length chunked; the API's are all known, but be sure.
+    if head.to_lowercase().contains("transfer-encoding: chunked") {
+        let text = String::from_utf8_lossy(&body).into_owned();
+        body = text.split("\r\n").skip(1).step_by(2).collect::<String>().into_bytes();
+    }
+    (status, head, body)
+}
+
+#[test]
+fn web_ui() {
+    use std::io::{BufRead, BufReader};
+    let c = Carrel::new("cli-web");
+    assert!(c.fails(&["web", "--no-open", "--listen", "0.0.0.0:0"]).contains("this machine only"));
+
+    let mut command = c.command(&["web", "--no-open", "--listen", "127.0.0.1:0"]);
+    let mut server = command.stdout(Stdio::piped()).spawn().unwrap();
+    let mut lines = BufReader::new(server.stdout.take().unwrap()).lines();
+    let link = lines.next().unwrap().unwrap();
+    let link = link.strip_prefix("carrel web: ").expect("the link first").to_string();
+    let addr = link.trim_start_matches("http://").split('/').next().unwrap().to_string();
+    let token = link.split("token=").nth(1).unwrap().to_string();
+    let token_file = c.tmp.path("state/carrel/web-token");
+    assert_eq!(std::fs::read_to_string(&token_file).unwrap(), token, "kept for the next start");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&token_file).unwrap().permissions().mode() & 0o777, 0o600);
+
+    let get = |path: &str, headers: &[&str]| http(&addr, "GET", path, headers, b"");
+    // Strangers: no cookie, another site's name (DNS rebinding), a wrong link.
+    assert_eq!(get("/api/info", &[]).0, 401);
+    assert_eq!(get("/", &["Host: evil.example:80"]).0, 403);
+    let port = addr.rsplit(':').next().unwrap();
+    assert_eq!(get("/api/info", &[&format!("Host: attacker.example:{port}")]).0, 403);
+    assert_eq!(get("/?token=guess", &[]).0, 403);
+
+    // The link trades the token for a cookie and leaves the address bar clean.
+    let (status, head, _) = get(&format!("/?token={token}"), &[]);
+    assert_eq!(status, 303, "{head}");
+    assert!(
+        head.contains("location: /\r") || head.contains("location: /\n") || head.ends_with("location: /"),
+        "{head}"
+    );
+    let cookie = head.lines().find_map(|l| l.strip_prefix("set-cookie: ")).expect("a cookie").to_string();
+    assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"), "{cookie}");
+    let cookie = format!("Cookie: {}", cookie.split(';').next().unwrap());
+    let api = |method: &str, path: &str, body: &[u8]| {
+        let (status, _, body) = http(&addr, method, path, &[&cookie], body);
+        (status, String::from_utf8_lossy(&body).into_owned())
+    };
+    let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+
+    let (status, info) = api("GET", "/api/info", b"");
+    assert_eq!(status, 200, "{info}");
+    assert_eq!(json(&info)["remote"], false);
+    assert_eq!(api("GET", "/api/papers", b""), (200, "[]".into()));
+
+    // A PDF from the browser becomes a paper.
+    let (status, added) = api("POST", "/api/upload?name=My%20Paper.pdf", FAKE_PDF);
+    assert_eq!(status, 200, "{added}");
+    let id = json(&added)["id"].as_str().unwrap().to_string();
+    let papers = json(&api("GET", "/api/papers", b"").1);
+    assert_eq!(papers[0]["id"], id.as_str());
+    assert_eq!(papers[0]["pdf"], true);
+    let (status, pdf) = api("GET", &format!("/api/papers/{id}/pdf"), b"");
+    assert_eq!((status, pdf.as_bytes()), (200, FAKE_PDF));
+    assert_eq!(api("GET", &format!("/api/papers/{id}/fulltext"), b"").0, 200);
+
+    // Notes are yours: written as sent, and gone when emptied.
+    let (status, paper) = api("PUT", &format!("/api/papers/{id}/notes"), "Read §3 again.".as_bytes());
+    assert_eq!(status, 200, "{paper}");
+    assert_eq!(json(&paper)["notes"], "Read §3 again.");
+    assert_eq!(json(&api("PUT", &format!("/api/papers/{id}/notes"), b"  ").1)["notes"], serde_json::Value::Null);
+    let (_, paper) = api("PUT", &format!("/api/papers/{id}/keywords"), br#"{"keywords": ["regolith", " ", "optics"]}"#);
+    assert_eq!(json(&paper)["keywords"], serde_json::json!(["regolith", "optics"]));
+    assert!(c.ok(&["show", &id]).contains("regolith"));
+    let (_, projects) = api("PUT", &format!("/api/papers/{id}/projects/thesis"), b"");
+    assert_eq!(json(&projects)["projects"], serde_json::json!(["thesis"]));
+    assert_eq!(json(&api("GET", "/api/papers?project=thesis", b"").1).as_array().unwrap().len(), 1);
+
+    // Drafts from an AI wait for the human here too.
+    c.tmp.write(&format!("lib/{id}/drafts/summary.md"), "An AI's summary.");
+    let drafts = json(&api("GET", "/api/drafts", b"").1);
+    assert_eq!(drafts[0]["field"], "summary");
+    let (status, paper) = api("POST", &format!("/api/papers/{id}/drafts/summary/approve"), b"");
+    assert_eq!(status, 200, "{paper}");
+    assert_eq!(json(&paper)["summary"], "An AI's summary.");
+
+    // Files only from the paper's own folders.
+    c.tmp.write(&format!("lib/{id}/figures/page-0001-01.png"), "png");
+    assert_eq!(api("GET", &format!("/api/papers/{id}/files/figures/page-0001-01.png"), b"").0, 200);
+    assert_eq!(api("GET", &format!("/api/papers/{id}/files/figures/..%2F{id}.bib"), b"").0, 400);
+    assert_eq!(api("GET", &format!("/api/papers/{id}/files/drafts/summary.md"), b"").0, 404);
+    assert_eq!(api("GET", "/api/papers/..%2F..%2Fetc/pdf", b"").0, 400);
+
+    // Writes from another site's page are refused even with the cookie.
+    let (status, _, _) =
+        http(&addr, "DELETE", &format!("/api/papers/{id}"), &[&cookie, "Origin: http://evil.example"], b"");
+    assert_eq!(status, 403);
+    assert_eq!(api("GET", "/api/nothing", b"").0, 404);
+    assert_eq!(api("DELETE", &format!("/api/papers/{id}"), b"").0, 200);
+    assert_eq!(api("GET", "/api/papers", b"").1, "[]");
+    server.kill().unwrap();
+    server.wait().unwrap();
+}

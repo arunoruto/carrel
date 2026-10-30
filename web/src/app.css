@@ -1,0 +1,127 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Catppuccin, like the TUI: Latte when light, Mocha when dark. */
+:root {
+  --background: #eff1f5;
+  --sidebar: #e6e9ef;
+  --card: #ffffff;
+  --foreground: #4c4f69;
+  --muted: #6c6f85;
+  --faint: #9ca0b0;
+  --border: #ccd0da;
+  --hover: #dce0e8;
+  --accent: #1e66f5;
+  --accent-foreground: #ffffff;
+  --ready: #40a02b;
+  --failed: #d20f39;
+  --wanted: #df8e1d;
+  --warning: #fe640b;
+  --title: #7287fd;
+}
+
+.dark {
+  --background: #1e1e2e;
+  --sidebar: #181825;
+  --card: #24273a;
+  --foreground: #cdd6f4;
+  --muted: #a6adc8;
+  --faint: #6c7086;
+  --border: #313244;
+  --hover: #313244;
+  --accent: #89b4fa;
+  --accent-foreground: #11111b;
+  --ready: #a6e3a1;
+  --failed: #f38ba8;
+  --wanted: #f9e2af;
+  --warning: #fab387;
+  --title: #b4befe;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-hover: var(--hover);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ready: var(--ready);
+  --color-failed: var(--failed);
+  --color-wanted: var(--wanted);
+  --color-warning: var(--warning);
+  --color-title: var(--title);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Inter', sans-serif;
+}
+
+html,
+body {
+  @apply bg-background text-foreground h-full antialiased;
+}
+
+#app {
+  @apply h-full;
+}
+
+* {
+  @apply border-border;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Markdown: summaries, notes, abstracts, full texts. */
+.prose {
+  @apply text-[0.94rem] leading-relaxed;
+}
+.prose :where(p, ul, ol, pre, blockquote, table) {
+  @apply my-3;
+}
+.prose :where(h1, h2, h3, h4) {
+  @apply text-title mt-5 mb-2 font-semibold;
+}
+.prose h1 {
+  @apply text-xl;
+}
+.prose h2 {
+  @apply text-lg;
+}
+.prose :where(ul) {
+  @apply list-disc pl-6;
+}
+.prose :where(ol) {
+  @apply list-decimal pl-6;
+}
+.prose a {
+  @apply text-accent underline-offset-2 hover:underline;
+}
+.prose code {
+  @apply bg-hover rounded px-1 py-0.5 text-[0.85em];
+}
+.prose pre {
+  @apply bg-hover overflow-x-auto rounded-lg p-3;
+}
+.prose blockquote {
+  @apply border-l-2 pl-4 italic text-muted;
+}
+.prose img {
+  @apply my-4 max-w-full rounded-lg border;
+}
+.prose table {
+  @apply block overflow-x-auto text-sm;
+}
+.prose :where(td, th) {
+  @apply border px-2 py-1;
+}
+
+/* The passage a semantic search found. */
+.carrel-hit {
+  @apply rounded-md;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+}
