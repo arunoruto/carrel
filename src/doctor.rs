@@ -33,6 +33,12 @@ impl Library {
             }
         }
 
+        // Why `carrel extract` won't help, if it won't.
+        let no_extractor = match self.extractor() {
+            Ok(Some(_)) => String::new(),
+            Ok(None) => format!("; {}", crate::NO_EXTRACTOR),
+            Err(e) => format!("; {e:#}"),
+        };
         let mut seen: HashMap<String, String> = HashMap::new();
         for p in &papers {
             let (b, id) = (&p.bib, p.id.as_str());
@@ -90,7 +96,7 @@ impl Library {
                     report("info", "pdf", id, "no PDF".into(), Some(fix));
                 }
                 (Some(_), None) => {
-                    let message = "no extracted text, so AI assistants can't read it".into();
+                    let message = format!("no extracted text, so AI assistants can't read it{no_extractor}");
                     report("warning", "text", id, message, Some(format!("carrel extract {id}")));
                 }
                 _ => {}

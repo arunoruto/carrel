@@ -15,7 +15,8 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 # The web UI, embedded into the binary by build.rs.
 COPY --from=web /web/dist web/dist
-# The runtime image's Python runs the extractor, so nothing is downloaded when a PDF comes in.
+# The runtime image's Python runs the PyMuPDF extractor, so nothing is downloaded when a PDF comes in.
+# No Docling: it would bring PyTorch, gigabytes of it.
 ENV CARREL_DEFAULT_EXTRACTOR='python -I -c "$CARREL_EXTRACT_PY" "$PDF"'
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \

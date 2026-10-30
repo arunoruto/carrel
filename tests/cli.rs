@@ -182,6 +182,76 @@ fn config_file() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("elsewhere"), "the config's library");
 }
 
+/// PATH without the folders holding uv or docling, with `first` in front.
+fn path_without_extractors(first: &std::path::Path) -> std::ffi::OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let others = std::env::split_paths(&path).filter(|dir| !dir.join("uv").exists() && !dir.join("docling").exists());
+    std::env::join_paths(std::iter::once(first.to_path_buf()).chain(others)).unwrap()
+}
+
+#[test]
+fn extractors() {
+    // Docling on PATH comes first; its output is moved into carrel's layout.
+    let c = Carrel::new("cli-docling");
+    c.script(
+        "bin/docling",
+        r#"case "$*" in *"--to md --image-export-mode referenced"*"--output docling"*) ;; *) exit 2 ;; esac
+for pdf; do :; done
+stem=$(basename "$pdf" .pdf)
+mkdir -p "docling/${stem}_artifacts"
+printf png > "docling/${stem}_artifacts/image_000000_ab12.png"
+printf '%s\n\n%s\n' 'Plain text from docling.' "![Image](${stem}_artifacts/image_000000_ab12.png)" > "docling/$stem.md""#,
+    );
+    let pdf = c.tmp.write("graph-theory.pdf", FAKE_PDF);
+    let bin = c.tmp.path("bin");
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let docling = |args: &[&str]| c.command(args).env_remove("CARREL_EXTRACTOR").env("PATH", &path).output().unwrap();
+    assert!(String::from_utf8_lossy(&docling(&["config"]).stdout).contains("extractor: docling"));
+    let out = docling(&["add", pdf.to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("added graphtheory\n  no DOI"), "{out:?}");
+    let text = read(c.tmp.path("lib/graphtheory/fulltext.md"));
+    assert!(text.contains("from docling") && text.contains("](figures/image_000000_ab12.png)"), "{text}");
+    assert!(c.tmp.path("lib/graphtheory/figures/image_000000_ab12.png").exists());
+
+    // Asked for but missing: shown, and the paper is still added.
+    let c = Carrel::new("cli-no-docling");
+    let pdf = c.tmp.write("graph-theory.pdf", FAKE_PDF);
+    let path = path_without_extractors(&c.tmp.path("bin"));
+    let mut add = c.command(&["add", pdf.to_str().unwrap()]);
+    let out = String::from_utf8(add.env("CARREL_EXTRACTOR", "docling").env("PATH", &path).output().unwrap().stdout);
+    let out = out.unwrap();
+    assert!(out.contains("added graphtheory") && out.contains("no `docling` on PATH"), "{out}");
+
+    // A build with its own Python always has PyMuPDF; otherwise it needs uv.
+    if option_env!("CARREL_DEFAULT_EXTRACTOR").is_some() {
+        return;
+    }
+    let c = Carrel::new("cli-pymupdf");
+    c.script("bin/uv", "printf 'from uv' > fulltext.md");
+    let pdf = c.tmp.write("graph-theory.pdf", FAKE_PDF);
+    let path = path_without_extractors(&c.tmp.path("bin"));
+    c.command(&["add", pdf.to_str().unwrap()]).env_remove("CARREL_EXTRACTOR").env("PATH", &path).output().unwrap();
+    assert_eq!(read(c.tmp.path("lib/graphtheory/fulltext.md")), "from uv", "PyMuPDF through uv");
+
+    // Nothing installed: the paper is added without text, with a word on how to get it.
+    let c = Carrel::new("cli-no-extractor");
+    let pdf = c.tmp.write("graph-theory.pdf", FAKE_PDF);
+    let path = path_without_extractors(&c.tmp.path("bin"));
+    let run = |args: &[&str]| {
+        let out = c.command(args).env_remove("CARREL_EXTRACTOR").env("PATH", &path).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let out = run(&["add", pdf.to_str().unwrap()]);
+    assert!(out.contains("added graphtheory") && out.contains("text not extracted: no text extractor found"), "{out}");
+    assert!(!c.tmp.path("lib/graphtheory/fulltext.md").exists());
+    assert!(run(&["doctor"]).contains("install uv or docling"));
+    assert!(run(&["extract", "graphtheory"]).contains("graphtheory: no text extractor found"));
+}
+
 #[test]
 fn projects_and_imports() {
     let c = Carrel::new("cli-projects");

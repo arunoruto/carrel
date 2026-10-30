@@ -16,10 +16,10 @@ fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
     ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A library using the real extractor.
+/// A library using the real extractor, PyMuPDF.
 fn real_library(tmp: &Tmp) -> Library {
     let mut lib = library(tmp);
-    lib.extractor = carrel::DEFAULT_EXTRACTOR.into();
+    lib.extractor = "pymupdf".into();
     lib
 }
 

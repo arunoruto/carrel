@@ -579,6 +579,12 @@ fn main() -> Result<()> {
             println!("key:     {}", lib.key);
             println!("index:   {}", lib.index.display());
             println!("theme:   {}", theme::Theme::configured()?.name);
+            let extractor = match lib.extractor() {
+                Ok(Some(extractor)) => extractor.name(),
+                Ok(None) => "none; install uv or docling to extract text from PDFs".into(),
+                Err(e) => format!("{e:#}"),
+            };
+            println!("extractor: {extractor}");
             let tokens = [
                 ("ads", carrel::token(&["ADS_API_TOKEN", "ADS_DEV_KEY"], |t| t.ads.as_ref())?),
                 ("s2", carrel::token(&["S2_API_KEY"], |t| t.s2.as_ref())?),

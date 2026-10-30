@@ -8,7 +8,7 @@ The library is a folder of plain files, by default `~/Documents/carrel` (see [Co
     vaswani2017attention.bib   metadata and approved keywords; the key is the folder name
     vaswani2017attention.pdf
     fulltext.md                the extracted text
-    figures/                   the extracted figures, named by page
+    figures/                   the extracted figures
     summary.md                 an approved summary
     notes.md                   your notes, and approved AI notes
     references.json            what it cites, each with its source (see The citation graph)

@@ -1,5 +1,5 @@
-# carrel's default extractor: $PDF -> fulltext.md + figures/page-NNNN-MM.png in the current directory.
-# Replace it by setting CARREL_EXTRACTOR to any shell command that does the same.
+# carrel's PyMuPDF extractor: $PDF -> fulltext.md + figures/page-NNNN-MM.png in the current directory.
+# Replace it with Docling or any shell command through the config's `extractor` or CARREL_EXTRACTOR.
 import pathlib
 import sys
 
