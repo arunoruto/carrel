@@ -537,6 +537,12 @@ fn file(path: &Path) -> Response<Body> {
             let mut response = text(StatusCode::OK, bytes);
             response.headers_mut().insert(header::CONTENT_TYPE, mime(path).parse().unwrap());
             response.headers_mut().insert(header::CONTENT_DISPOSITION, "inline".parse().unwrap());
+            response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+            // Supplementary files come from anywhere: an SVG or HTML one must not run scripts as this page.
+            // PDFs are spared, as Chrome won't show them sandboxed.
+            if mime(path) != "application/pdf" {
+                response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, "sandbox".parse().unwrap());
+            }
             response
         }
         Err(e) => json_status(StatusCode::NOT_FOUND, json!({"error": e.to_string()})),

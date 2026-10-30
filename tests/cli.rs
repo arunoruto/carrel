@@ -534,7 +534,10 @@ fn web_ui() {
 
     // Files only from the paper's own folders.
     c.tmp.write(&format!("lib/{id}/figures/page-0001-01.png"), "png");
-    assert_eq!(api("GET", &format!("/api/papers/{id}/files/figures/page-0001-01.png"), b"").0, 200);
+    let (status, head, _) =
+        http(&addr, "GET", &format!("/api/papers/{id}/files/figures/page-0001-01.png"), &[&cookie], b"");
+    assert_eq!(status, 200);
+    assert!(head.contains("content-security-policy: sandbox"), "no scripts from files: {head}");
     assert_eq!(api("GET", &format!("/api/papers/{id}/files/figures/..%2F{id}.bib"), b"").0, 400);
     assert_eq!(api("GET", &format!("/api/papers/{id}/files/drafts/summary.md"), b"").0, 404);
     assert_eq!(api("GET", "/api/papers/..%2F..%2Fetc/pdf", b"").0, 400);

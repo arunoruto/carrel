@@ -13,8 +13,10 @@ class App {
 
   async refresh() {
     try {
-      const [info, projects, papers] = await Promise.all([api.info(), api.projects(), api.papers()]);
-      this.info = info;
+      // Info asks Ollama, which may take seconds to time out; the rest doesn't wait for it.
+      const info = api.info().then((info) => (this.info = info));
+      const [projects, papers] = await Promise.all([api.projects(), api.papers()]);
+      await info;
       this.projects = projects;
       this.total = papers.length;
       this.loggedOut = false;
