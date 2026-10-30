@@ -8,6 +8,10 @@
 
 <br />
 <div align="center">
+  <a href="https://github.com/arunoruto/carrel">
+    <img src="assets/logo.svg" alt="carrel logo" width="96" height="96">
+  </a>
+
 <h3 align="center">carrel</h3>
 
   <p align="center">

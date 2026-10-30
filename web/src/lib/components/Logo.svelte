@@ -1,17 +1,11 @@
 <script lang="ts">
+  // assets/logo.svg: a reading nook with three books, the nook in the text colour.
   let { class: extra = 'size-7' }: { class?: string } = $props();
-  // The TUI's book spines.
-  const spines = [
-    ['#f38ba8', 9, 20],
-    ['#fab387', 5, 24],
-    ['#f9e2af', 7, 22],
-    ['#a6e3a1', 11, 18],
-  ] as const;
 </script>
 
-<svg class={extra} viewBox="0 0 32 32" aria-hidden="true">
-  {#each spines as [color, y, h], i}
-    <rect x={3 + i * 5} {y} width="4" height={h} rx="1" fill={color} />
-  {/each}
-  <rect x="23" y="4" width="4" height="25" rx="1" fill="#89b4fa" transform="rotate(8 25 16)" />
+<svg class={extra} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <path d="M9 57V29a23 23 0 0 1 46 0v28M5 57h54" stroke="currentColor" stroke-width="7" stroke-linecap="round" />
+  <rect x="17" y="30" width="8" height="24" rx="2" fill="#e8586e" />
+  <rect x="27" y="23" width="8" height="31" rx="2" fill="#f2a33a" />
+  <rect x="36.5" y="27" width="8" height="27" rx="2" fill="#4c7ef0" transform="rotate(11 36.5 54)" />
 </svg>

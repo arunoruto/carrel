@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="3" y="9" width="4" height="20" rx="1" fill="#f38ba8"/><rect x="8" y="5" width="4" height="24" rx="1" fill="#fab387"/><rect x="13" y="7" width="4" height="22" rx="1" fill="#f9e2af"/><rect x="18" y="11" width="4" height="18" rx="1" fill="#a6e3a1"/><rect x="23" y="4" width="4" height="25" rx="1" fill="#89b4fa" transform="rotate(8 25 16)"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- carrel: a reading nook with three books, one leaning. The nook follows the light or dark theme. -->
+  <style>.nook{stroke:#4c4f69}@media (prefers-color-scheme:dark){.nook{stroke:#cdd6f4}}</style>
+  <path class="nook" d="M9 57V29a23 23 0 0 1 46 0v28M5 57h54" stroke-width="7" stroke-linecap="round"/>
+  <rect x="17" y="30" width="8" height="24" rx="2" fill="#e8586e"/>
+  <rect x="27" y="23" width="8" height="31" rx="2" fill="#f2a33a"/>
+  <rect x="36.5" y="27" width="8" height="27" rx="2" fill="#4c7ef0" transform="rotate(11 36.5 54)"/>
+</svg>

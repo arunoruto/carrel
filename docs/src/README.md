@@ -2,6 +2,8 @@
 
 <div class="hero">
 
+<img src="logo.svg" alt="" width="88" height="88">
+
 **A research paper library for you and your AI.**
 
 Add papers by PDF, DOI, arXiv id or title. carrel finds their metadata, turns each PDF into text and figures an AI can read, keeps a `.bib` file for every paper, and lets an AI search, read and summarize your library, with you approving what it writes.
