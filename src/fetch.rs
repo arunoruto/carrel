@@ -11,6 +11,8 @@ pub enum Source {
     Pdf(PathBuf),
     Doi(String),
     Arxiv(String),
+    /// A book's, as ISBN-13.
+    Isbn(String),
     Title(String),
 }
 
@@ -76,6 +78,10 @@ pub fn classify(input: &str) -> Result<Source> {
     }
     if let Some(doi) = find_doi(s) {
         return Ok(Source::Doi(doi));
+    }
+    let isbn = lower.strip_prefix("isbn").map_or(s, |rest| rest.trim_start_matches([':', ' ', '-']));
+    if let Some(isbn) = crate::books::isbn13(isbn) {
+        return Ok(Source::Isbn(isbn));
     }
     if s.is_empty() || s.starts_with(['/', '~', '.']) || lower.ends_with(".pdf") {
         bail!("no such file: {s}");
@@ -598,6 +604,9 @@ mod tests {
         assert!(matches!(classify("1706.03762").unwrap(), Source::Arxiv(_)));
         assert!(matches!(classify("doi:10.1038/nature14539").unwrap(), Source::Doi(d) if d == "10.1038/nature14539"));
         assert!(matches!(classify("Attention is all you need").unwrap(), Source::Title(_)));
+        assert!(matches!(classify("978-0-521-88349-8").unwrap(), Source::Isbn(i) if i == "9780521883498"));
+        assert!(matches!(classify("ISBN: 0-521-78252-X").unwrap(), Source::Isbn(i) if i == "9780521782524"));
+        assert!(matches!(classify("978-0-521-88349-7").unwrap(), Source::Title(_)), "check digit wrong");
         assert!(classify("~/no-such-file.pdf").is_err());
         assert!(same_title("Attention Is All You Need", "Attention is All you Need."));
         assert!(same_title("Eﬃcient Pre-training", "Efficient Pretraining"));

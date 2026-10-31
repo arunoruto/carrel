@@ -6,7 +6,7 @@
 
 **A research paper library for you and your AI.**
 
-Add papers by PDF, DOI, arXiv id or title. carrel finds their metadata, turns each PDF into text and figures an AI can read, keeps a `.bib` file for every paper, and lets an AI search, read and summarize your library, with you approving what it writes.
+Add papers by PDF, DOI, arXiv id, ISBN or title. carrel finds their metadata, turns each PDF into text and figures an AI can read, keeps a `.bib` file for every paper, and lets an AI search, read and summarize your library, with you approving what it writes.
 
 `carrel add 2006.11239` · `carrel search diffusion author:ho` · `carrel bib -p thesis > refs.bib`
 
@@ -16,7 +16,7 @@ Add papers by PDF, DOI, arXiv id or title. carrel finds their metadata, turns ea
 
 ## What it does
 
-- **Add papers by PDF, DOI, arXiv id or title**, or import a `.bib` from a LaTeX project, Zotero or JabRef. Metadata comes from doi.org, Crossref, Semantic Scholar and arXiv; arXiv PDFs are downloaded.
+- **Add papers by PDF, DOI, arXiv id, ISBN or title**, or import a `.bib` from a LaTeX project, Zotero or JabRef. Metadata comes from doi.org, Crossref, Semantic Scholar and arXiv; arXiv PDFs are downloaded.
 - **Plain files you own.** Each paper is a folder named by its citation key, holding `<key>.bib`, `<key>.pdf`, the extracted text and figures, your notes and supplementary material. Sync it, put it in git, edit it by hand.
 - **Readable by AI.** Every PDF becomes `fulltext.md` plus `figures/`, so an assistant can read papers without PDF tools of its own.
 - **AI writes drafts, you decide.** Summaries, keywords and notes an AI proposes wait in `drafts/` until you approve them.

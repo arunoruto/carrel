@@ -8,7 +8,8 @@ use std::collections::{HashMap, HashSet};
 pub struct Issue {
     /// "error": the paper can't be loaded; "warning": something needs fixing; "info": worth a look.
     pub level: &'static str,
-    /// What was checked: broken, fields, markup, macro, duplicate, text, pdf, preprint, references, project, people.
+    /// What was checked: broken, fields, markup, macro, duplicate, text, pdf, preprint, references, project,
+    /// people, and with `--online` doi.
     pub check: &'static str,
     pub id: String,
     pub message: String,
@@ -44,9 +45,9 @@ impl Library {
         for p in &papers {
             let (b, id) = (&p.bib, p.id.as_str());
             let edit = Some(format!("carrel edit {id}"));
-            let update = match b.doi().is_some() || b.arxiv().is_some() {
+            let update = match b.doi().is_some() || b.arxiv().is_some() || b.kind == "book" {
                 true => format!("carrel update {id}"),
-                false => format!("carrel update {id} <DOI, arXiv id or title>"),
+                false => format!("carrel update {id} <DOI, arXiv id, ISBN or title>"),
             };
 
             // The fields every style needs (any of the alternatives), plus the venue the entry type needs.
@@ -80,6 +81,7 @@ impl Library {
             }
 
             let mut keys = fetch::paper_keys(&fetch::Ids { doi: b.doi(), arxiv: b.arxiv() }, &b.title());
+            keys.extend(b.get("isbn").as_deref().and_then(crate::books::isbn13).map(|isbn| format!("isbn:{isbn}")));
             // The same pages of the same venue and year: the same paper, however its title is spelled.
             let pages = b.get("pages").filter(|p| p.contains(['-', '–']));
             if let (Some(year), Some(venue), Some(pages)) = (b.year(), b.venue(), pages) {
@@ -140,10 +142,38 @@ impl Library {
                 report("warning", "duplicate", &id, message, None);
             }
         }
-        let rank = |level: &str| ["error", "warning", "info"].iter().position(|l| *l == level);
-        issues.sort_by(|a, b| rank(a.level).cmp(&rank(b.level)).then(a.id.cmp(&b.id)));
+        sort(&mut issues);
         issues
     }
+
+    /// Online: each DOI looked up on doi.org, to find the ones that belong to another work (imports bring
+    /// those along: a review of the book, a paper with a similar title) or to none.
+    // ponytail: one request after another, about a minute for 150 papers
+    pub fn check_dois(&self) -> Vec<Issue> {
+        let mut issues = vec![];
+        for p in self.papers().0 {
+            let Some(doi) = p.bib.doi() else { continue };
+            let message = match fetch::metadata(&fetch::Ids { doi: Some(doi.clone()), arxiv: None }) {
+                Ok(work) if crate::update::same_work(&p.bib.title(), &work.title()) => continue,
+                Ok(work) => format!("its DOI {doi} is {:?}, another work", work.title()),
+                Err(e) => format!("its DOI {doi} doesn't resolve: {e:#}"),
+            };
+            issues.push(Issue {
+                level: "warning",
+                check: "doi",
+                id: p.id.clone(),
+                message,
+                fix: Some(format!("carrel edit {}", p.id)),
+            });
+        }
+        issues
+    }
+}
+
+/// Errors first, then warnings, then infos; by id within each.
+pub fn sort(issues: &mut [Issue]) {
+    let rank = |level: &str| ["error", "warning", "info"].iter().position(|l| *l == level);
+    issues.sort_by(|a, b| rank(a.level).cmp(&rank(b.level)).then(a.id.cmp(&b.id)));
 }
 
 #[cfg(test)]

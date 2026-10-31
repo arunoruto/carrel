@@ -24,7 +24,7 @@ struct Cli {
 enum Cmd {
     /// The terminal UI: browse, filter and manage the library, the citation graph, people and drafts
     Tui,
-    /// Add papers by PDF file, DOI, arXiv id/URL or exact title
+    /// Add papers by PDF file, DOI, arXiv id/URL, ISBN or exact title
     Add {
         #[arg(required = true)]
         sources: Vec<String>,
@@ -41,9 +41,9 @@ enum Cmd {
     Update {
         #[arg(required_unless_present = "all")]
         id: Option<String>,
-        /// Which paper it is (DOI, arXiv id or title), for papers added without one
+        /// Which paper it is (DOI, arXiv id, ISBN or title), for papers added without one
         source: Option<String>,
-        /// Every paper with a DOI or arXiv id
+        /// Every paper with a DOI or arXiv id, and every book
         #[arg(long, conflicts_with_all = ["id", "source"])]
         all: bool,
     },
@@ -55,6 +55,9 @@ enum Cmd {
         /// Also list each paper without a PDF and each arXiv preprint
         #[arg(long)]
         all: bool,
+        /// Also look up every DOI, to find those that belong to another work
+        #[arg(long)]
+        online: bool,
     },
     /// Import every entry of a .bib file (a LaTeX project's, a Zotero export, ...), keeping its keys
     Import {
@@ -398,7 +401,8 @@ fn main() -> Result<()> {
             lib.update(&id, source.as_deref())?.iter().for_each(|m| println!("{m}"))
         }
         Cmd::Update { id: None, .. } => {
-            let papers = lib.papers().0.into_iter().filter(|p| p.bib.doi().is_some() || p.bib.arxiv().is_some());
+            let known = |p: &Paper| p.bib.doi().is_some() || p.bib.arxiv().is_some() || p.bib.kind == "book";
+            let papers = lib.papers().0.into_iter().filter(known);
             for p in papers {
                 match lib.update(&p.id, None) {
                     Ok(changes) => println!("{}: {}", p.id, changes.join("; ")),
@@ -406,7 +410,7 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Doctor { json, all } => doctor(&lib, json, all)?,
+        Cmd::Doctor { json, all, online } => doctor(&lib, json, all, online)?,
         Cmd::Sync { dry_run, keep } => sync(&lib, dry_run, keep)?,
         Cmd::ImportIlibrarian { data } => {
             let imported = lib.import_ilibrarian(&data)?;
@@ -838,8 +842,12 @@ fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>) -> Res
     Ok(())
 }
 
-fn doctor(lib: &Library, json: bool, all: bool) -> Result<()> {
-    let issues = lib.doctor();
+fn doctor(lib: &Library, json: bool, all: bool, online: bool) -> Result<()> {
+    let mut issues = lib.doctor();
+    if online {
+        issues.extend(spinning("looking up every DOI", || lib.check_dois()));
+        carrel::doctor::sort(&mut issues);
+    }
     if json {
         print_json(&issues)?;
         return Ok(());

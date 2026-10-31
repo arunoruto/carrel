@@ -6,7 +6,8 @@
 |---|---|---|
 | arXiv id or URL | `2006.11239`, `arXiv:hep-th/9711200`, `https://arxiv.org/abs/2006.11239v2` | metadata from arXiv's DOI, the PDF downloaded |
 | DOI or URL | `10.1038/nature14539`, `https://doi.org/…`, publisher URLs containing the DOI | metadata from doi.org (Crossref, DataCite, …) |
-| PDF | `paper.pdf`, `'~/Downloads/a paper.pdf'` | text extracted; its DOI or arXiv id read from the first page, or else its title looked up |
+| ISBN | `978-0-521-88349-8`, `ISBN 0-521-78252-X` | a book: metadata from [Open Library](https://openlibrary.org) |
+| PDF | `paper.pdf`, `'~/Downloads/a paper.pdf'` | text extracted; its DOI or arXiv id read from the first page, or else its title looked up; a book's ISBN from its copyright page |
 | exact title | `"Attention Is All You Need"` | looked up on Crossref, Semantic Scholar and arXiv |
 
 A title that doesn't match exactly prints the closest papers with the id to add each by. In the TUI, `a` with a title shows the results to pick from.
@@ -126,6 +127,6 @@ With I, Librarian in Docker, the data folder is the volume mounted at `/app/data
 A PDF without DOI or arXiv id whose title isn't found still gets added, with its title from the PDF. Tell carrel which paper it is later:
 
 ```sh
-carrel update attention 10.48550/arXiv.1706.03762   # or an arXiv id, or the exact title
+carrel update attention 10.48550/arXiv.1706.03762   # or an arXiv id, an ISBN, or the exact title
 carrel rename attention                              # then a key from the new metadata
 ```

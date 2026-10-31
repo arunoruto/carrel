@@ -7,7 +7,7 @@ Run `carrel <command> --help` for every option.
 | `carrel` | the config's `default`: the [TUI](tui.md) unless set |
 | `tui` | the [TUI](tui.md) |
 | `web [--listen addr] [--no-open] [--get-url]` | the [web UI](web.md), on this machine; `--get-url` only prints the login link |
-| `add <source>…` | add papers by PDF, DOI, arXiv id/URL or exact title |
+| `add <source>…` | add papers by PDF, DOI, arXiv id/URL, ISBN or exact title |
 | `attach <id> [pdf]` | give a paper its PDF; without a file, from arXiv |
 | `addto <id> <file or URL>…` | add supplementary files |
 | `import <file.bib> [-p project] [--pdfs]` | import a `.bib`, keeping its keys; [from JabRef](adding-papers.md#from-jabref) with its files and groups |
@@ -35,7 +35,7 @@ Run `carrel <command> --help` for every option.
 | `reject <id> <summary\|keywords\|notes\|references>` | discard a draft |
 | `project [list\|show\|add\|remove\|delete\|sync]` | [projects](projects.md) |
 | `bib [ids…] [-p project] [--jabref]` | BibTeX for papers, a project, or the library; `--jabref` adds [file links and projects as groups](projects.md#jabref) |
-| `doctor [--all] [--json]` | [check the library](maintenance.md) |
+| `doctor [--all] [--online] [--json]` | [check the library](maintenance.md) |
 | `rm <id>` | delete a paper and its files |
 | `sync [-n] [--keep local\|remote]` | [share the library](sharing.md) through the config's remote |
 | `serve [--listen addr] [--every minutes]` | [run the library on a server](server.md): MCP over HTTP, syncing and background work |

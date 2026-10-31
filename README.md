@@ -53,7 +53,7 @@
 
 ## About The Project
 
-- **Add papers by PDF, DOI, arXiv id or title**, or import a `.bib`; metadata is looked up and arXiv PDFs are downloaded.
+- **Add papers by PDF, DOI, arXiv id, ISBN or title**, or import a `.bib`; metadata is looked up and arXiv PDFs are downloaded.
 - **Plain files you own**: one folder per paper, named by its citation key, with `<key>.bib`, `<key>.pdf`, notes and supplementary material.
 - **Readable by AI**: every PDF becomes `fulltext.md` and `figures/`, served to assistants over **MCP**.
 - **AI writes drafts, you decide**: proposed summaries, keywords and notes wait for your approval.

@@ -18,8 +18,9 @@
 pub mod affiliations;
 pub mod authors;
 pub mod bib;
+pub mod books;
 pub mod consume;
-mod doctor;
+pub mod doctor;
 pub mod embed;
 pub mod extract;
 pub mod fetch;
@@ -389,7 +390,7 @@ impl Library {
         (papers, broken)
     }
 
-    /// Add a paper from a PDF, DOI, arXiv id/URL or exact title. Returns its id and messages worth showing.
+    /// Add a paper from a PDF, DOI, arXiv id/URL, ISBN or exact title. Returns its id and messages worth showing.
     pub fn add(&self, source: &str) -> Result<(String, Vec<String>)> {
         self.add_from(source, false)
     }
@@ -397,27 +398,29 @@ impl Library {
     /// [`Library::add`], refusing PDFs that turn out to have no DOI or arXiv id (invoices, letters, ...).
     fn add_from(&self, source: &str, known_only: bool) -> Result<(String, Vec<String>)> {
         let tmp = Staging::new(&self.root)?;
-        let ids = match fetch::classify(source)? {
+        let (ids, isbn) = match fetch::classify(source)? {
             fetch::Source::Pdf(path) => {
                 copy_pdf(&path, &tmp.0.join("paper.pdf"))?;
-                fetch::Ids::default()
+                (fetch::Ids::default(), None)
             }
-            fetch::Source::Arxiv(id) => fetch::Ids { arxiv: Some(id), ..Default::default() },
-            fetch::Source::Doi(doi) => fetch::Ids { doi: Some(doi), ..Default::default() },
-            fetch::Source::Title(title) => fetch::by_title(&title)?,
+            fetch::Source::Arxiv(id) => (fetch::Ids { arxiv: Some(id), ..Default::default() }, None),
+            fetch::Source::Doi(doi) => (fetch::Ids { doi: Some(doi), ..Default::default() }, None),
+            fetch::Source::Isbn(isbn) => (fetch::Ids::default(), Some(isbn)),
+            fetch::Source::Title(title) => (fetch::by_title(&title)?, None),
         };
-        self.add_staged(tmp, ids, source, known_only)
+        self.add_staged(tmp, ids, isbn, source, known_only)
     }
 
     /// Add a search result: metadata from its DOI when it has one, the PDF from arXiv when it is there.
     pub fn add_ids(&self, ids: &fetch::Ids) -> Result<(String, Vec<String>)> {
-        self.add_staged(Staging::new(&self.root)?, ids.clone(), &ids.source(), false)
+        self.add_staged(Staging::new(&self.root)?, ids.clone(), None, &ids.source(), false)
     }
 
     fn add_staged(
         &self,
         tmp: Staging,
         mut ids: fetch::Ids,
+        isbn: Option<String>,
         source: &str,
         known_only: bool,
     ) -> Result<(String, Vec<String>)> {
@@ -460,10 +463,27 @@ impl Library {
                 Err(e) => messages.push(format!("title lookup failed: {e:#}")),
             }
         }
-        if known_only && ids.is_empty() {
-            bail!("not recognised as a paper: no DOI or arXiv id, and no known title");
+        // A book: by the ISBN it was added by, else the one on its copyright page.
+        let given = isbn.is_some();
+        if ids.is_empty()
+            && let Some(isbn) = isbn.or_else(|| books::find_isbn(&text))
+        {
+            match books::by_isbn(&isbn) {
+                // Like a DOI in the text, an ISBN may be another book's: its title must be in the text.
+                Ok(Some(book)) if given || starts(&text, book.title().split(':').next().unwrap_or_default()) => {
+                    fetched = Some(book)
+                }
+                Ok(Some(book)) => messages.push(format!("ignored ISBN {isbn} from the text: it is {:?}", book.title())),
+                Ok(None) if given => bail!("Open Library doesn't know ISBN {isbn}"),
+                Ok(None) => messages.push(format!("Open Library doesn't know ISBN {isbn} from the text")),
+                Err(e) if given => return Err(e),
+                Err(e) => messages.push(format!("ISBN lookup failed: {e:#}")),
+            }
         }
-        let mut bib = if ids.is_empty() {
+        if known_only && ids.is_empty() && fetched.is_none() {
+            bail!("not recognised as a paper: no DOI, arXiv id or ISBN, and no known title");
+        }
+        let mut bib = if ids.is_empty() && fetched.is_none() {
             messages.push("no DOI or arXiv id found; fix the metadata with `carrel edit`".into());
             Entry::new("misc")
         } else {
@@ -941,7 +961,11 @@ impl Drop for Staging {
 
 fn same_paper(a: &Entry, b: &Entry) -> bool {
     let eq = |x: Option<String>, y: Option<String>| matches!((x, y), (Some(x), Some(y)) if x.eq_ignore_ascii_case(&y));
-    eq(a.doi(), b.doi()) || eq(a.arxiv(), b.arxiv()) || fetch::same_title(&a.title(), &b.title())
+    let isbn = |e: &Entry| e.get("isbn").as_deref().and_then(books::isbn13);
+    eq(a.doi(), b.doi())
+        || eq(a.arxiv(), b.arxiv())
+        || eq(isbn(a), isbn(b))
+        || fetch::same_title(&a.title(), &b.title())
 }
 
 /// Words a key skips (shorter ones are skipped anyway): English, German, French, Spanish, Italian.
