@@ -637,7 +637,7 @@ fn web_ui() {
     assert_eq!(api("GET", "/api/papers/..%2F..%2Fetc/pdf", b"").0, 400);
 
     // The library as a network, its people, a paper's citation tree, the doctor and BibTeX to save.
-    let (_, other) = api("POST", "/api/upload?name=Other.pdf", FAKE_PDF);
+    let (_, other) = api("POST", "/api/upload?name=Other.pdf", &[FAKE_PDF, b"% other\n"].concat());
     let other = json(&other)["id"].as_str().unwrap().to_string();
     c.tmp.write(
         &format!("lib/{id}/{id}.bib"),

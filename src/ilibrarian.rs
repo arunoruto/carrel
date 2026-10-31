@@ -83,7 +83,7 @@ impl Library {
             bib.set("title", Some(&title));
             let names = |table: &str, link: &str, column: &str| -> Result<String> {
                 let sql = format!(
-                    "SELECT CASE WHEN coalesce(a.first_name, '') = '' THEN a.last_name ELSE a.last_name || ', ' || a.first_name END
+                    "SELECT CASE WHEN trim(coalesce(a.first_name, '')) = '' THEN trim(a.last_name) ELSE trim(a.last_name) || ', ' || trim(a.first_name) END
                      FROM {link} x JOIN {table} a ON a.id = x.{column} WHERE x.item_id = ?1 ORDER BY x.position"
                 );
                 Ok(list(&sql, item)?.join(" and "))

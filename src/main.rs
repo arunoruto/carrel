@@ -335,7 +335,10 @@ fn main() -> Result<()> {
     };
     // Setting up the machine needs no library.
     match cmd {
-        Cmd::Integrate { agent: Some(agent), remove } => return Ok(println!("{}", install::integrate(agent, remove)?)),
+        Cmd::Integrate { agent: Some(agent), remove } => {
+            println!("{}", install::integrate(agent, remove)?);
+            return Ok(());
+        }
         Cmd::Integrate { agent: None, .. } => {
             for agent in install::AGENTS {
                 let state = match install::integrated(agent)? {
@@ -362,7 +365,8 @@ fn main() -> Result<()> {
         }
         Cmd::Service { cmd: Some(ServiceCmd::Remove { service }) } => {
             let removed = install::remove(service)?;
-            return Ok(println!("{}", if removed { "removed" } else { "wasn't installed" }));
+            println!("{}", if removed { "removed" } else { "wasn't installed" });
+            return Ok(());
         }
         Cmd::Service { cmd: None } => {
             for service in [install::Service::Web, install::Service::Consume] {
@@ -857,7 +861,7 @@ fn doctor(lib: &Library, json: bool, all: bool, online: bool) -> Result<()> {
     let (shown, hidden): (Vec<_>, Vec<_>) = issues.iter().partition(|i| all || i.level != "info");
     for i in &shown {
         let fix = i.fix.as_ref().map_or(String::new(), |fix| format!("  → {fix}"));
-        println!("{:<8}{:<30}{}{fix}", i.level, i.id, i.message);
+        println!("{:<8}{:<29} {}{fix}", i.level, i.id, i.message);
     }
     let count = |check| hidden.iter().filter(|i| i.check == check).count();
     if !hidden.is_empty() {

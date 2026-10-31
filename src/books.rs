@@ -13,11 +13,14 @@ const OPEN_LIBRARY: &str = "https://openlibrary.org";
 pub fn isbn13(raw: &str) -> Option<String> {
     let chars: String = raw.chars().filter(|c| !matches!(c, '-' | ' ' | '‐' | '–')).collect();
     let digit = |c: char| c.to_digit(10);
+    if !chars.is_ascii() {
+        return None;
+    }
     match chars.len() {
         13 if chars.chars().all(|c| c.is_ascii_digit()) => {
             let sum: u32 =
                 chars.chars().enumerate().map(|(i, c)| digit(c).unwrap() * if i % 2 == 0 { 1 } else { 3 }).sum();
-            (sum % 10 == 0 && (chars.starts_with("978") || chars.starts_with("979"))).then_some(chars)
+            (sum.is_multiple_of(10) && (chars.starts_with("978") || chars.starts_with("979"))).then_some(chars)
         }
         10 => {
             let (body, check) = chars.split_at(9);
@@ -27,7 +30,7 @@ pub fn isbn13(raw: &str) -> Option<String> {
                 c => digit(c.chars().next()?)?,
             };
             let sum: u32 = body.iter().enumerate().map(|(i, d)| d * (10 - i as u32)).sum::<u32>() + check;
-            if sum % 11 != 0 {
+            if !sum.is_multiple_of(11) {
                 return None;
             }
             let twelve = format!("978{}", body.iter().map(u32::to_string).collect::<String>());
@@ -196,6 +199,7 @@ mod tests {
     #[test]
     fn isbns() {
         assert_eq!(isbn13("978-0-521-88349-8").as_deref(), Some("9780521883498"));
+        assert_eq!(isbn13("12345678é"), None, "not a panic");
         assert_eq!(isbn13("0 521 78252 X").as_deref(), Some("9780521782524"), "ISBN-10 with X, as 13");
         assert_eq!(isbn13("0-471-30932-X").as_deref(), Some("9780471309321"));
         assert_eq!(isbn13("978-0-521-88349-7"), None, "wrong check digit");

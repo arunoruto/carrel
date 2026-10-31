@@ -451,6 +451,20 @@ impl Library {
         self.add_staged(Staging::new(&self.root)?, ids.clone(), None, &ids.source(), false)
     }
 
+    /// The paper whose PDF has exactly these bytes.
+    pub fn with_pdf(&self, pdf: &Path) -> Result<Option<String>> {
+        let bytes = fs::read(pdf)?;
+        for p in self.papers().0 {
+            if let Some(other) = p.pdf()
+                && fs::metadata(&other).is_ok_and(|m| m.len() == bytes.len() as u64)
+                && fs::read(&other)? == bytes
+            {
+                return Ok(Some(p.id));
+            }
+        }
+        Ok(None)
+    }
+
     fn add_staged(
         &self,
         tmp: Staging,
@@ -467,6 +481,9 @@ impl Library {
             fetch::download_arxiv(id, &pdf)?;
         }
         let has_pdf = pdf.exists();
+        if has_pdf && let Some(old) = self.with_pdf(&pdf)? {
+            bail!("already in the library as {old}: the same PDF");
+        }
         if has_pdf {
             messages.extend(self.try_extract(&pdf, &tmp.0));
         }
@@ -589,7 +606,8 @@ impl Library {
 
     fn unique_id(&self, base: &str) -> String {
         let mut candidates = std::iter::once(base.to_string()).chain(('b'..='z').map(|c| format!("{base}{c}")));
-        let free = candidates.find(|id| valid_id(id) && !self.root.join(id).exists());
+        // Nor another paper's old key, which old citations still use.
+        let free = candidates.find(|id| valid_id(id) && !self.root.join(id).exists() && self.get(id).is_err());
         free.unwrap_or_else(|| format!("{base}-{}", std::process::id()))
     }
 
@@ -597,6 +615,7 @@ impl Library {
     /// figures. Returns messages worth showing.
     pub fn attach(&self, id: &str, pdf: Option<&Path>) -> Result<Vec<String>> {
         let p = self.get(id)?;
+        let id = p.id.as_str(); // not an old key
         if let Some(existing) = p.pdf() {
             bail!("{id} already has a PDF; delete {} first to replace it", existing.display());
         }
@@ -814,6 +833,7 @@ impl Library {
     /// Re-run text and figure extraction for a paper.
     pub fn extract(&self, id: &str) -> Result<()> {
         let p = self.get(id)?;
+        let id = p.id.as_str(); // not an old key
         let pdf = p.pdf().context("this paper has no PDF")?;
         let tmp = Staging::new(&self.root)?;
         self.extractor()?.context(NO_EXTRACTOR)?.extract(&pdf, &tmp.0)?;
@@ -825,6 +845,8 @@ impl Library {
     /// Without a new key, the key template makes one from the metadata. Returns the new key.
     pub fn rename(&self, id: &str, new: Option<&str>) -> Result<String> {
         let p = self.get(id)?;
+        let id = p.id.clone(); // not an old key
+        let id = id.as_str();
         let new = match new {
             Some(new) => new.to_string(),
             None => match citekey(&self.key, &p.bib)? {
@@ -833,7 +855,7 @@ impl Library {
             },
         };
         let dir = self.root.join(&new);
-        if !valid_id(&new) || dir.exists() {
+        if !valid_id(&new) || dir.exists() || self.get(&new).is_ok_and(|other| other.id != id) {
             bail!("{new:?} is not a valid new id, or already taken");
         }
         let had_pdf = p.pdf().is_some();
@@ -851,8 +873,9 @@ impl Library {
     }
 
     pub fn remove(&self, id: &str) -> Result<()> {
-        fs::remove_dir_all(self.get(id)?.dir)?;
-        self.replace_in_projects(id, None)
+        let p = self.get(id)?;
+        fs::remove_dir_all(&p.dir)?;
+        self.replace_in_projects(&p.id, None)
     }
 
     /// Store an AI proposal as a draft; a human approves or rejects it later.

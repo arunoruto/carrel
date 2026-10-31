@@ -110,7 +110,7 @@ fn sd_quote(s: &str) -> String {
 fn systemd(service: Service, unit: &Unit) -> Vec<(String, String)> {
     let exec = std::iter::once(unit.exe.to_string_lossy().into_owned())
         .chain(unit.args.iter().cloned())
-        .map(|w| sd_quote(&w))
+        .map(|w| sd_quote(&w).replace('$', "$$")) // no variables expanded
         .collect::<Vec<_>>()
         .join(" ");
     let env: String =
@@ -125,7 +125,8 @@ fn systemd(service: Service, unit: &Unit) -> Vec<(String, String)> {
         )],
         Service::Consume => {
             let watched: String =
-                unit.folders.iter().map(|f| format!("PathChanged={}\n", sd_quote(&f.to_string_lossy()))).collect();
+                                // Unquoted: systemd takes the rest of the line as the path, spaces and all.
+                unit.folders.iter().map(|f| format!("PathChanged={}\n", f.to_string_lossy().replace('%', "%%"))).collect();
             vec![
                 (
                     "carrel-consume.service".into(),
@@ -354,7 +355,9 @@ fn edit_toml(text: &str, exe: Option<&str>) -> Result<(String, bool)> {
     for line in text.lines() {
         let header = line.trim_start().starts_with('[');
         if header {
-            inside = line.trim() == CODEX_TABLE;
+            // Its sub-tables (`[mcp_servers.carrel.env]`) too when removing it; kept when updating it.
+            let sub = exe.is_none() && line.trim().starts_with("[mcp_servers.carrel.");
+            inside = line.trim() == CODEX_TABLE || sub;
             found |= inside;
         }
         if !inside {
@@ -364,13 +367,7 @@ fn edit_toml(text: &str, exe: Option<&str>) -> Result<(String, bool)> {
     }
     let Some(exe) = exe else { return Ok((kept, found)) };
     let table = format!("{CODEX_TABLE}\ncommand = {}\nargs = [\"mcp\"]\n", toml::Value::from(exe));
-    let sep = if kept.trim().is_empty() {
-        ""
-    } else if kept.ends_with("\n\n") {
-        ""
-    } else {
-        "\n"
-    };
+    let sep = if kept.trim().is_empty() || kept.ends_with("\n\n") { "" } else { "\n" };
     let new = format!("{}{sep}{table}", kept.trim_start_matches('\n'));
     new.parse::<toml::Table>().context("its config.toml doesn't parse")?;
     let changed = !text.contains(&table);
@@ -448,7 +445,7 @@ mod tests {
         assert_eq!(names, ["carrel-consume.service", "carrel-consume.path", "carrel-consume.timer"]);
         assert!(units[0].1.contains("ExecStart=\"/home/me/.local/bin/carrel\" \"consume\"\n"));
         assert!(units[0].1.contains("Environment=\"PATH=/usr/bin:/home/me/100%%\"\n"));
-        assert!(units[1].1.contains("PathChanged=\"/home/me/Down loads\"\nPathChanged=\"/home/me/Papers\"\n"));
+        assert!(units[1].1.contains("PathChanged=/home/me/Down loads\nPathChanged=/home/me/Papers\n"));
         let web = Unit { args: Service::Web.args("127.0.0.1:7701"), ..unit() };
         let web = &systemd(Service::Web, &web)[0].1;
         assert!(web.contains("\"web\" \"--no-open\" \"--listen\" \"127.0.0.1:7701\"\nRestart=on-failure"));
@@ -499,6 +496,12 @@ mod tests {
         let (without, changed) = edit_toml(&with, None).unwrap();
         assert!(changed);
         assert_eq!(without.trim_end(), before.trim_end());
+        // Settings added to it by hand: kept when updating, gone with it.
+        let env = format!("{with}\n[mcp_servers.carrel.env]\nCARREL_LIBRARY = \"/x\"\n");
+        let (moved, _) = edit_toml(&env, Some("/usr/bin/carrel")).unwrap();
+        let table: toml::Table = moved.parse().unwrap();
+        assert_eq!(table["mcp_servers"]["carrel"]["env"]["CARREL_LIBRARY"].as_str(), Some("/x"));
+        assert_eq!(edit_toml(&env, None).unwrap().0.trim_end(), before.trim_end());
         assert_eq!(edit_toml("", Some("c")).unwrap().0, "[mcp_servers.carrel]\ncommand = \"c\"\nargs = [\"mcp\"]\n");
     }
 }

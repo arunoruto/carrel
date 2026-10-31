@@ -30,7 +30,7 @@ fn adding_pdfs() {
     // A failing extractor doesn't lose the paper; the doctor notices the missing text.
     let mut failing = library(&tmp);
     failing.extractor = "echo 'it broke' >&2; exit 3".into();
-    let other = tmp.write("in/other.pdf", FAKE_PDF);
+    let other = tmp.write("in/other.pdf", [FAKE_PDF, b"% another\n"].concat());
     let (id, messages) = failing.add(&other.to_string_lossy()).unwrap();
     assert!(messages.iter().any(|m| m.contains("it broke")), "{messages:?}");
     assert!(lib.doctor().iter().any(|i| i.check == "text" && i.id == id));
@@ -56,6 +56,12 @@ fn citation_keys() {
     // The old key stays as an alias: commands, and citations with biber, still find the paper.
     assert_eq!(lib.get("a").unwrap().id, "muller2021uber");
     assert_eq!(lib.get("muller2021uber").unwrap().bib.aliases(), ["a"]);
+    // By an old key too, and an old key isn't free for another paper.
+    assert!(lib.rename("zhang2020shen", Some("a")).is_err());
+    assert_eq!(lib.rename("a", Some("muller")).unwrap(), "muller");
+    assert!(lib.get("muller").unwrap().dir.join("muller.bib").exists());
+    assert_eq!(lib.get("muller").unwrap().bib.aliases(), ["a", "muller2021uber"]);
+    assert_eq!(lib.rename("muller", Some("muller2021uber")).unwrap(), "muller2021uber", "back to an own old key");
 
     for (template, key) in [
         ("{{ author }}:{{ year }}", "Muller:2021"),

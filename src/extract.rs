@@ -176,7 +176,7 @@ impl Extractor for Fallback {
 // ponytail: a byte scan, not a PDF parser; a page tree in an encrypted or oddly filtered stream is missed
 pub fn pages(pdf: &Path) -> Option<usize> {
     let bytes = fs::read(pdf).ok()?;
-    let mut texts = vec![bytes.clone()];
+    let mut texts = vec![];
     let mut from = 0;
     while let Some(at) = find(&bytes[from..], b"stream").map(|i| from + i) {
         from = at + 6;
@@ -185,24 +185,34 @@ pub fn pages(pdf: &Path) -> Option<usize> {
             continue;
         }
         let start = from + bytes[from..].iter().take(2).take_while(|b| matches!(b, b'\r' | b'\n')).count();
+        // At most 16 MB from each: a small stream can inflate to gigabytes.
         let mut inflated = vec![];
-        if std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&bytes[start..]), &mut inflated).is_ok() {
+        let stream = std::io::Read::take(flate2::read::ZlibDecoder::new(&bytes[start..]), 16 << 20);
+        if std::io::Read::read_to_end(&mut { stream }, &mut inflated).is_ok() {
             texts.push(inflated);
         }
     }
+    texts.push(bytes);
     let mut most = None;
     for text in &texts {
         let mut from = 0;
         while let Some(at) = find(&text[from..], b"/Pages").map(|i| from + i) {
             from = at + 6;
             // `/Type /Pages`, `/Type/Pages`; not `/Pages 3 0 R` in the catalogue.
-            let before = String::from_utf8_lossy(&text[at.saturating_sub(8)..at]).replace(' ', "");
+            let before: String = String::from_utf8_lossy(&text[at.saturating_sub(12)..at]).split_whitespace().collect();
             if !before.ends_with("/Type") {
                 continue;
             }
             // Its dictionary: from the `<<` before to the `>>` after.
             let start = text[..at].windows(2).rposition(|w| w == b"<<").unwrap_or(0);
-            let end = find(&text[at..], b">>").map_or(text.len(), |i| at + i);
+            let (mut depth, mut end) = (1, at);
+            while depth > 0 && end + 1 < text.len() {
+                match &text[end..end + 2] {
+                    b"<<" => (depth, end) = (depth + 1, end + 2),
+                    b">>" => (depth, end) = (depth - 1, end + 2),
+                    _ => end += 1,
+                }
+            }
             let window = String::from_utf8_lossy(&text[start..end]).into_owned();
             let counts = window.match_indices("/Count").filter_map(|(i, _)| {
                 window[i + 6..].trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse::<usize>().ok()
@@ -384,6 +394,10 @@ mod tests {
         packed.extend(b"\nendstream\nendobj\n%%EOF\n");
         fs::write(tmp.join("packed.pdf"), packed).unwrap();
         assert_eq!(pages(&tmp.join("packed.pdf")), Some(12));
+        // Its /Count after a nested dictionary, and a line break inside `/Type /Pages`.
+        let nested = "2 0 obj << /Type\n/Pages /Resources << /Font << /F1 9 0 R >> >> /Count 33 >> endobj\n";
+        fs::write(tmp.join("nested.pdf"), nested).unwrap();
+        assert_eq!(pages(&tmp.join("nested.pdf")), Some(33));
         fs::write(tmp.join("none.pdf"), "%PDF-1.4\n%%EOF\n").unwrap();
         assert_eq!(pages(&tmp.join("none.pdf")), None);
 

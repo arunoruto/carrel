@@ -98,12 +98,16 @@ impl Library {
             let typst = file.extension().is_some_and(|e| e == "typ");
             cited.extend(cited_keys(&text, typst).into_iter().filter(|k| !cited.contains(k)).collect::<Vec<_>>());
         }
-        // Each cited key's paper, also by an old key in its `ids`.
+        // Each cited key's paper, also by an old key in its `ids`; a paper's own key wins over another's old one.
+        let papers = self.papers().0;
         let mut current = HashMap::new();
-        for p in self.papers().0 {
-            for key in p.bib.aliases().into_iter().chain([p.id.clone()]) {
+        for p in &papers {
+            for key in p.bib.aliases() {
                 current.insert(key, p.id.clone());
             }
+        }
+        for p in &papers {
+            current.insert(p.id.clone(), p.id.clone());
         }
         let before = self.project(name).unwrap_or_default();
         let (known, missing): (Vec<String>, Vec<String>) = cited.iter().cloned().partition(|k| current.contains_key(k));

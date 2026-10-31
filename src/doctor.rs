@@ -3,6 +3,7 @@
 use crate::{Library, fetch, graph};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 #[derive(Debug, Serialize)]
 pub struct Issue {
@@ -40,6 +41,12 @@ impl Library {
             Ok(None) => format!("; {}", crate::NO_EXTRACTOR),
             Err(e) => format!("; {e:#}"),
         };
+        // The same PDF under two keys; only PDFs of a size another one has too are read.
+        let size = |p: &crate::Paper| Some(std::fs::metadata(p.pdf()?).ok()?.len());
+        let mut sizes: HashMap<u64, usize> = HashMap::new();
+        for len in papers.iter().filter_map(size) {
+            *sizes.entry(len).or_default() += 1;
+        }
         let mut seen: HashMap<String, String> = HashMap::new();
         let mut doubled = HashSet::new();
         for p in &papers {
@@ -83,6 +90,13 @@ impl Library {
 
             let mut keys = fetch::paper_keys(&fetch::Ids { doi: b.doi(), arxiv: b.arxiv() }, &b.title());
             keys.extend(b.get("isbn").as_deref().and_then(crate::books::isbn13).map(|isbn| format!("isbn:{isbn}")));
+            if size(p).is_some_and(|len| sizes[&len] > 1)
+                && let Some(bytes) = p.pdf().and_then(|f| std::fs::read(f).ok())
+            {
+                let mut hash = DefaultHasher::new();
+                bytes.hash(&mut hash);
+                keys.push(format!("pdf {:016x}", hash.finish()));
+            }
             // The same pages of the same venue and year: the same paper, however its title is spelled.
             let pages = b.get("pages").filter(|p| p.contains(['-', '–']));
             if let (Some(year), Some(venue), Some(pages)) = (b.year(), b.venue(), pages) {
@@ -205,6 +219,12 @@ mod tests {
             "f",
             "@article{f, title = {Steps. 1: Glass}, author = {Jäger, C.}, year = 1994, journal = {A&A}, pages = {641--655}}",
         );
+        // The same PDF under another title; c's is as long, but not the same.
+        write("g", "@misc{g, title = {Scan 1}}");
+        write("h", "@misc{h, title = {Unrelated}}");
+        for (id, pdf) in [("g", "%PDF-1.4 same"), ("h", "%PDF-1.4 same"), ("c", "%PDF-1.4 diff")] {
+            fs::write(lib.root.join(id).join(format!("{id}.pdf")), pdf).unwrap();
+        }
         fs::create_dir_all(lib.root.join("projects")).unwrap();
         fs::write(lib.root.join("projects/x.txt"), "a\ngone\n").unwrap();
 
@@ -215,6 +235,7 @@ mod tests {
             ("macro", "a"),
             ("duplicate", "b"),
             ("duplicate", "f"),
+            ("duplicate", "h"),
             ("fields", "c"),
             ("project", "gone"),
             ("pdf", "a"),
@@ -223,6 +244,7 @@ mod tests {
             assert!(found.contains(&expected), "{expected:?} not in {found:?}");
         }
         assert!(!found.contains(&("fields", "a")) && !found.contains(&("fields", "b")), "{found:?}");
+        assert!(!found.contains(&("duplicate", "c")) && !found.contains(&("duplicate", "g")), "{found:?}");
         assert_eq!(found[0], ("broken", "d"), "errors first");
         fs::remove_dir_all(tmp).unwrap();
     }
