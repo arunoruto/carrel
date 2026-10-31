@@ -1,6 +1,6 @@
 [package]
 name = "carrel"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 description = "A research paper library for you and your AI: PDFs and BibTeX, full text and figures, projects, a TUI and an MCP server"
