@@ -134,18 +134,21 @@ fn reference_sources() {
         Some(ads) => {
             let n = ads.references(&lookup).unwrap().len();
             assert!(n > 50, "{n}"); // ADS keeps only the references it could resolve: 62 of them
+            let ids_of = |title: &str, year, author| {
+                ads.record(title, year, author).unwrap().map(|d| carrel::refs::record_ids(&d)).unwrap_or_default()
+            };
             // Three records carry this title (2008, 2012, 2016); the year picks the one with a DOI.
             let title = "Space Weathering on Airless Bodies";
             assert_eq!(
-                ads.ids(title, Some(2016), Some("Pieters, Carlé M.")).unwrap().doi.as_deref(),
+                ids_of(title, Some(2016), Some("Pieters, Carlé M.")).doi.as_deref(),
                 Some("10.1002/2016JE005128")
             );
-            assert!(ads.ids(title, Some(2008), None).unwrap().is_empty(), "the 2008 abstract has no DOI");
-            assert!(ads.ids(title, Some(1990), None).unwrap().is_empty(), "no record from 1990");
-            assert!(ads.ids(title, None, None).unwrap().is_empty(), "without a year, the title is ambiguous");
-            let greiner = ads.ids("Classical Electrodynamics", Some(1998), Some("Greiner, Walter")).unwrap();
+            assert!(ids_of(title, Some(2008), None).is_empty(), "the 2008 abstract has no DOI");
+            assert!(ids_of(title, Some(1990), None).is_empty(), "no record from 1990");
+            assert!(ids_of(title, None, None).is_empty(), "without a year, the title is ambiguous");
+            let greiner = ids_of("Classical Electrodynamics", Some(1998), Some("Greiner, Walter"));
             assert_eq!(greiner.doi.as_deref(), Some("10.1007/978-1-4612-0587-6"));
-            let jackson = ads.ids("Classical Electrodynamics", Some(1998), Some("Jackson, John David")).unwrap();
+            let jackson = ids_of("Classical Electrodynamics", Some(1998), Some("Jackson, John David"));
             assert_ne!(jackson.doi, greiner.doi, "same title and year, another author");
         }
         None => eprintln!("ADS skipped: no ADS token"),

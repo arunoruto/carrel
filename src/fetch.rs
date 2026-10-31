@@ -13,6 +13,8 @@ pub enum Source {
     Arxiv(String),
     /// A book's, as ISBN-13.
     Isbn(String),
+    /// NASA ADS's id, such as `2020LPI....51.2026D`.
+    Bibcode(String),
     Title(String),
 }
 
@@ -79,6 +81,11 @@ pub fn classify(input: &str) -> Result<Source> {
     if let Some(doi) = find_doi(s) {
         return Ok(Source::Doi(doi));
     }
+    let bibcode = s.rsplit_once("/abs/").map_or(s, |(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or(rest));
+    let bibcode = bibcode.replace("%26", "&");
+    if is_bibcode(&bibcode) {
+        return Ok(Source::Bibcode(bibcode));
+    }
     let isbn = lower.strip_prefix("isbn").map_or(s, |rest| rest.trim_start_matches([':', ' ', '-']));
     if let Some(isbn) = crate::books::isbn13(isbn) {
         return Ok(Source::Isbn(isbn));
@@ -87,6 +94,18 @@ pub fn classify(input: &str) -> Result<Source> {
         bail!("no such file: {s}");
     }
     Ok(Source::Title(s.to_string()))
+}
+
+/// An ADS bibcode: 19 characters, the year first and the first author's initial last
+/// (`1970GeCAS...1.1937A`, `2011A&A...525A..62B`).
+pub fn is_bibcode(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 19
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[4].is_ascii_alphabetic()
+        && (b[18].is_ascii_uppercase() || b[18] == b'.')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'&'))
+        && b.contains(&b'.')
 }
 
 /// The archives of old-style arXiv ids (`hep-th/9711200`), used until 2007.
@@ -607,6 +626,10 @@ mod tests {
         assert!(matches!(classify("978-0-521-88349-8").unwrap(), Source::Isbn(i) if i == "9780521883498"));
         assert!(matches!(classify("ISBN: 0-521-78252-X").unwrap(), Source::Isbn(i) if i == "9780521782524"));
         assert!(matches!(classify("978-0-521-88349-7").unwrap(), Source::Title(_)), "check digit wrong");
+        assert!(matches!(classify("2020LPI....51.2026D").unwrap(), Source::Bibcode(b) if b == "2020LPI....51.2026D"));
+        let url = "https://ui.adsabs.harvard.edu/abs/2011A%26A...525A..62B/abstract";
+        assert!(matches!(classify(url).unwrap(), Source::Bibcode(b) if b == "2011A&A...525A..62B"));
+        assert!(matches!(classify("Spectroscopy of Moons").unwrap(), Source::Title(_)));
         assert!(classify("~/no-such-file.pdf").is_err());
         assert!(same_title("Attention Is All You Need", "Attention is All you Need."));
         assert!(same_title("Eﬃcient Pre-training", "Efficient Pretraining"));

@@ -45,9 +45,10 @@ impl Library {
         for p in &papers {
             let (b, id) = (&p.bib, p.id.as_str());
             let edit = Some(format!("carrel edit {id}"));
-            let update = match b.doi().is_some() || b.arxiv().is_some() || b.kind == "book" {
+            let known = b.doi().is_some() || b.arxiv().is_some() || b.kind == "book" || b.bibcode().is_some();
+            let update = match known {
                 true => format!("carrel update {id}"),
-                false => format!("carrel update {id} <DOI, arXiv id, ISBN or title>"),
+                false => format!("carrel update {id} <DOI, arXiv id, ISBN, ADS bibcode or title>"),
             };
 
             // The fields every style needs (any of the alternatives), plus the venue the entry type needs.

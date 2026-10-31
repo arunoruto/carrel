@@ -18,14 +18,14 @@ pub trait Extractor {
 
 /// The extractor `setting` (the config's `extractor`) asks for: `auto` (Docling, else PyMuPDF, else none),
 /// `docling`, `pymupdf` or a shell command. `docling` is where the config says Docling is: a program, or
-/// the URL of a docling-serve.
-pub fn choose(setting: &str, docling: Option<&str>) -> Result<Option<Box<dyn Extractor>>> {
+/// the URL of a docling-serve; `formulas`, whether Docling decodes formulas.
+pub fn choose(setting: &str, docling: Option<&str>, formulas: bool) -> Result<Option<Box<dyn Extractor>>> {
     let docling: Option<Box<dyn Extractor>> = match docling {
         Some(url) if url.starts_with("http://") || url.starts_with("https://") => {
-            Some(Box::new(DoclingServe(url.trim_end_matches('/').into())))
+            Some(Box::new(DoclingServe(url.trim_end_matches('/').into(), formulas)))
         }
-        Some(path) => Some(Box::new(Docling(crate::expand_home(path)))),
-        None => on_path("docling").map(|path| Box::new(Docling(path)) as _),
+        Some(path) => Some(Box::new(Docling(crate::expand_home(path), formulas))),
+        None => on_path("docling").map(|path| Box::new(Docling(path, formulas)) as _),
     };
     let pymupdf = option_env!("CARREL_DEFAULT_EXTRACTOR").is_some() || on_path("uv").is_some();
     pick(setting, docling, pymupdf)
@@ -97,11 +97,12 @@ impl Extractor for PyMuPdf {
 
 /// [Docling](https://github.com/docling-project/docling)'s command line: better tables and reading order,
 /// but slow on a CPU, and it downloads its models on first use.
-pub struct Docling(pub PathBuf);
+/// The second field: decode formulas into LaTeX (its formula model; slow on a CPU).
+pub struct Docling(pub PathBuf, pub bool);
 
 impl Extractor for Docling {
     fn name(&self) -> String {
-        "docling".into()
+        if self.1 { "docling with formulas".into() } else { "docling".into() }
     }
 
     fn extract(&self, pdf: &Path, out: &Path) -> Result<()> {
@@ -116,6 +117,7 @@ impl Extractor for Docling {
             let output = Command::new(&self.0)
                 .args(["--to", "md", "--image-export-mode", "referenced", "--no-ocr", "--output", "docling"])
                 .args(backend)
+                .args(self.1.then_some("--enrich-formula"))
                 .arg(pdf)
                 .current_dir(out)
                 .stdin(Stdio::null())
@@ -148,8 +150,12 @@ impl Extractor for Docling {
     }
 }
 
-/// The first extractor, else the second where the first fails.
+/// The first extractor, else the second where the first fails. PDFs longer than [`LONG`] pages go
+/// straight to the second: a textbook takes Docling hours and gigabytes of memory.
 pub struct Fallback(pub Box<dyn Extractor>, pub Box<dyn Extractor>);
+
+/// Pages beyond which a PDF is a book rather than a paper, for [`Fallback`].
+pub const LONG: usize = 150;
 
 impl Extractor for Fallback {
     fn name(&self) -> String {
@@ -157,24 +163,75 @@ impl Extractor for Fallback {
     }
 
     fn extract(&self, pdf: &Path, out: &Path) -> Result<()> {
+        if pages(pdf).is_some_and(|n| n > LONG) {
+            return self.1.extract(pdf, out);
+        }
         let Err(first) = self.0.extract(pdf, out) else { return Ok(()) };
         self.1.extract(pdf, out).map_err(|second| anyhow::anyhow!("{first:#}; {second:#}"))
     }
 }
 
+/// A PDF's page count: the largest `/Count` of its page tree nodes (`/Type /Pages`), which sit in the
+/// file as text, or in compressed object streams (`/ObjStm`) in newer PDFs. None when it can't tell.
+// ponytail: a byte scan, not a PDF parser; a page tree in an encrypted or oddly filtered stream is missed
+pub fn pages(pdf: &Path) -> Option<usize> {
+    let bytes = fs::read(pdf).ok()?;
+    let mut texts = vec![bytes.clone()];
+    let mut from = 0;
+    while let Some(at) = find(&bytes[from..], b"stream").map(|i| from + i) {
+        from = at + 6;
+        let dict = &bytes[at.saturating_sub(300)..at];
+        if bytes[..at].ends_with(b"end") || find(dict, b"/ObjStm").is_none() || find(dict, b"/FlateDecode").is_none() {
+            continue;
+        }
+        let start = from + bytes[from..].iter().take(2).take_while(|b| matches!(b, b'\r' | b'\n')).count();
+        let mut inflated = vec![];
+        if std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&bytes[start..]), &mut inflated).is_ok() {
+            texts.push(inflated);
+        }
+    }
+    let mut most = None;
+    for text in &texts {
+        let mut from = 0;
+        while let Some(at) = find(&text[from..], b"/Pages").map(|i| from + i) {
+            from = at + 6;
+            // `/Type /Pages`, `/Type/Pages`; not `/Pages 3 0 R` in the catalogue.
+            let before = String::from_utf8_lossy(&text[at.saturating_sub(8)..at]).replace(' ', "");
+            if !before.ends_with("/Type") {
+                continue;
+            }
+            // Its dictionary: from the `<<` before to the `>>` after.
+            let start = text[..at].windows(2).rposition(|w| w == b"<<").unwrap_or(0);
+            let end = find(&text[at..], b">>").map_or(text.len(), |i| at + i);
+            let window = String::from_utf8_lossy(&text[start..end]).into_owned();
+            let counts = window.match_indices("/Count").filter_map(|(i, _)| {
+                window[i + 6..].trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse::<usize>().ok()
+            });
+            most = most.max(counts.max());
+        }
+    }
+    most
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 /// A [docling-serve](https://github.com/docling-project/docling-serve) at this URL, so the work happens on
 /// another machine. Its API key, if it wants one, is the config's `tokens.docling` or `DOCLING_SERVE_API_KEY`.
-pub struct DoclingServe(pub String);
+/// The second field: decode formulas, as for [`Docling`].
+pub struct DoclingServe(pub String, pub bool);
 
 impl Extractor for DoclingServe {
     fn name(&self) -> String {
-        format!("docling at {}", self.0)
+        format!("docling at {}{}", self.0, if self.1 { " with formulas" } else { "" })
     }
 
     fn extract(&self, pdf: &Path, out: &Path) -> Result<()> {
         let pdf = fs::read(pdf).with_context(|| format!("cannot read {}", pdf.display()))?;
         let body = json!({
-            "options": {"to_formats": ["md"], "image_export_mode": "embedded", "do_ocr": false},
+            "options": {"to_formats": ["md"], "image_export_mode": "embedded", "do_ocr": false,
+                "do_formula_enrichment": self.1},
             "sources": [{"kind": "file", "base64_string": STANDARD.encode(pdf), "filename": "paper.pdf"}],
         });
         // ponytail: no time limit, like the local one; a hung server hangs the add.
@@ -235,7 +292,7 @@ mod tests {
     use super::*;
 
     fn picked(setting: &str, docling: bool, pymupdf: bool) -> Option<String> {
-        let docling = docling.then(|| Box::new(Docling("/opt/docling".into())) as _);
+        let docling = docling.then(|| Box::new(Docling("/opt/docling".into(), false)) as _);
         pick(setting, docling, pymupdf).unwrap().map(|x| x.name())
     }
 
@@ -248,7 +305,7 @@ mod tests {
         assert_eq!(picked("pymupdf", true, true).as_deref(), Some("pymupdf"));
         assert_eq!(picked("echo hi", true, true).as_deref(), Some("echo hi"), "anything else is a command");
         assert!(pick("docling", None, true).is_err_and(|e| e.to_string().contains("no `docling`")));
-        let server = choose("auto", Some("https://docling.example.org/")).unwrap().unwrap();
+        let server = choose("auto", Some("https://docling.example.org/"), false).unwrap().unwrap();
         assert!(server.name().starts_with("docling at https://docling.example.org"), "a URL is a docling-serve");
         assert!(pick("pymupdf", None, false).is_err_and(|e| e.to_string().contains("uv")));
     }
@@ -268,7 +325,7 @@ mod tests {
         .unwrap();
         std::process::Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
 
-        Docling(fake.clone()).extract(&tmp.join("My Paper.pdf"), &out).unwrap();
+        Docling(fake.clone(), false).extract(&tmp.join("My Paper.pdf"), &out).unwrap();
         let text = fs::read_to_string(out.join("fulltext.md")).unwrap();
         assert_eq!(
             text,
@@ -284,11 +341,15 @@ mod tests {
              *) echo 'ConversionError: broken PDF' >&2 ;; esac\n",
         )
         .unwrap();
-        Docling(fake.clone()).extract(&tmp.join("x.pdf"), &out).unwrap();
+        Docling(fake.clone(), false).extract(&tmp.join("x.pdf"), &out).unwrap();
         assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "from pdfium\n");
         fs::write(&fake, "#!/bin/sh\nmkdir -p docling\necho 'ConversionError: broken PDF' >&2\n").unwrap();
-        let e = Docling(fake).extract(&tmp.join("x.pdf"), &out).unwrap_err();
+        let e = Docling(fake.clone(), false).extract(&tmp.join("x.pdf"), &out).unwrap_err();
         assert!(e.to_string().contains("broken PDF"), "{e}");
+        // Formulas: its formula model.
+        fs::write(&fake, "#!/bin/sh\nmkdir -p docling\necho \"$*\" > docling/x.md\n").unwrap();
+        Docling(fake.clone(), true).extract(&tmp.join("x.pdf"), &out).unwrap();
+        assert!(fs::read_to_string(out.join("fulltext.md")).unwrap().contains("--enrich-formula"));
         assert!(!out.join("docling").exists(), "cleaned up after failing too");
 
         // Where Docling fails, PyMuPDF (here a command) takes over.
@@ -298,6 +359,41 @@ mod tests {
         assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "fallback\n");
         let e = Fallback(Box::new(Shell("exit 1".into())), Box::new(Shell("exit 2".into())));
         assert!(e.extract(&tmp.join("x.pdf"), &out).is_err());
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn page_counts() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!("carrel-pages-{}", std::process::id()));
+        fs::create_dir_all(&tmp).unwrap();
+        // A page tree as text, with an outline whose /Count is not the pages'.
+        let plain = tmp.join("plain.pdf");
+        let text = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+                    2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 212 >> endobj\n\
+                    5 0 obj << /Type /Outlines /Count 900 >> endobj\n%%EOF\n";
+        fs::write(&plain, text).unwrap();
+        assert_eq!(pages(&plain), Some(212));
+        // The same in a compressed object stream, as PDF 1.5 writes it.
+        let mut z = flate2::write::ZlibEncoder::new(vec![], flate2::Compression::default());
+        z.write_all(b"2 0 << /Type/Pages/Kids[3 0 R]/Count 12>><</Type/Page/Parent 2 0 R>>").unwrap();
+        let mut packed =
+            b"%PDF-1.5\n7 0 obj\n<< /Type /ObjStm /N 2 /First 8 /Filter /FlateDecode /Length 60 >>\nstream\r\n"
+                .to_vec();
+        packed.extend(z.finish().unwrap());
+        packed.extend(b"\nendstream\nendobj\n%%EOF\n");
+        fs::write(tmp.join("packed.pdf"), packed).unwrap();
+        assert_eq!(pages(&tmp.join("packed.pdf")), Some(12));
+        fs::write(tmp.join("none.pdf"), "%PDF-1.4\n%%EOF\n").unwrap();
+        assert_eq!(pages(&tmp.join("none.pdf")), None);
+
+        // A book skips the first extractor.
+        let out = tmp.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let first = Shell("echo first > fulltext.md".into());
+        let second = Shell("echo second > fulltext.md".into());
+        Fallback(Box::new(first), Box::new(second)).extract(&plain, &out).unwrap();
+        assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "second\n");
         fs::remove_dir_all(tmp).unwrap();
     }
 
@@ -313,11 +409,11 @@ mod tests {
             (200, reply),
             (200, r#"{"status": "failure", "errors": ["broken PDF"], "document": {}}"#),
         ]);
-        DoclingServe(url.clone()).extract(&tmp.join("paper.pdf"), &tmp).unwrap();
+        DoclingServe(url.clone(), false).extract(&tmp.join("paper.pdf"), &tmp).unwrap();
         let text = fs::read_to_string(tmp.join("fulltext.md")).unwrap();
         assert_eq!(text, "# Title\n\n![Image](figures/image_000.png)\n![x](data:image/../x;base64,!)\n");
         assert_eq!(fs::read(tmp.join("figures/image_000.png")).unwrap(), b"png");
-        let e = DoclingServe(url).extract(&tmp.join("paper.pdf"), &tmp).unwrap_err();
+        let e = DoclingServe(url, false).extract(&tmp.join("paper.pdf"), &tmp).unwrap_err();
         assert!(e.to_string().contains("broken PDF"), "{e}");
         let requests = server.join().unwrap();
         assert!(

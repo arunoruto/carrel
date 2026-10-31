@@ -4,6 +4,7 @@
 
 use crate::{Library, Paper, valid_id};
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -53,10 +54,10 @@ impl Library {
         let mut listed = if path.exists() { self.project(name)? } else { vec![] };
         let mut text = fs::read_to_string(&path).unwrap_or_default();
         for id in ids {
+            let id = &self.get(id)?.id; // an old key: the paper's current one
             if listed.contains(id) {
                 continue;
             }
-            self.get(id)?;
             listed.push(id.clone());
             if !text.is_empty() && !text.ends_with('\n') {
                 text.push('\n');
@@ -97,12 +98,25 @@ impl Library {
             let typst = file.extension().is_some_and(|e| e == "typ");
             cited.extend(cited_keys(&text, typst).into_iter().filter(|k| !cited.contains(k)).collect::<Vec<_>>());
         }
-        let library: Vec<String> = self.papers().0.into_iter().map(|p| p.id).collect();
+        // Each cited key's paper, also by an old key in its `ids`.
+        let mut current = HashMap::new();
+        for p in self.papers().0 {
+            for key in p.bib.aliases().into_iter().chain([p.id.clone()]) {
+                current.insert(key, p.id.clone());
+            }
+        }
         let before = self.project(name).unwrap_or_default();
-        let (known, missing): (Vec<String>, Vec<String>) = cited.iter().cloned().partition(|k| library.contains(k));
+        let (known, missing): (Vec<String>, Vec<String>) = cited.iter().cloned().partition(|k| current.contains_key(k));
+        let mut ids: Vec<String> = vec![];
+        known.iter().map(|k| &current[k]).for_each(|id| {
+            if !ids.contains(id) {
+                ids.push(id.clone())
+            }
+        });
+        let known = ids;
         self.add_to_project(name, &known)?;
-        let added = known.into_iter().filter(|k| !before.contains(k)).collect();
-        let uncited = self.project(name)?.into_iter().filter(|k| !cited.contains(k)).collect();
+        let added = known.iter().filter(|k| !before.contains(k)).cloned().collect();
+        let uncited = self.project(name)?.into_iter().filter(|k| !known.contains(k)).collect();
         Ok((added, missing, uncited))
     }
 

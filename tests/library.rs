@@ -53,6 +53,9 @@ fn citation_keys() {
     assert_eq!(lib.rename("d", None).unwrap(), "paper", "nothing to build a key from");
     assert_eq!(lib.rename("muller2021uber", None).unwrap(), "muller2021uber", "already right: nothing happens");
     assert!(lib.get("muller2021uber").is_ok());
+    // The old key stays as an alias: commands, and citations with biber, still find the paper.
+    assert_eq!(lib.get("a").unwrap().id, "muller2021uber");
+    assert_eq!(lib.get("muller2021uber").unwrap().bib.aliases(), ["a"]);
 
     for (template, key) in [
         ("{{ author }}:{{ year }}", "Muller:2021"),
@@ -275,6 +278,13 @@ fn projects() {
     let tex = tmp.write("doc/main.tex", "\\cite{alpha} % \\cite{commented}\n\\citep[p.~1]{missing2}");
     let (added, missing, uncited) = lib.sync_project("doc", &[tex]).unwrap();
     assert_eq!((added, missing, uncited), (vec!["alpha".to_string()], vec!["missing2".to_string()], vec![]));
+
+    // Citations of a key from before a rename count for the paper.
+    let tex = tmp.write("doc/old.tex", "\\cite{a} \\cite{alpha}");
+    let (added, missing, uncited) = lib.sync_project("old", &[tex]).unwrap();
+    assert_eq!((added, missing, uncited), (vec!["alpha".to_string()], vec![], vec![]));
+    lib.add_to_project("old", &["a".into()]).unwrap();
+    assert_eq!(lib.project("old").unwrap(), ["alpha"], "listed by its current key");
 }
 
 #[test]

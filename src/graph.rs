@@ -339,14 +339,22 @@ impl Library {
         Ok((n, note))
     }
 
-    /// Adds the DOI and arXiv id ADS has for a paper lacking both.
+    /// Adds the DOI, arXiv id and ADS bibcode (as `adsurl`) ADS has for a paper lacking a DOI and arXiv id.
     fn fill_ids(&self, p: &Paper) -> Result<Option<String>> {
         let (None, None, Some(ads)) = (p.bib.doi(), p.bib.arxiv(), crate::refs::ads()?) else { return Ok(None) };
-        let ids = ads.ids(&p.bib.title(), p.bib.year(), p.bib.authors().first().map(String::as_str))?;
+        let first = p.bib.authors().first().cloned();
+        let Some(record) = ads.record(&p.bib.title(), p.bib.year(), first.as_deref())? else { return Ok(None) };
+        let ids = crate::refs::record_ids(&record);
+        let mut p = p.clone();
+        if p.bib.bibcode().is_none()
+            && let Some(bibcode) = record["bibcode"].as_str()
+        {
+            p.bib.set("adsurl", Some(&format!("https://ui.adsabs.harvard.edu/abs/{}", bibcode.replace('&', "%26"))));
+            p.save()?;
+        }
         if ids.is_empty() {
             return Ok(None);
         }
-        let mut p = p.clone();
         p.bib.set("doi", ids.doi.as_deref());
         if ids.arxiv.is_some() {
             p.bib.set("eprint", ids.arxiv.as_deref());

@@ -180,6 +180,23 @@ impl Entry {
         self.get("eprint").filter(|_| archive.eq_ignore_ascii_case("arxiv"))
     }
 
+    /// The NASA ADS bibcode, kept in `adsurl` as ADS's own BibTeX has it.
+    pub fn bibcode(&self) -> Option<String> {
+        let url = self.get("adsurl")?;
+        let (_, rest) = url.rsplit_once("/abs/")?;
+        let bibcode = rest.split(['/', '?', '#']).next()?.replace("%26", "&");
+        crate::fetch::is_bibcode(&bibcode).then_some(bibcode)
+    }
+
+    /// Keys this entry also goes by (biblatex's `ids`), such as its keys before a rename or merge.
+    pub fn aliases(&self) -> Vec<String> {
+        let all = self.get("ids").unwrap_or_default();
+        let mut aliases: Vec<String> =
+            all.split(',').map(str::trim).filter(|a| !a.is_empty()).map(String::from).collect();
+        aliases.dedup();
+        aliases
+    }
+
     pub fn keywords(&self) -> Vec<String> {
         let all = self.get("keywords").unwrap_or_default();
         all.split([',', ';']).map(str::trim).filter(|k| !k.is_empty()).map(String::from).collect()

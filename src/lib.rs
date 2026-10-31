@@ -184,6 +184,9 @@ pub struct Config {
     pub extractor: Option<String>,
     /// Where Docling is, when not on PATH, or the URL of a docling-serve. `CARREL_DOCLING` overrides it.
     pub docling: Option<String>,
+    /// Docling decodes formulas into LaTeX, instead of leaving them out: about a minute per formula on a
+    /// CPU, so for a GPU or a docling-serve on one.
+    pub formulas: Option<bool>,
     /// What `carrel` without arguments runs, as its arguments: `tui` (the default), `list -p thesis`, ...
     pub default: Option<String>,
     /// The TUI's colours: a built-in theme (`catppuccin-mocha`, `catppuccin-latte`) or
@@ -300,6 +303,8 @@ pub struct Library {
     pub extractor: String,
     /// Where Docling is, when not on PATH, or the URL of a docling-serve.
     pub docling: Option<String>,
+    /// Whether Docling decodes formulas.
+    pub formulas: bool,
     /// Where to compute embeddings for semantic search; none without `[embeddings]` in the config.
     pub embeddings: Option<embed::Config>,
 }
@@ -326,6 +331,7 @@ impl Library {
             lib.extractor = cmd;
         }
         lib.docling = std::env::var("CARREL_DOCLING").ok().filter(|d| !d.is_empty()).or(config.docling);
+        lib.formulas = config.formulas.unwrap_or(false);
         lib.embeddings = config.embeddings;
         Ok(lib)
     }
@@ -338,7 +344,15 @@ impl Library {
         let mut hash = DefaultHasher::new();
         root.hash(&mut hash);
         let index = cache.join(format!("index-{:016x}.sqlite", hash.finish()));
-        Ok(Self { root, index, key: DEFAULT_KEY.into(), extractor: "auto".into(), docling: None, embeddings: None })
+        Ok(Self {
+            root,
+            index,
+            key: DEFAULT_KEY.into(),
+            extractor: "auto".into(),
+            docling: None,
+            formulas: false,
+            embeddings: None,
+        })
     }
 
     pub fn get(&self, id: &str) -> Result<Paper> {
@@ -347,6 +361,12 @@ impl Library {
             bail!("invalid paper id {id:?}");
         }
         let dir = self.root.join(id);
+        // A key the paper had before a rename or merge, kept in its `ids` field: old citations still work.
+        if !dir.is_dir()
+            && let Some(paper) = self.papers().0.into_iter().find(|p| p.bib.aliases().iter().any(|a| a == id))
+        {
+            return Ok(paper);
+        }
         let path = dir.join(format!("{id}.bib"));
         let src = fs::read_to_string(&path).with_context(|| match dir.is_dir() {
             true => format!("{} is missing", path.display()),
@@ -398,17 +418,32 @@ impl Library {
     /// [`Library::add`], refusing PDFs that turn out to have no DOI or arXiv id (invoices, letters, ...).
     fn add_from(&self, source: &str, known_only: bool) -> Result<(String, Vec<String>)> {
         let tmp = Staging::new(&self.root)?;
-        let (ids, isbn) = match fetch::classify(source)? {
+        let none = fetch::Ids::default();
+        let (ids, known) = match fetch::classify(source)? {
             fetch::Source::Pdf(path) => {
                 copy_pdf(&path, &tmp.0.join("paper.pdf"))?;
-                (fetch::Ids::default(), None)
+                (none, None)
             }
-            fetch::Source::Arxiv(id) => (fetch::Ids { arxiv: Some(id), ..Default::default() }, None),
-            fetch::Source::Doi(doi) => (fetch::Ids { doi: Some(doi), ..Default::default() }, None),
-            fetch::Source::Isbn(isbn) => (fetch::Ids::default(), Some(isbn)),
+            fetch::Source::Arxiv(id) => (fetch::Ids { arxiv: Some(id), ..none }, None),
+            fetch::Source::Doi(doi) => (fetch::Ids { doi: Some(doi), ..none }, None),
+            fetch::Source::Isbn(isbn) => {
+                let mut book =
+                    books::by_isbn(&isbn)?.with_context(|| format!("Open Library doesn't know ISBN {isbn}"))?;
+                book.set("isbn", Some(&isbn));
+                (none, Some(book))
+            }
+            // Its DOI's metadata when it has one, which ADS's records of journal papers mostly do.
+            fetch::Source::Bibcode(bibcode) => {
+                let ads = refs::ads()?.context("a bibcode needs an ADS token (see `carrel config`)")?;
+                let entry = ads.bibtex(&bibcode)?;
+                match entry.doi() {
+                    Some(doi) => (fetch::Ids { doi: Some(doi), ..none }, None),
+                    None => (none, Some(entry)),
+                }
+            }
             fetch::Source::Title(title) => (fetch::by_title(&title)?, None),
         };
-        self.add_staged(tmp, ids, isbn, source, known_only)
+        self.add_staged(tmp, ids, known, source, known_only)
     }
 
     /// Add a search result: metadata from its DOI when it has one, the PDF from arXiv when it is there.
@@ -420,7 +455,7 @@ impl Library {
         &self,
         tmp: Staging,
         mut ids: fetch::Ids,
-        isbn: Option<String>,
+        known: Option<Entry>,
         source: &str,
         known_only: bool,
     ) -> Result<(String, Vec<String>)> {
@@ -439,8 +474,9 @@ impl Library {
         // Identify a PDF: ids printed on its first page, else its title.
         let text = fs::read_to_string(tmp.0.join("fulltext.md")).unwrap_or_default();
         let title = guess_title(&text);
-        let mut fetched = None;
-        if ids.is_empty() {
+        // Metadata already looked up (an ISBN's, a bibcode's).
+        let mut fetched = known;
+        if ids.is_empty() && fetched.is_none() {
             // A DOI in the text may be one it cites (a data set, a related paper): believe it only when its
             // title is at the start of the text.
             let found = fetch::find_ids(&text);
@@ -456,6 +492,7 @@ impl Library {
             }
         }
         if ids.is_empty()
+            && fetched.is_none()
             && let Some(t) = &title
         {
             match fetch::exact_title(t) {
@@ -463,21 +500,37 @@ impl Library {
                 Err(e) => messages.push(format!("title lookup failed: {e:#}")),
             }
         }
-        // A book: by the ISBN it was added by, else the one on its copyright page.
-        let given = isbn.is_some();
+        // A book: the ISBN on its copyright page.
         if ids.is_empty()
-            && let Some(isbn) = isbn.or_else(|| books::find_isbn(&text))
+            && fetched.is_none()
+            && let Some(isbn) = books::find_isbn(&text)
         {
             match books::by_isbn(&isbn) {
                 // Like a DOI in the text, an ISBN may be another book's: its title must be in the text.
-                Ok(Some(book)) if given || starts(&text, book.title().split(':').next().unwrap_or_default()) => {
+                Ok(Some(book)) if starts(&text, book.title().split(':').next().unwrap_or_default()) => {
                     fetched = Some(book)
                 }
                 Ok(Some(book)) => messages.push(format!("ignored ISBN {isbn} from the text: it is {:?}", book.title())),
-                Ok(None) if given => bail!("Open Library doesn't know ISBN {isbn}"),
                 Ok(None) => messages.push(format!("Open Library doesn't know ISBN {isbn} from the text")),
-                Err(e) if given => return Err(e),
                 Err(e) => messages.push(format!("ISBN lookup failed: {e:#}")),
+            }
+        }
+        // Conference abstracts and older papers have no DOI, but ADS has most of astronomy's and planetary
+        // science's: by a title no other record shares, as nothing else is known yet.
+        if ids.is_empty()
+            && fetched.is_none()
+            && let Some(t) = &title
+            && let Ok(Some(ads)) = refs::ads()
+        {
+            match ads.record(t, None, None) {
+                Ok(Some(d)) if !refs::record_ids(&d).is_empty() => ids = refs::record_ids(&d),
+                Ok(Some(d)) => match d["bibcode"].as_str().map(|b| ads.bibtex(b)) {
+                    Some(Ok(entry)) => fetched = Some(entry),
+                    Some(Err(e)) => messages.push(format!("ADS: {e:#}")),
+                    None => {}
+                },
+                Ok(None) => {}
+                Err(e) => messages.push(format!("ADS: {e:#}")),
             }
         }
         if known_only && ids.is_empty() && fetched.is_none() {
@@ -744,7 +797,7 @@ impl Library {
 
     /// What extracts text here; `None` when nothing is installed.
     pub fn extractor(&self) -> Result<Option<Box<dyn extract::Extractor>>> {
-        extract::choose(&self.extractor, self.docling.as_deref())
+        extract::choose(&self.extractor, self.docling.as_deref(), self.formulas)
     }
 
     /// Extract text and figures into `out`; a message worth showing when that didn't work. Without an
@@ -788,7 +841,10 @@ impl Library {
         if had_pdf {
             fs::rename(dir.join(format!("{id}.pdf")), dir.join(format!("{new}.pdf")))?;
         }
-        fs::write(dir.join(format!("{new}.bib")), p.bib.to_bib(&new))?;
+        let mut bib = p.bib;
+        let aliases = bib.aliases().into_iter().chain([id.to_string()]).filter(|a| *a != new).collect::<Vec<_>>();
+        bib.set("ids", Some(&aliases.join(", ")).filter(|a| !a.is_empty()).map(String::as_str));
+        fs::write(dir.join(format!("{new}.bib")), bib.to_bib(&new))?;
         fs::remove_file(dir.join(format!("{id}.bib")))?;
         self.replace_in_projects(id, Some(&new))?;
         Ok(new)

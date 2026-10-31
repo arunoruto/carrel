@@ -223,6 +223,7 @@ dependencies = [
  "clap",
  "deunicode",
  "dirs",
+ "flate2",
  "http-body-util",
  "hyper",
  "hyper-util",

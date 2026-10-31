@@ -26,7 +26,7 @@ A paper's key names its folder, its `.bib` and PDF, and its BibTeX entry, so `\c
 
 By default a key is the first author's family name, the year and the first meaningful title word, in ASCII: `vaswani2017attention`, `muller2021uber`. A second paper with the same key gets `b`, `c`, … appended. The format is a template you can change ([Configuration](configuration.md#citation-keys)).
 
-Keys never change on their own, so citations keep working. `carrel rename <id> [new]` changes one on purpose: folder, files, `.bib` key and project lists together.
+Keys never change on their own, so citations keep working. `carrel rename <id> [new]` changes one on purpose: folder, files, `.bib` key and project lists together. The old key goes into the entry's `ids` field, biblatex's list of a key's aliases: biber resolves `\cite{old}` to the paper, and carrel's commands, the MCP tools and `carrel project sync` take old keys too. With plain BibTeX, which ignores `ids`, update your citations.
 
 ## The .bib files
 

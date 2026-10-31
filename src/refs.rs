@@ -1,9 +1,10 @@
 //! Where a paper's reference list comes from. Every source answers the same question through
 //! [`ReferenceSource`], so they are interchangeable; [`sources`] lists the available ones, best first.
 
+use crate::bib::Entry;
 use crate::fetch::{self, Candidate, Ids};
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// What a source gets to find a paper by.
 pub struct Lookup<'a> {
@@ -190,12 +191,12 @@ pub fn ads() -> Result<Option<Ads>> {
 }
 
 impl Ads {
-    /// The DOI and arXiv id of the paper with this title, year (give or take one) and first author, if ADS
-    /// knows them.
-    /// Several papers share some titles, so without a year only a unique title counts.
-    pub fn ids(&self, title: &str, year: Option<i32>, first_author: Option<&str>) -> Result<Ids> {
+    /// ADS's record of the paper with this title, first author and year: that year if one has it, else a
+    /// year off (preprints, conference years), else none. Several papers share some titles (an abstract
+    /// given at two conferences), so without a year only a title no other record shares counts.
+    pub fn record(&self, title: &str, year: Option<i32>, first_author: Option<&str>) -> Result<Option<Value>> {
         let q = format!("title:\"{}\"", title.replace('"', ""));
-        let docs = self.query(&q, "title,year,doi,identifier,first_author", "20")?;
+        let docs = self.query(&q, "bibcode,title,year,doi,identifier,first_author", "20")?;
         // Generic titles ("Classical Electrodynamics", 1998) need the author too.
         let family = |name: &str| fetch::title_key(crate::bib::family(name));
         let author_fits = |d: &Value| match (first_author, d["first_author"].as_str()) {
@@ -206,22 +207,46 @@ impl Ads {
             (Some(a), Some(b)) => (a - b).abs() <= 1,
             _ => true,
         };
-        let same: Vec<_> = docs
+        let same: Vec<&Value> = docs
             .iter()
             .filter(|d| {
                 d["title"][0].as_str().is_some_and(|t| fetch::same_title(t, title)) && year_fits(d) && author_fits(d)
             })
             .collect();
-        // Without a year, only a title no other record shares.
-        let [d, ..] = same[..] else { return Ok(Ids::default()) };
-        if year.is_none() && same.len() > 1 {
-            return Ok(Ids::default());
-        }
-        let identifiers = d["identifier"].as_array().into_iter().flatten().filter_map(Value::as_str);
-        Ok(Ids {
-            doi: d["doi"][0].as_str().map(String::from),
-            arxiv: identifiers.filter_map(|i| i.strip_prefix("arXiv:")).find_map(fetch::arxiv_id),
+        let exact =
+            same.iter().find(|d| year.is_some() && d["year"].as_str() == year.map(|y| y.to_string()).as_deref());
+        Ok(match (exact, &same[..]) {
+            (Some(d), _) => Some((*d).clone()),
+            (None, [d]) => Some((*d).clone()),
+            (None, [d, ..]) if year.is_some() => Some((*d).clone()),
+            _ => None,
         })
+    }
+
+    /// A paper's metadata as ADS exports it, with journals by their full names rather than AASTeX macros.
+    pub fn bibtex(&self, bibcode: &str) -> Result<Entry> {
+        let request = fetch::agent()
+            .post("https://api.adsabs.harvard.edu/v1/export/bibtex")
+            .header("Authorization", &format!("Bearer {}", self.token));
+        let reply: Value = request
+            .send_json(json!({"bibcode": [bibcode], "journalformat": 3}))
+            .context("NASA ADS")?
+            .into_body()
+            .read_json()?;
+        let text = reply["export"].as_str().context("ADS exported nothing")?;
+        let (_, mut entry) = Entry::parse(text).with_context(|| format!("ADS's BibTeX for {bibcode}"))?;
+        // `month = jan` also when ADS doesn't know the month (its date says 00).
+        entry.fields.retain(|(name, _)| name != "adsnote" && name != "month");
+        Ok(entry)
+    }
+}
+
+/// The DOI and arXiv id in an ADS record.
+pub fn record_ids(d: &Value) -> Ids {
+    let identifiers = d["identifier"].as_array().into_iter().flatten().filter_map(Value::as_str);
+    Ids {
+        doi: d["doi"][0].as_str().map(String::from),
+        arxiv: identifiers.filter_map(|i| i.strip_prefix("arXiv:")).find_map(fetch::arxiv_id),
     }
 }
 
@@ -270,6 +295,22 @@ fn ads_paper(d: &Value) -> Option<Candidate> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// NASA ADS, live and with a token: an abstract given at two conferences under one title.
+    #[test]
+    #[ignore = "network, ADS token"]
+    fn ads_records() {
+        let ads = ads().unwrap().expect("an ADS token");
+        let title = "The Spectral Properties of Lunar Agglutinates";
+        let bibcode = |year| ads.record(title, Some(year), Some("Denevi, B. W.")).unwrap().unwrap()["bibcode"].clone();
+        assert_eq!(bibcode(2020), "2020LPI....51.2026D", "that year's, not the other's");
+        assert_eq!(bibcode(2021), "2021LPI....52.2368D");
+        assert!(ads.record(title, None, None).unwrap().is_none(), "two records, no year: none");
+        let entry = ads.bibtex("1970GeCAS...1.1937A").unwrap();
+        assert_eq!(entry.get("journal").as_deref(), Some("Geochimica et Cosmochimica Acta Supplement"));
+        assert_eq!(entry.bibcode().as_deref(), Some("1970GeCAS...1.1937A"));
+        assert!(entry.get("adsnote").is_none() && entry.get("month").is_none());
+    }
 
     #[test]
     fn openalex_works() {

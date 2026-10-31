@@ -1,8 +1,8 @@
 //! Refreshing a paper's metadata, for instance once its arXiv preprint has been published.
 
 use crate::bib::Entry;
-use crate::{Library, books, citekey, fetch};
-use anyhow::{Result, bail};
+use crate::{Library, books, citekey, fetch, refs};
+use anyhow::{Context, Result, bail};
 use std::fs;
 
 impl Library {
@@ -17,6 +17,7 @@ impl Library {
             Some(fetch::Source::Doi(doi)) => fetch::Ids { doi: Some(doi), arxiv: None },
             Some(fetch::Source::Arxiv(arxiv)) => fetch::Ids { doi: None, arxiv: Some(arxiv) },
             Some(fetch::Source::Isbn(isbn)) => return self.update_book(id, Some(isbn)),
+            Some(fetch::Source::Bibcode(bibcode)) => return self.update_ads(id, Some(bibcode)),
             Some(fetch::Source::Title(title)) => fetch::by_title(&title)?,
             Some(fetch::Source::Pdf(_)) => bail!("to give a paper its PDF, use `carrel attach`"),
             None => fetch::Ids { doi: p.bib.doi(), arxiv: p.bib.arxiv() },
@@ -24,9 +25,13 @@ impl Library {
         if source.is_none() && p.bib.kind == "book" {
             return self.update_book(id, None);
         }
+        if ids.is_empty() && source.is_none() && refs::ads()?.is_some() {
+            return self.update_ads(id, None);
+        }
         if ids.is_empty() {
             bail!(
-                "{id} has no DOI or arXiv id; say which paper it is: carrel update {id} <DOI, arXiv id, ISBN or title>"
+                "{id} has no DOI or arXiv id; say which paper it is: \
+                 carrel update {id} <DOI, arXiv id, ISBN, ADS bibcode or title>"
             );
         }
         let mut notes = vec![];
@@ -89,6 +94,37 @@ impl Library {
             ),
             None => {}
         }
+        if changes.is_empty() {
+            return Ok(vec!["already up to date".into()]);
+        }
+        p.save()?;
+        Ok(changes)
+    }
+}
+
+impl Library {
+    /// A paper without DOI or arXiv id (a conference abstract, an old paper) gets the fields it lacks
+    /// from NASA ADS, by its bibcode: given, in its `adsurl`, or ADS's record of its title, first author
+    /// and year. Only what it lacks: ADS spells names `{Denevi}, B.~W.`. If ADS has its DOI, the next
+    /// update fetches the DOI's metadata.
+    fn update_ads(&self, id: &str, bibcode: Option<String>) -> Result<Vec<String>> {
+        let ads = refs::ads()?.context("an ADS bibcode needs an ADS token (see `carrel config`)")?;
+        let mut p = self.get(id)?;
+        let bibcode = match bibcode.or_else(|| p.bib.bibcode()) {
+            Some(bibcode) => bibcode,
+            None => {
+                let first = p.bib.authors().first().cloned();
+                let record = ads.record(&p.bib.title(), p.bib.year(), first.as_deref())?;
+                match record.as_ref().and_then(|d| d["bibcode"].as_str()) {
+                    Some(bibcode) => bibcode.to_string(),
+                    None => bail!(
+                        "{id} has no DOI or arXiv id, and ADS has no record of its title, author and year; say which \
+                         paper it is: carrel update {id} <DOI, arXiv id, ISBN, ADS bibcode or title>"
+                    ),
+                }
+            }
+        };
+        let changes = fill(&mut p.bib, &ads.bibtex(&bibcode)?);
         if changes.is_empty() {
             return Ok(vec!["already up to date".into()]);
         }

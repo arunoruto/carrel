@@ -24,7 +24,7 @@ struct Cli {
 enum Cmd {
     /// The terminal UI: browse, filter and manage the library, the citation graph, people and drafts
     Tui,
-    /// Add papers by PDF file, DOI, arXiv id/URL, ISBN or exact title
+    /// Add papers by PDF file, DOI, arXiv id/URL, ISBN, ADS bibcode/URL or exact title
     Add {
         #[arg(required = true)]
         sources: Vec<String>,
@@ -41,9 +41,9 @@ enum Cmd {
     Update {
         #[arg(required_unless_present = "all")]
         id: Option<String>,
-        /// Which paper it is (DOI, arXiv id, ISBN or title), for papers added without one
+        /// Which paper it is (DOI, arXiv id, ISBN, ADS bibcode or title), for papers added without one
         source: Option<String>,
-        /// Every paper with a DOI or arXiv id, and every book
+        /// Every paper with a DOI, arXiv id or ADS bibcode, and every book
         #[arg(long, conflicts_with_all = ["id", "source"])]
         all: bool,
     },
@@ -401,7 +401,9 @@ fn main() -> Result<()> {
             lib.update(&id, source.as_deref())?.iter().for_each(|m| println!("{m}"))
         }
         Cmd::Update { id: None, .. } => {
-            let known = |p: &Paper| p.bib.doi().is_some() || p.bib.arxiv().is_some() || p.bib.kind == "book";
+            let known = |p: &Paper| {
+                p.bib.doi().is_some() || p.bib.arxiv().is_some() || p.bib.kind == "book" || p.bib.bibcode().is_some()
+            };
             let papers = lib.papers().0.into_iter().filter(known);
             for p in papers {
                 match lib.update(&p.id, None) {
