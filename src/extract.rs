@@ -34,7 +34,11 @@ pub fn choose(setting: &str, docling: Option<&str>) -> Result<Option<Box<dyn Ext
 fn pick(setting: &str, docling: Option<Box<dyn Extractor>>, pymupdf: bool) -> Result<Option<Box<dyn Extractor>>> {
     let pymupdf = pymupdf.then(|| Box::new(PyMuPdf) as Box<dyn Extractor>);
     Ok(match setting.trim() {
-        "auto" => docling.or(pymupdf),
+        // Docling gives up on some PDFs that PyMuPDF reads fine.
+        "auto" => match (docling, pymupdf) {
+            (Some(docling), Some(pymupdf)) => Some(Box::new(Fallback(docling, pymupdf))),
+            (docling, pymupdf) => docling.or(pymupdf),
+        },
         "docling" => Some(docling.context("the extractor is docling, but there is no `docling` on PATH; install it or set `docling` in the config to where it is")?),
         "pymupdf" => Some(pymupdf.context("the extractor is pymupdf, which needs uv: https://docs.astral.sh/uv/")?),
         cmd => Some(Box::new(Shell(cmd.into()))),
@@ -103,20 +107,31 @@ impl Extractor for Docling {
     fn extract(&self, pdf: &Path, out: &Path) -> Result<()> {
         // Docling writes `<stem>.md` and its images to `<stem>_artifacts/`, linked relative to the .md
         // when the output folder is relative. No OCR: born-digital papers don't need it, and it's slow.
-        let output = Command::new(&self.0)
-            .args(["--to", "md", "--image-export-mode", "referenced", "--no-ocr", "--output", "docling"])
-            .arg(pdf)
-            .current_dir(out)
-            .stdin(Stdio::null())
-            .output()
-            .with_context(|| format!("cannot run {}", self.0.display()))?;
+        // Its own PDF parser fails whole documents over one page it can't read ("operation for array
+        // attempted on object of type null"); pdfium, its other one, reads those.
         let work = out.join("docling");
-        let mut entries = fs::read_dir(&work).into_iter().flatten().flatten().map(|e| e.path());
-        // It exits with 0 also when the conversion failed, so look at what it wrote.
-        let Some(md) = entries.find(|p| p.extension().is_some_and(|e| e == "md")) else {
+        let mut failed = String::new();
+        let mut md = None;
+        for backend in [&[][..], &["--pdf-backend", "pypdfium2"]] {
+            let output = Command::new(&self.0)
+                .args(["--to", "md", "--image-export-mode", "referenced", "--no-ocr", "--output", "docling"])
+                .args(backend)
+                .arg(pdf)
+                .current_dir(out)
+                .stdin(Stdio::null())
+                .output()
+                .with_context(|| format!("cannot run {}", self.0.display()))?;
+            // It exits with 0 also when the conversion failed, so look at what it wrote.
+            let mut entries = fs::read_dir(&work).into_iter().flatten().flatten().map(|e| e.path());
+            md = entries.find(|p| p.extension().is_some_and(|e| e == "md"));
+            if md.is_some() {
+                break;
+            }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("docling failed: {}", stderr.trim().lines().last().unwrap_or("it wrote no Markdown"));
-        };
+            failed = stderr.trim().lines().last().unwrap_or("it wrote no Markdown").to_string();
+            let _ = fs::remove_dir_all(&work);
+        }
+        let Some(md) = md else { bail!("docling failed: {failed}") };
         let artifacts = format!("{}_artifacts", md.file_stem().unwrap_or_default().to_string_lossy());
         // Older versions (2.69) put the images next to the .md; newer ones (2.118) one `docling/` deeper,
         // with the links saying so.
@@ -130,6 +145,20 @@ impl Extractor for Docling {
         }
         fs::remove_dir_all(&work)?;
         Ok(())
+    }
+}
+
+/// The first extractor, else the second where the first fails.
+pub struct Fallback(pub Box<dyn Extractor>, pub Box<dyn Extractor>);
+
+impl Extractor for Fallback {
+    fn name(&self) -> String {
+        format!("{}, else {}", self.0.name(), self.1.name())
+    }
+
+    fn extract(&self, pdf: &Path, out: &Path) -> Result<()> {
+        let Err(first) = self.0.extract(pdf, out) else { return Ok(()) };
+        self.1.extract(pdf, out).map_err(|second| anyhow::anyhow!("{first:#}; {second:#}"))
     }
 }
 
@@ -212,14 +241,15 @@ mod tests {
 
     #[test]
     fn choosing() {
-        assert_eq!(picked("auto", true, true).as_deref(), Some("docling"), "docling first");
+        assert_eq!(picked("auto", true, true).as_deref(), Some("docling, else pymupdf"), "docling first");
+        assert_eq!(picked("auto", true, false).as_deref(), Some("docling"));
         assert_eq!(picked("auto", false, true).as_deref(), Some("pymupdf"));
         assert_eq!(picked("auto", false, false), None, "nothing installed");
         assert_eq!(picked("pymupdf", true, true).as_deref(), Some("pymupdf"));
         assert_eq!(picked("echo hi", true, true).as_deref(), Some("echo hi"), "anything else is a command");
         assert!(pick("docling", None, true).is_err_and(|e| e.to_string().contains("no `docling`")));
         let server = choose("auto", Some("https://docling.example.org/")).unwrap().unwrap();
-        assert_eq!(server.name(), "docling at https://docling.example.org", "a URL is a docling-serve");
+        assert!(server.name().starts_with("docling at https://docling.example.org"), "a URL is a docling-serve");
         assert!(pick("pymupdf", None, false).is_err_and(|e| e.to_string().contains("uv")));
     }
 
@@ -247,9 +277,27 @@ mod tests {
         assert!(out.join("figures/image_000000_ab12.png").exists());
         assert!(!out.join("docling").exists(), "its folder is cleaned up");
 
-        fs::write(&fake, "#!/bin/sh\necho 'ConversionError: broken PDF' >&2\n").unwrap();
+        // Its parser fails; pdfium's works.
+        fs::write(
+            &fake,
+            "#!/bin/sh\nmkdir -p docling\ncase \"$*\" in *pypdfium2*) echo 'from pdfium' > docling/x.md ;; \
+             *) echo 'ConversionError: broken PDF' >&2 ;; esac\n",
+        )
+        .unwrap();
+        Docling(fake.clone()).extract(&tmp.join("x.pdf"), &out).unwrap();
+        assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "from pdfium\n");
+        fs::write(&fake, "#!/bin/sh\nmkdir -p docling\necho 'ConversionError: broken PDF' >&2\n").unwrap();
         let e = Docling(fake).extract(&tmp.join("x.pdf"), &out).unwrap_err();
         assert!(e.to_string().contains("broken PDF"), "{e}");
+        assert!(!out.join("docling").exists(), "cleaned up after failing too");
+
+        // Where Docling fails, PyMuPDF (here a command) takes over.
+        let fails = Shell("exit 1".into());
+        let works = Shell("echo fallback > fulltext.md".into());
+        Fallback(Box::new(fails), Box::new(works)).extract(&tmp.join("x.pdf"), &out).unwrap();
+        assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "fallback\n");
+        let e = Fallback(Box::new(Shell("exit 1".into())), Box::new(Shell("exit 2".into())));
+        assert!(e.extract(&tmp.join("x.pdf"), &out).is_err());
         fs::remove_dir_all(tmp).unwrap();
     }
 
