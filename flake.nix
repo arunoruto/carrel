@@ -26,7 +26,8 @@
             clippy
             rustfmt
             rust-analyzer
-            mdbook # the docs
+            hugo # the docs, with go for the theme
+            go
             nodejs # the web UI: npm ci && npm run build in web/
             uv # the default extractor outside of Nix builds
           ];

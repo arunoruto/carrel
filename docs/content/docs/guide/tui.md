@@ -1,6 +1,10 @@
-# The TUI
+---
+title: "The TUI"
+weight: 7
+aliases: ["/tui.html"]
+---
 
-The [web UI](web.md) covers the same ground in the browser. `carrel` without a command opens the terminal UI (unless your [config](configuration.md#what-carrel-alone-does) says otherwise); `carrel tui` always does. It has four tabs, each with up to three panes that narrow from left to right, and a *Selected* bar below them. The focused pane has the accent border; `h`/`l` move the focus.
+The [web UI](/docs/guide/web.md) covers the same ground in the browser. `carrel` without a command opens the terminal UI (unless your [config](/docs/reference/configuration.md#what-carrel-alone-does) says otherwise); `carrel tui` always does. It has four tabs, each with up to three panes that narrow from left to right, and a *Selected* bar below them. The focused pane has the accent border; `h`/`l` move the focus.
 
 - **Library**: shelves (all papers, your projects, and keywords on at least two papers) › the papers on that shelf, each with its status › the selected paper: authors, venue, keywords, summary, abstract, notes.
 - **Graph**: for the paper selected in the Library, the library papers it cites and theirs in turn, the ones citing it, and the papers the library (or the project shown) cites most but doesn't have.
@@ -18,7 +22,7 @@ A paper's status:
 
 ## Keys
 
-Everywhere: `Tab`/`[`/`]` or `1`–`4` switch tabs, `h`/`j`/`k`/`l` or the arrows move, `Ctrl-D`/`Ctrl-U` move by ten, `g`/`G` jump to the top or bottom, `J`/`K` scroll the text on the right, `S` [syncs](sharing.md) with the remote in the background, `q` quits. The line at the bottom always shows the keys that work right now.
+Everywhere: `Tab`/`[`/`]` or `1`–`4` switch tabs, `h`/`j`/`k`/`l` or the arrows move, `Ctrl-D`/`Ctrl-U` move by ten, `g`/`G` jump to the top or bottom, `J`/`K` scroll the text on the right, `S` [syncs](/docs/guide/sharing.md) with the remote in the background, `q` quits. The line at the bottom always shows the keys that work right now.
 
 | Tab | Key | Action |
 |---|---|---|

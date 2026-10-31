@@ -1,4 +1,8 @@
-# The citation graph
+---
+title: "The citation graph"
+weight: 4
+aliases: ["/citations.html"]
+---
 
 carrel keeps each paper's reference list, so it knows which of your papers cite each other, which share authors, and which papers your library keeps citing but doesn't have. The cited papers don't need to be in the library.
 
@@ -48,7 +52,7 @@ carrel asks every source in this order, and each adds the references the earlier
 
 | Source | Covers | Needs |
 |---|---|---|
-| `ads` ([NASA ADS](https://ui.adsabs.harvard.edu)) | astronomy and planetary science, including conference abstracts without a DOI | a free token in `ADS_API_TOKEN` or [the config](configuration.md#api-tokens); skipped without one |
+| `ads` ([NASA ADS](https://ui.adsabs.harvard.edu)) | astronomy and planetary science, including conference abstracts without a DOI | a free token in `ADS_API_TOKEN` or [the config](/docs/reference/configuration.md#api-tokens); skipped without one |
 | `openalex` ([OpenAlex](https://openalex.org)) | most journals across all fields, each reference matched to a record | nothing; `OPENALEX_API_KEY` raises the shared daily budget |
 | `crossref` ([Crossref](https://www.crossref.org)) | the reference lists publishers deposit, including what OpenAlex can't match: conference abstracts, theses, books. Some entries are only the citation as printed | a DOI |
 | `semantic-scholar` | computer science and preprints; asked only when the others find nothing, since some publishers (Wiley, for example) hide their references from it | nothing; `S2_API_KEY` against rate limits |
@@ -99,7 +103,7 @@ carrel authors same "Clark, Roger N." "Clark, R. N."        # one person
 carrel authors different "Head, J." "Head, James W."        # two people
 ```
 
-Each confirmed person is a file, `people/<id>.json`, listing the spellings that belong to them and nobody else, so the decision travels with the library when you [share it](sharing.md). Confirming again with a spelling that's already taken joins the two.
+Each confirmed person is a file, `people/<id>.json`, listing the spellings that belong to them and nobody else, so the decision travels with the library when you [share it](/docs/guide/sharing.md). Confirming again with a spelling that's already taken joins the two.
 
 An assistant can propose such decisions too (the MCP tool `propose_people`, with its reasons). They wait as drafts:
 
@@ -109,8 +113,8 @@ carrel authors approve 1
 carrel authors reject 1
 ```
 
-The references live in `<key>/references.json`, a plain JSON list, so they travel with the library when you [share it](sharing.md).
+The references live in `<key>/references.json`, a plain JSON list, so they travel with the library when you [share it](/docs/guide/sharing.md).
 
 ## Institutions
 
-Whenever carrel looks up a paper's references, it also asks OpenAlex where its authors worked when they wrote it, and keeps that in `<key>/affiliations.json`: each author with their institutions, named and with their [ROR](https://ror.org) id. The [web UI's map](web.md) links papers through the institutions they share. Papers added before this need `carrel refs --all` once; a [server](server.md) fills them in by itself. Only papers with a DOI or arXiv id can be found.
+Whenever carrel looks up a paper's references, it also asks OpenAlex where its authors worked when they wrote it, and keeps that in `<key>/affiliations.json`: each author with their institutions, named and with their [ROR](https://ror.org) id. The [web UI's map](/docs/guide/web.md) links papers through the institutions they share. Papers added before this need `carrel refs --all` once; a [server](/docs/guide/server.md) fills them in by itself. Only papers with a DOI or arXiv id can be found.

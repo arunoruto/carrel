@@ -1,4 +1,8 @@
-# Projects and bibliographies
+---
+title: "Projects and bibliographies"
+weight: 3
+aliases: ["/projects.html"]
+---
 
 A project groups papers, such as everything a thesis chapter or a talk cites. It is a text file, `projects/<name>.txt`, with one paper id per line; `#` starts a comment.
 
@@ -35,9 +39,9 @@ carrel bib --jabref -p thesis > thesis-jabref.bib   # a project's papers, still 
 - Its projects go into `groups`, and every project is a static group in JabRef's group tree.
 - `databaseType:biblatex` is set only when the entries use biblatex fields (`journaltitle`, `date`, …); carrel itself writes BibTeX.
 
-Without `--jabref` (`--files` is its old name), `carrel bib` prints the `.bib` files as they are, so a thesis bibliography stays minimal; biber and BibTeX would ignore the extra fields anyway. carrel's own files stay the source: regenerate the file after changes, and edit metadata with `carrel edit`, since JabRef's edits stay in the generated file. Don't commit it to a [shared library](sharing.md): the library's path in it is this machine's.
+Without `--jabref` (`--files` is its old name), `carrel bib` prints the `.bib` files as they are, so a thesis bibliography stays minimal; biber and BibTeX would ignore the extra fields anyway. carrel's own files stay the source: regenerate the file after changes, and edit metadata with `carrel edit`, since JabRef's edits stay in the generated file. Don't commit it to a [shared library](/docs/guide/sharing.md): the library's path in it is this machine's.
 
-Going the other way, `carrel import` reads a JabRef library: see [importing a .bib](adding-papers.md#importing-a-bib). Exporting with `--jabref` and importing that file into an empty library gives back the papers, their files and the projects.
+Going the other way, `carrel import` reads a JabRef library: see [importing a .bib](/docs/guide/adding-papers.md#importing-a-bib). Exporting with `--jabref` and importing that file into an empty library gives back the papers, their files and the projects.
 
 ## Keeping a project in step with your writing
 

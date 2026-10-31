@@ -1,4 +1,8 @@
-# Contributing
+---
+title: "Contributing"
+weight: 9
+aliases: ["/development.html"]
+---
 
 carrel is written in Rust. The code is a library (`src/lib.rs` and its modules) with four frontends: the CLI (`src/main.rs`), the TUI (`src/tui.rs`), the web UI (`src/web.rs` and `web/`) and the MCP server (`src/mcp.rs`).
 
@@ -12,7 +16,7 @@ Where carrel can be extended, there is a trait to implement, and the rest of the
 
 ## Setup
 
-With Nix, `nix develop` gives you Rust, clippy, rustfmt, rust-analyzer, mdBook and uv. Otherwise install a recent Rust (1.89 or newer) and uv.
+With Nix, `nix develop` gives you Rust, clippy, rustfmt, rust-analyzer, Hugo, Go, Node.js and uv. Otherwise install a recent Rust (1.89 or newer) and uv.
 
 ```sh
 cargo run -- --help
@@ -21,7 +25,7 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 ## The web UI
 
-The [web UI](web.md) is a Svelte 5 app with Tailwind CSS in `web/`. `build.rs` embeds its built files (`web/dist`, or `$CARREL_WEB_DIST`) into the binary; without them carrel still builds, and `carrel web` serves only the API. The JSON API is in `src/web.rs`.
+The [web UI](/docs/guide/web.md) is a Svelte 5 app with Tailwind CSS in `web/`. `build.rs` embeds its built files (`web/dist`, or `$CARREL_WEB_DIST`) into the binary; without them carrel still builds, and `carrel web` serves only the API. The JSON API is in `src/web.rs`.
 
 ```sh
 cd web && npm ci
@@ -43,10 +47,10 @@ The internet tests are marked `#[ignore = "needs internet"]`, so a plain `cargo 
 
 ## Docs
 
-This site is an [mdBook](https://rust-lang.github.io/mdBook/) in `docs/`:
+This site is built with [Hugo](https://gohugo.io) and the [Hextra](https://imfing.github.io/hextra/) theme, from `docs/`. The pages are in `docs/content/docs/`, ordered by the `weight` in each page's front matter; the theme is a Hugo module, so Hugo needs Go to fetch it:
 
 ```sh
-mdbook serve docs --open
+hugo server -s docs          # http://localhost:1313/carrel/
 ```
 
 ## Releases

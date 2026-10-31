@@ -1,6 +1,10 @@
-# The library
+---
+title: "The library"
+weight: 2
+aliases: ["/library.html"]
+---
 
-The library is a folder of plain files, by default `~/Documents/carrel` (see [Configuration](configuration.md)). carrel reads them fresh every time, so you can edit, sync or version them with any tool ([Sharing a library](sharing.md)).
+The library is a folder of plain files, by default `~/Documents/carrel` (see [Configuration](/docs/reference/configuration.md)). carrel reads them fresh every time, so you can edit, sync or version them with any tool ([Sharing a library](/docs/guide/sharing.md)).
 
 ```text
 ~/Documents/carrel/
@@ -24,7 +28,7 @@ The library is a folder of plain files, by default `~/Documents/carrel` (see [Co
 
 A paper's key names its folder, its `.bib` and PDF, and its BibTeX entry, so `\cite{vaswani2017attention}` and Typst's `@vaswani2017attention` work directly.
 
-By default a key is the first author's family name, the year and the first meaningful title word, in ASCII: `vaswani2017attention`, `muller2021uber`. A second paper with the same key gets `b`, `c`, … appended. The format is a template you can change ([Configuration](configuration.md#citation-keys)).
+By default a key is the first author's family name, the year and the first meaningful title word, in ASCII: `vaswani2017attention`, `muller2021uber`. A second paper with the same key gets `b`, `c`, … appended. The format is a template you can change ([Configuration](/docs/reference/configuration.md#citation-keys)).
 
 Keys never change on their own, so citations keep working. `carrel rename <id> [new]` changes one on purpose: folder, files, `.bib` key and project lists together. The old key goes into the entry's `ids` field, biblatex's list of a key's aliases: biber resolves `\cite{old}` to the paper, and carrel's commands, the MCP tools and `carrel project sync` take old keys too. With plain BibTeX, which ignores `ids`, update your citations.
 
@@ -56,4 +60,4 @@ for paper in json.loads(out.stdout):
         print(paper["id"], paper["doi"], len(text))
 ```
 
-To share a library with others, see [Sharing a library](sharing.md).
+To share a library with others, see [Sharing a library](/docs/guide/sharing.md).

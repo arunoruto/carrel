@@ -1,4 +1,8 @@
-# Quick start
+---
+title: "Quick start"
+weight: 2
+aliases: ["/quick-start.html"]
+---
 
 Add a few papers:
 
@@ -20,7 +24,7 @@ carrel show vaswani2017attention
 carrel                                             # the TUI
 ```
 
-Connect your AI assistant ([Working with an AI](ai.md) has the details):
+Connect your AI assistant ([Working with an AI](/docs/guide/ai.md) has the details):
 
 ```sh
 carrel integrate claude                            # or opencode, codex, gemini, cursor

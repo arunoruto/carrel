@@ -1,4 +1,8 @@
-# Adding papers
+---
+title: "Adding papers"
+weight: 1
+aliases: ["/adding-papers.html"]
+---
 
 `carrel add` takes any mix of:
 
@@ -42,7 +46,7 @@ days = 30
 auto = false
 ```
 
-Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. Unfinished downloads, PDFs that don't yet end in `%%EOF` (as curl and wget leave them, and Firefox's empty placeholder), wait for the next run.
+Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you through the [notifiers](/docs/reference/configuration.md#notifications) about the PDFs new since last time, once each. With `auto = true` (or `carrel consume --yes`) it adds the ones it can identify as papers, by a DOI, an arXiv id or a known title, and tells you what it added and what it left. Invoices and letters stay where they are. Unfinished downloads, PDFs that don't yet end in `%%EOF` (as curl and wget leave them, and Firefox's empty placeholder), wait for the next run.
 
 `carrel consume ~/Papers ~/Downloads` looks in those folders instead of the config's.
 
@@ -61,9 +65,9 @@ With [Home Manager](https://github.com/nix-community/home-manager), carrel's mod
 }
 ```
 
-It notifies through the config's [notifiers](configuration.md#notifications) and adds papers only with `[consume] auto = true` there. On Linux, `journalctl --user -u carrel-consume` shows what each run did. On macOS, it runs as a launchd agent that logs to `~/Library/Logs/carrel-consume.log`.
+It notifies through the config's [notifiers](/docs/reference/configuration.md#notifications) and adds papers only with `[consume] auto = true` there. On Linux, `journalctl --user -u carrel-consume` shows what each run did. On macOS, it runs as a launchd agent that logs to `~/Library/Logs/carrel-consume.log`.
 
-Without Home Manager, `carrel service install consume` sets up the same thing ([Running in the background](installation.md#running-in-the-background)). It watches the config's `[consume] folders`, or Downloads.
+Without Home Manager, `carrel service install consume` sets up the same thing ([Running in the background](/docs/installation.md#running-in-the-background)). It watches the config's `[consume] folders`, or Downloads.
 
 ## Duplicates
 
@@ -102,7 +106,7 @@ A JabRef library comes over with its files and groups:
 
 - The `file` field's links (`Description:path:PDF;…`) are followed, relative to the `fileDirectory` the file names (also a user-specific one) or else to the `.bib`'s folder. The first PDF becomes the paper's PDF, the other files its supplementary files, with their text extracted. Missing files (and Windows paths on another system) are reported and skipped. Zotero's and Mendeley's `file` fields work the same way.
 - Static groups become projects, with the entries their `groups` field puts in them. Projects are flat, so a nested group becomes a project of its own name; groups of the same name in different branches become one project, and names are made into valid project names (`Chapter 1` → `Chapter-1`, reported). Keyword, search and other dynamic groups are skipped.
-- `file` and `groups` aren't kept in the paper's `.bib`: carrel keeps the files and projects itself, and `carrel bib --jabref` [writes them back](projects.md#jabref).
+- `file` and `groups` aren't kept in the paper's `.bib`: carrel keeps the files and projects itself, and `carrel bib --jabref` [writes them back](/docs/guide/projects.md#jabref).
 
 ## Moving from I, Librarian
 

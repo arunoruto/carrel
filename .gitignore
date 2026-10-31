@@ -1,4 +1,6 @@
 /target
-/docs/book
+/docs/public
+/docs/resources
+/docs/.hugo_build.lock
 result
 result-*

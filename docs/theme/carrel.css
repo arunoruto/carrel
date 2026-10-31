@@ -1,5 +1,0 @@
-/* A calmer reading width and a landing banner for the introduction. */
-:root { --content-max-width: 860px; }
-.hero { padding: 1.5rem 1.75rem; margin: 1rem 0 2rem; border-radius: 12px; border: 1px solid var(--table-border-color); background: var(--table-alternate-bg); }
-.hero p { margin: 0.4rem 0; font-size: 1.1em; }
-.hero code { font-size: 0.95em; }

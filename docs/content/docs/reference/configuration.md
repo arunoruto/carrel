@@ -1,4 +1,8 @@
-# Configuration
+---
+title: "Configuration"
+weight: 2
+aliases: ["/configuration.html"]
+---
 
 Settings live in `~/.config/carrel/config.toml` (or `$XDG_CONFIG_HOME/carrel/config.toml`), on Linux and macOS alike; every one is optional. `carrel config` shows the paths in use.
 
@@ -21,15 +25,15 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 
 ## What `carrel` alone does
 
-`default` is what running `carrel` without a command does, written as its arguments: `tui` (the default) opens the [TUI](tui.md), `list -p thesis` lists a project, `search` with a query… Arguments are split on spaces; quotes aren't understood.
+`default` is what running `carrel` without a command does, written as its arguments: `tui` (the default) opens the [TUI](/docs/guide/tui.md), `list -p thesis` lists a project, `search` with a query… Arguments are split on spaces; quotes aren't understood.
 
-`theme` picks the TUI's colours ([themes](tui.md#themes)).
+`theme` picks the TUI's colours ([themes](/docs/guide/tui.md#themes)).
 
 ## The library
 
 `library` is the library folder. The environment variable `CARREL_HOME` overrides it. The default is `carrel` in your Documents folder.
 
-`[remote]` is where `carrel sync` shares it: an S3 bucket or a folder ([Sharing a library](sharing.md)).
+`[remote]` is where `carrel sync` shares it: an S3 bucket or a folder ([Sharing a library](/docs/guide/sharing.md)).
 
 ## Citation keys
 
@@ -69,9 +73,9 @@ For *He, Zhang, Ren and Sun (2016), Deep Residual Learning for Image Recognition
 
 **PyMuPDF** runs through [uv](https://docs.astral.sh/uv/), which fetches pymupdf4llm on first use; the Nix package and the Docker image bring their own Python with it instead, so for them it is always there.
 
-**Docling** is found as `docling` on your `PATH`, or where `docling` in the config says (useful for services, whose `PATH` is short). Install it with `uv tool install docling` or `pipx install docling`; on Nix it is in nixpkgs, e.g. `services.carrel.docling.package = pkgs.docling;` with the [Home Manager module](adding-papers.md#watching-the-folder), which installs it and points carrel and its services at it (it is not part of carrel's package: it brings PyTorch, gigabytes of it), or for the [NixOS module](server.md#on-nixos) `services.carrel.settings.docling = lib.getExe pkgs.docling;`. With `auto`, carrel then uses it. carrel runs `docling --to md --image-export-mode referenced --no-ocr`, without OCR because papers born digital don't need it and it is slow, and moves the result into carrel's layout. Where Docling's own PDF parser gives up on a page (it then fails the whole document), carrel tries again with its pdfium parser. Very long PDFs, such as whole textbooks, take Docling hours and gigabytes of memory, so with `auto` those over 150 pages go to PyMuPDF. Docling downloads its models on first use, so the first paper takes a while, and on a CPU every paper takes tens of seconds to minutes; there is no time limit. It leaves formulas out (`<!-- formula-not-decoded -->`) unless `formulas = true`, which turns on its formula model and writes them as LaTeX (`$$x^{2} = \sec^{2} b + …$$`). On a CPU that takes about a minute per formula, ten minutes for a four-page paper with ten, so it is for a GPU or a docling-serve on one.
+**Docling** is found as `docling` on your `PATH`, or where `docling` in the config says (useful for services, whose `PATH` is short). Install it with `uv tool install docling` or `pipx install docling`; on Nix it is in nixpkgs, e.g. `services.carrel.docling.package = pkgs.docling;` with the [Home Manager module](/docs/guide/adding-papers.md#watching-the-folder), which installs it and points carrel and its services at it (it is not part of carrel's package: it brings PyTorch, gigabytes of it), or for the [NixOS module](/docs/guide/server.md#on-nixos) `services.carrel.settings.docling = lib.getExe pkgs.docling;`. With `auto`, carrel then uses it. carrel runs `docling --to md --image-export-mode referenced --no-ocr`, without OCR because papers born digital don't need it and it is slow, and moves the result into carrel's layout. Where Docling's own PDF parser gives up on a page (it then fails the whole document), carrel tries again with its pdfium parser. Very long PDFs, such as whole textbooks, take Docling hours and gigabytes of memory, so with `auto` those over 150 pages go to PyMuPDF. Docling downloads its models on first use, so the first paper takes a while, and on a CPU every paper takes tens of seconds to minutes; there is no time limit. It leaves formulas out (`<!-- formula-not-decoded -->`) unless `formulas = true`, which turns on its formula model and writes them as LaTeX (`$$x^{2} = \sec^{2} b + …$$`). On a CPU that takes about a minute per formula, ten minutes for a four-page paper with ten, so it is for a GPU or a docling-serve on one.
 
-**Docling on another machine**: set `docling` to the URL of a [docling-serve](https://github.com/docling-project/docling-serve), and carrel sends it the PDF instead of running Docling itself. That suits a laptop with a server or a GPU nearby, and a [carrel server](server.md) whose container leaves Docling out. `formulas = true` asks it to decode formulas too. With Docker:
+**Docling on another machine**: set `docling` to the URL of a [docling-serve](https://github.com/docling-project/docling-serve), and carrel sends it the PDF instead of running Docling itself. That suits a laptop with a server or a GPU nearby, and a [carrel server](/docs/guide/server.md) whose container leaves Docling out. `formulas = true` asks it to decode formulas too. With Docker:
 
 ```sh
 docker run -d --name docling -p 5001:5001 \
@@ -96,7 +100,7 @@ Keep it on a network you trust or behind HTTPS: the PDFs go to it in full.
 
 ## The server
 
-`[serve]` holds [`carrel serve`](server.md)'s settings; its flags override them:
+`[serve]` holds [`carrel serve`](/docs/guide/server.md)'s settings; its flags override them:
 
 ```toml
 [serve]
@@ -107,11 +111,11 @@ trusted = ["127.0.0.0/8", "100.64.0.0/10"]       # networks that need no token, 
 proxies = ["172.18.0.0/16"]                      # reverse proxies whose X-Forwarded-For carrel believes
 ```
 
-See [Networks without a token](server.md#networks-without-a-token) before trusting anything behind a reverse proxy.
+See [Networks without a token](/docs/guide/server.md#networks-without-a-token) before trusting anything behind a reverse proxy.
 
 ## Notifications
 
-carrel tells you what it did while you weren't looking: PDFs that `carrel consume` found in your [Downloads](adding-papers.md#from-your-downloads) or added from there when run from a timer, and a [server](server.md) that can't reach Ollama. A server never tells you about papers others dropped in its folder. Use any of these, or several:
+carrel tells you what it did while you weren't looking: PDFs that `carrel consume` found in your [Downloads](/docs/guide/adding-papers.md#from-your-downloads) or added from there when run from a timer, and a [server](/docs/guide/server.md) that can't reach Ollama. A server never tells you about papers others dropped in its folder. Use any of these, or several:
 
 ```toml
 [notify]
@@ -154,9 +158,9 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | `CARREL_DOCLING` | where Docling is, a program or a docling-serve's URL, like `docling` in the config |
 | `DOCLING_SERVE_API_KEY` | the API key of that docling-serve |
 | `S2_API_KEY` | a free [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key); without one, references, citations and some lookups are often rate-limited |
-| `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](citations.md) |
+| `ADS_API_TOKEN` (or `ADS_DEV_KEY`) | a free [NASA ADS token](https://ui.adsabs.harvard.edu/user/settings/token); turns on ADS as the first [reference source](/docs/guide/citations.md) |
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
-| `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](sharing.md)'s settings |
-| `CARREL_SERVE_TOKEN` | the token [`carrel serve`](server.md)'s clients must send |
-| `OLLAMA_HOST` | where Ollama is, for [semantic search](semantic-search.md) |
+| `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](/docs/guide/sharing.md)'s settings |
+| `CARREL_SERVE_TOKEN` | the token [`carrel serve`](/docs/guide/server.md)'s clients must send |
+| `OLLAMA_HOST` | where Ollama is, for [semantic search](/docs/guide/semantic-search.md) |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |

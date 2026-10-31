@@ -1,4 +1,8 @@
-# Sharing a library
+---
+title: "Sharing a library"
+weight: 10
+aliases: ["/sharing.html"]
+---
 
 The library is plain files and the search index is a local cache, so sharing it needs no database server. `carrel sync` shares it through an S3 bucket ([Garage](https://garagehq.deuxfleurs.fr), MinIO, AWS, ...) or a plain folder; [Git](#with-git) works as well. Keep whichever you use private: it holds publishers' PDFs.
 

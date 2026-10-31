@@ -138,7 +138,7 @@ Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [release
   ```sh
   cargo install --git https://github.com/arunoruto/carrel
   ```
-* Docker, for a server: `ghcr.io/arunoruto/carrel:latest` (the latest release) or `:edge` (main); see [Running a server](https://arunoruto.github.io/carrel/server.html).
+* Docker, for a server: `ghcr.io/arunoruto/carrel:latest` (the latest release) or `:edge` (main); see [Running a server](https://arunoruto.github.io/carrel/docs/guide/server/).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -163,7 +163,7 @@ _For more, see the [documentation][docs-url]._
 
 ## Contributing
 
-`nix develop` (or Rust 1.89+ and uv), then `cargo test`; see [Contributing](https://arunoruto.github.io/carrel/development.html). Releases are cut automatically from [Conventional Commits](https://www.conventionalcommits.org).
+`nix develop` (or Rust 1.89+ and uv), then `cargo test`; see [Contributing](https://arunoruto.github.io/carrel/docs/development/). Releases are cut automatically from [Conventional Commits](https://www.conventionalcommits.org).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -183,7 +183,7 @@ Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-M
 [issues-url]: https://github.com/arunoruto/carrel/issues
 [license-shield]: https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=for-the-badge
 [license-url]: https://github.com/arunoruto/carrel/blob/main/LICENSE-MIT
-[architecture-url]: https://arunoruto.github.io/carrel/architecture.html
+[architecture-url]: https://arunoruto.github.io/carrel/docs/guide/architecture/
 [Rust-badge]: https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white
 [Rust-url]: https://www.rust-lang.org
 [Ratatui-badge]: https://img.shields.io/badge/Ratatui-1E1E2E?style=for-the-badge&logo=ratatui&logoColor=white

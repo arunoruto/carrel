@@ -54,7 +54,7 @@ With Nix but without Home Manager: `nix profile install github:arunoruto/carrel`
 curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | sh
 ```
 
-If `~/.local/bin` is not on `PATH`, ask before adding it to the human's shell profile. Other routes, such as Cargo, bin and Docker, are at https://arunoruto.github.io/carrel/installation.html.
+If `~/.local/bin` is not on `PATH`, ask before adding it to the human's shell profile. Other routes, such as Cargo, bin and Docker, are at https://arunoruto.github.io/carrel/docs/installation/.
 
 **Text extraction:** outside Nix and Docker, carrel needs `uv`, which fetches pymupdf4llm on first use, or `docling`. If neither is there, offer to install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Without either, papers are still added, just without their text.
 
@@ -75,9 +75,9 @@ library = "~/Documents/carrel"    # ask; the default is fine for most people
 # model = "bge-m3"
 ```
 
-Ask about the field: astronomers want an ADS token (https://ui.adsabs.harvard.edu/user/settings/token). Config details: https://arunoruto.github.io/carrel/configuration.html.
+Ask about the field: astronomers want an ADS token (https://ui.adsabs.harvard.edu/user/settings/token). Config details: https://arunoruto.github.io/carrel/docs/reference/configuration/.
 
-**A library that already exists** on a server or another machine is shared with `[remote]` and `carrel sync` (https://arunoruto.github.io/carrel/sharing.html). Ask the human for the remote's details instead of making up a new one.
+**A library that already exists** on a server or another machine is shared with `[remote]` and `carrel sync` (https://arunoruto.github.io/carrel/docs/guide/sharing/). Ask the human for the remote's details instead of making up a new one.
 
 ## 4. Bring in their papers
 
@@ -107,7 +107,7 @@ After that, the agent needs a restart. If `carrel integrate` doesn't exist (a re
 - Codex (`~/.codex/config.toml`): `[mcp_servers.carrel]`, then `command = "carrel"` and `args = ["mcp"]`
 - Gemini CLI (`~/.gemini/settings.json`) and Cursor (`~/.cursor/mcp.json`): `"mcpServers": { "carrel": { "command": "carrel", "args": ["mcp"] } }`
 
-For a library on a carrel server, the agent talks MCP over HTTP to `https://<server>/mcp` with an `Authorization: Bearer <token>` header (https://arunoruto.github.io/carrel/server.html#connecting-an-ai).
+For a library on a carrel server, the agent talks MCP over HTTP to `https://<server>/mcp` with an `Authorization: Bearer <token>` header (https://arunoruto.github.io/carrel/docs/guide/server/#connecting-an-ai).
 
 ## 6. Keep it running (optional)
 

@@ -1,10 +1,14 @@
-# MCP tools
+---
+title: "MCP tools"
+weight: 3
+aliases: ["/mcp-tools.html"]
+---
 
 What `carrel mcp` offers an assistant. Paper ids are citation keys. The assistant can read everything; the only thing it can write is drafts.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `search` | `query`, `limit`, `semantic` | best matches first: id, title, authors, year, keywords, where the words matched. `field:word` and `project:name` work. With `semantic`, by [meaning](semantic-search.md): the passage that matched and where it is |
+| `search` | `query`, `limit`, `semantic` | best matches first: id, title, authors, year, keywords, where the words matched. `field:word` and `project:name` work. With `semantic`, by [meaning](/docs/guide/semantic-search.md): the passage that matched and where it is |
 | `list_papers` | `project` | all papers, or a project's |
 | `list_projects` | | each project with its paper ids |
 | `get_paper` | `id` | metadata, abstract, summary, keywords, notes, figure and supplementary lists, pending drafts, file paths |

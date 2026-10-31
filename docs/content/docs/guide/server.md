@@ -1,13 +1,17 @@
-# Running a server
+---
+title: "Running a server"
+weight: 11
+aliases: ["/server.html"]
+---
 
 `carrel serve` runs the library on a server, for a group and its AIs:
 
-- it serves the [MCP tools](mcp-tools.md) over HTTP at `/mcp`, so an AI anywhere on the network can use the library;
-- every few minutes it [syncs](sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs, looks up the references of new papers and, with `[embeddings]` in its config, computes their [embeddings](semantic-search.md). Everyone else gets the results with their next `carrel sync`.
+- it serves the [MCP tools](/docs/reference/mcp-tools.md) over HTTP at `/mcp`, so an AI anywhere on the network can use the library;
+- every few minutes it [syncs](/docs/guide/sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs, looks up the references of new papers and, with `[embeddings]` in its config, computes their [embeddings](/docs/guide/semantic-search.md). Everyone else gets the results with their next `carrel sync`.
 - with `[consume]` and `auto = true` in its config, it adds the papers that turn up in a folder (a shared drop folder, say) and logs what it added;
-- with [notifiers](configuration.md#notifications) in its config, it tells you about its own trouble, such as Ollama going away. Papers others drop in don't land in your inbox; only a `carrel consume` on your own machine tells you about your Downloads.
+- with [notifiers](/docs/reference/configuration.md#notifications) in its config, it tells you about its own trouble, such as Ollama going away. Papers others drop in don't land in your inbox; only a `carrel consume` on your own machine tells you about your Downloads.
 
-Everyone keeps their own library and syncs it as before; the server is one more member of the group, one that never sleeps. It needs a [remote](sharing.md) in its config to share its work. [Clients and servers](architecture.md) shows how the pieces connect.
+Everyone keeps their own library and syncs it as before; the server is one more member of the group, one that never sleeps. It needs a [remote](/docs/guide/sharing.md) in its config to share its work. [Clients and servers](/docs/guide/architecture.md) shows how the pieces connect.
 
 ## With Docker
 
@@ -81,7 +85,7 @@ The flake has a module:
 }
 ```
 
-The library lives in `/var/lib/carrel/library`. `settings` is the [config](configuration.md) as Nix; keep secrets in `environmentFile`, since `settings` ends up in the Nix store.
+The library lives in `/var/lib/carrel/library`. `settings` is the [config](/docs/reference/configuration.md) as Nix; keep secrets in `environmentFile`, since `settings` ends up in the Nix store.
 
 ## Connecting an AI
 

@@ -20,13 +20,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
         with:
-          tool: mdbook@0.5.2
-      - run: mdbook build docs
+          fetch-depth: 0 # each page's last-updated date
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: docs/go.mod
+          cache: false
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: 0.168.0
+          extended: true
+      - run: hugo --gc --minify -s docs
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: docs/book
+          path: docs/public
 
   deploy:
     if: github.event_name != 'pull_request'

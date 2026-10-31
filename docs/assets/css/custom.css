@@ -1,0 +1,7 @@
+/* carrel's colors: the blue of the leaning book. */
+:root {
+  --primary-hue: 222deg;
+  --primary-saturation: 84%;
+  --primary-lightness: 55%;
+}
+.carrel-logo { width: 88px; height: 88px; }
