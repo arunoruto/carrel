@@ -50,6 +50,8 @@ Without a terminal, from a timer, `carrel consume` doesn't ask. It tells you thr
 
 `carrel consume ~/Papers ~/Downloads` looks in those folders instead of the config's.
 
+Alert emails saved as `.eml` files in these folders, such as Google Scholar's, become [recommendations](/docs/guide/recommendations.md).
+
 ### Watching the folder
 
 With [Home Manager](https://github.com/nix-community/home-manager), carrel's module runs `carrel consume` whenever something lands in Downloads, and hourly in case it missed one:

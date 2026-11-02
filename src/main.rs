@@ -190,6 +190,18 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<ProjectCmd>,
     },
+    /// Papers recommended by alert emails (Google Scholar), most alike to the library first, waiting to be
+    /// added or dismissed
+    #[command(args_conflicts_with_subcommands = true)]
+    Recommended {
+        #[command(subcommand)]
+        cmd: Option<RecommendedCmd>,
+        /// Also the dismissed ones
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Share the library: upload what changed here, download what changed on the config's remote
     Sync {
         /// Only list what would happen
@@ -292,6 +304,27 @@ enum ServiceCmd {
     },
     /// Stop it and remove it
     Remove { service: install::Service },
+}
+
+#[derive(Subcommand)]
+enum RecommendedCmd {
+    /// Read alert emails: .eml files, or folders of them (`carrel consume` reads those in its folders)
+    Import {
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+    /// Add recommendations to the library, with their PDF when the alert links to one that's free
+    Add {
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
+    /// Hide recommendations for good
+    Dismiss {
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
+    /// Score them all again by how alike they are to the library (needs [embeddings])
+    Score,
 }
 
 #[derive(Subcommand)]
@@ -631,6 +664,55 @@ fn main() -> Result<()> {
                 false => papers.iter().for_each(|p| println!("{}", p.bibtex())),
             }
         }
+        Cmd::Recommended { cmd, all, json } => match cmd {
+            None => {
+                let recs = lib.recommendations(all);
+                if json {
+                    return print_json(&recs);
+                }
+                if recs.is_empty() {
+                    println!("no recommendations; `carrel recommended import <folder of .eml alerts>` reads some");
+                }
+                for r in recs {
+                    print_recommendation(&r);
+                }
+            }
+            Some(RecommendedCmd::Import { paths }) => {
+                let imported = spinning("reading the alerts", || lib.import_alerts(&paths))?;
+                println!("{} alerts, {} new recommendations", imported.alerts, imported.new.len());
+                imported.new.iter().take(10).for_each(print_recommendation);
+                if imported.new.len() > 10 {
+                    println!("and {} more: `carrel recommended`", imported.new.len() - 10);
+                }
+            }
+            Some(RecommendedCmd::Add { keys }) => {
+                for key in keys {
+                    match spinning("adding", || lib.add_recommended(&key)) {
+                        Ok((id, messages)) => {
+                            println!("added {id}");
+                            messages.iter().for_each(|m| println!("  {m}"));
+                        }
+                        Err(e) => eprintln!("{key}: {e:#}"),
+                    }
+                }
+            }
+            Some(RecommendedCmd::Dismiss { keys }) => {
+                for key in keys {
+                    lib.dismiss(&key)?;
+                }
+            }
+            Some(RecommendedCmd::Score) => {
+                if lib.embeddings.is_none() {
+                    bail!("scoring needs [embeddings] in the config (see `carrel embed --help`)");
+                }
+                let mut recs = lib.recommendations(true);
+                spinning("comparing them with the library", || lib.score(&mut recs))?;
+                for r in &recs {
+                    lib.save_recommendation(r)?;
+                }
+                println!("scored {}", recs.len());
+            }
+        },
         Cmd::Project { cmd } => match cmd.unwrap_or(ProjectCmd::List) {
             ProjectCmd::List => {
                 for name in lib.projects() {
@@ -765,6 +847,13 @@ fn consume(lib: &Library, folders: Vec<String>, yes: bool, again: bool, days: Op
         return Ok(());
     }
 
+    let (added, waiting) = spinning("reading alert emails", || consume::recommendations(lib, &settings));
+    if !added.is_empty() {
+        println!("added from the alerts:\n{}\n", added.join("\n"));
+    }
+    if !waiting.is_empty() {
+        println!("{} new recommendations from alert emails: `carrel recommended`\n", waiting.len());
+    }
     let mut seen = Seen::load();
     let found: Vec<_> = consume::find(&folders, settings.days())
         .into_iter()
@@ -886,6 +975,22 @@ fn project_papers(lib: &Library, name: &str) -> Result<Vec<Paper>> {
 
 fn in_library(id: &Option<String>) -> String {
     id.as_ref().map_or(String::new(), |id| format!("  [in library: {id}]"))
+}
+
+/// Score, title, then byline and key: `carrel recommended add <key>`.
+fn print_recommendation(r: &carrel::recommended::Recommendation) {
+    let score = r.score.map_or("    ".into(), |s| format!("{s:.2}"));
+    let times = if r.dates.len() > 1 { format!(", recommended {}×", r.dates.len()) } else { String::new() };
+    let pdf = if r.pdf { ", PDF" } else { "" };
+    let venue = [r.venue.clone(), r.year.map(|y| y.to_string())].into_iter().flatten().collect::<Vec<_>>();
+    let mut byline = r.authors.first().cloned().unwrap_or_default();
+    if r.authors.len() > 1 {
+        byline.push_str(" et al.");
+    }
+    if !venue.is_empty() {
+        byline.push_str(&format!(" · {}", venue.join(", ")));
+    }
+    println!("{score}  {}\n      {byline}{pdf}{times}  [{}]", r.title, r.key);
 }
 
 fn print_json(value: &impl serde::Serialize) -> Result<()> {

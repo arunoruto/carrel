@@ -1,6 +1,6 @@
 ---
 title: "Sharing a library"
-weight: 10
+weight: 11
 aliases: ["/sharing.html"]
 ---
 

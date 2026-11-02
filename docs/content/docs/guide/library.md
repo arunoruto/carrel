@@ -1,6 +1,6 @@
 ---
 title: "The library"
-weight: 2
+weight: 3
 aliases: ["/library.html"]
 ---
 

@@ -23,6 +23,9 @@ pub struct Config {
     pub auto: bool,
     /// Only PDFs changed in the last this many days (30 by default), so years of downloads don't pour in.
     pub days: Option<u64>,
+    /// Add papers recommended by alert emails (`.eml` files in the folders) when they are at least this
+    /// alike to the library (0 to 1, with embeddings); without it, they wait in `carrel recommended`.
+    pub recommended: Option<f32>,
 }
 
 impl Config {
@@ -171,19 +174,51 @@ impl Library {
     }
 }
 
+/// Read the alert emails in the folders: papers alike enough to the library (`recommended`) are added,
+/// the others wait. Returns lines about the added ones and the new waiting ones.
+pub fn recommendations(lib: &Library, config: &Config) -> (Vec<String>, Vec<String>) {
+    let files = crate::recommended::alert_files(&config.folders());
+    if files.is_empty() {
+        return (vec![], vec![]);
+    }
+    let imported = match lib.import_alerts(&files) {
+        Ok(imported) => imported,
+        Err(e) => return (vec![], vec![format!("  cannot read the alerts: {e:#}")]),
+    };
+    let (mut added, mut waiting) = (vec![], vec![]);
+    for r in imported.new {
+        let score = r.score.map_or(String::new(), |s| format!("{s:.2}  "));
+        let line = format!("  {score}{}", r.title);
+        if config.recommended.is_some_and(|min| r.score.is_some_and(|s| s >= min)) {
+            match lib.add_recommended(&r.key) {
+                Ok((id, messages)) => {
+                    added.push(format!("  {id}  {}\n    recommended, {score}alike to the library", r.title));
+                    added.extend(messages.iter().map(|m| format!("    {m}")));
+                    continue;
+                }
+                Err(e) => waiting.push(format!("{line}\n    not added: {e:#}")),
+            }
+        } else {
+            waiting.push(line);
+        }
+    }
+    (added, waiting)
+}
+
 /// `carrel consume` without anyone to ask: adds the PDFs it can identify when `auto` is on, and returns
 /// a message about the PDFs new since last time (subject and body), if there are any. With `again`, PDFs
 /// told about before count as new.
 pub fn unattended(lib: &Library, config: &Config, auto: bool, again: bool) -> Result<Option<(String, String)>> {
+    let (mut added, mut recommended) = recommendations(lib, config);
     let mut seen = Seen::load();
     let new: Vec<Found> = find(&config.folders(), config.days())
         .into_iter()
         .filter(|f| seen.get(f).is_none() || again && seen.get(f) == Some(Mark::Told))
         .collect();
-    if new.is_empty() {
+    if new.is_empty() && added.is_empty() && recommended.is_empty() {
         return Ok(None);
     }
-    let (mut added, mut left) = (vec![], vec![]);
+    let mut left = vec![];
     for f in &new {
         seen.set(f, Mark::Told);
         if !auto {
@@ -209,9 +244,17 @@ pub fn unattended(lib: &Library, config: &Config, auto: bool, again: bool) -> Re
         let heading = if auto { "Not added" } else { "New, waiting for `carrel consume`" };
         body.push(format!("{heading}:\n{}", left.join("\n")));
     }
+    let n = recommended.len();
+    if n > 0 {
+        recommended.truncate(10);
+        let more = if n > 10 { format!("\n  and {} more", n - 10) } else { String::new() };
+        body.push(format!("Recommended, waiting in `carrel recommended`:\n{}{more}", recommended.join("\n")));
+    }
+    let s = |n: usize| if n == 1 { "" } else { "s" };
     let subject = match (added.len(), left.len()) {
-        (0, n) => format!("carrel found {n} new PDF{}", if n == 1 { "" } else { "s" }),
-        (n, _) => format!("carrel added {n} paper{}", if n == 1 { "" } else { "s" }),
+        (0, 0) => format!("{n} paper{} recommended", s(n)),
+        (0, n) => format!("carrel found {n} new PDF{}", s(n)),
+        (n, _) => format!("carrel added {n} paper{}", s(n)),
     };
     Ok(Some((subject, body.join("\n\n") + "\n")))
 }

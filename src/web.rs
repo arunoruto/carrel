@@ -290,6 +290,18 @@ fn api_call(
             suggestions.truncate(query.get("limit").and_then(|l| l.parse().ok()).unwrap_or(50));
             ok(json!(suggestions))
         }
+        // Papers recommended by alert emails, waiting to be added or dismissed.
+        (m, ["recommended"]) if *m == get => {
+            ok(json!(lib.recommendations(query.get("all").is_some_and(|a| a == "1" || a == "true"))))
+        }
+        (m, ["recommended", key, "add"]) if *m == post => {
+            let (id, messages) = lib.add_recommended(key)?;
+            ok(json!({"id": id, "messages": messages}))
+        }
+        (m, ["recommended", key, "dismiss"]) if *m == post => {
+            lib.dismiss(key)?;
+            ok(json!({}))
+        }
         (m, ["inbox"]) if *m == get => ok(inbox()?),
         (m, ["map"]) if *m == get => ok(map(lib, query.get("project").filter(|p| !p.is_empty()))?),
         (m, ["doctor"]) if *m == get => ok(json!(lib.doctor())),

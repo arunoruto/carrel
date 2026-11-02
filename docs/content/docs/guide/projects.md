@@ -1,6 +1,6 @@
 ---
 title: "Projects and bibliographies"
-weight: 3
+weight: 4
 aliases: ["/projects.html"]
 ---
 

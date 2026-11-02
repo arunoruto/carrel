@@ -1,13 +1,15 @@
 //! Terminal UI, styled like Tapedeck: a header with the logo, the tabs and the library's size; three panes
 //! that narrow from left to right; a Selected bar; the keys. Tabs: Library (shelves › papers › the paper),
 //! Graph (what it cites, what cites it, what the library lacks), People (people › papers › maybe the same
-//! person) and Drafts (AI proposals next to what they would change).
+//! person), Drafts (AI proposals next to what they would change) and Discover (papers recommended by alert
+//! emails, to add or dismiss).
 
 use crate::theme::Theme;
 use anyhow::Result;
 use carrel::authors::{self, Person, Proposal};
 use carrel::fetch::{self, Candidate, Source};
 use carrel::graph::{Graph, Suggestion};
+use carrel::recommended::Recommendation;
 use carrel::{Config, Field, Library, Paper};
 use ratatui::{
     DefaultTerminal, Frame,
@@ -26,7 +28,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-const TABS: [&str; 4] = ["Library", "Graph", "People", "Drafts"];
+const TABS: [&str; 5] = ["Library", "Graph", "People", "Drafts", "Discover"];
+const TAB_ORDER: [Tab; 5] = [Tab::Library, Tab::Graph, Tab::People, Tab::Drafts, Tab::Discover];
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -35,6 +38,8 @@ enum Tab {
     Graph,
     People,
     Drafts,
+    /// Papers recommended by alert emails.
+    Discover,
 }
 
 #[derive(PartialEq)]
@@ -140,6 +145,8 @@ struct App {
 
     drafts: Vec<Draft>,
     draft_list: ListState,
+    recs: Vec<Recommendation>,
+    rec_list: ListState,
 
     input: String,
     results: Vec<Candidate>,
@@ -183,6 +190,8 @@ pub fn run(lib: Library) -> Result<()> {
         person_papers: ListState::default().with_selected(Some(0)),
         maybe_list: ListState::default().with_selected(Some(0)),
         drafts: vec![],
+        recs: vec![],
+        rec_list: ListState::default().with_selected(Some(0)),
         draft_list: ListState::default().with_selected(Some(0)),
         input: String::new(),
         results: vec![],
@@ -308,6 +317,8 @@ impl App {
         drafts.extend(self.lib.people_drafts().into_iter().map(Draft::People));
         self.drafts = drafts;
         clamp(&mut self.draft_list, self.drafts.len());
+        self.recs = self.lib.recommendations(false);
+        clamp(&mut self.rec_list, self.recs.len());
         self.full = None;
         self.graph = None;
         self.people_loaded = false;
@@ -476,7 +487,7 @@ impl App {
 
     fn panes(&self) -> usize {
         match self.tab {
-            Tab::Drafts => 1,
+            Tab::Drafts | Tab::Discover => 1,
             _ => 3,
         }
     }
@@ -490,12 +501,12 @@ impl App {
     fn on_key(&mut self, key: KeyEvent, term: &mut DefaultTerminal) {
         self.status.clear();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let tabs = [Tab::Library, Tab::Graph, Tab::People, Tab::Drafts];
+        let tabs = TAB_ORDER;
         let now = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
         match key.code {
             KeyCode::Tab | KeyCode::Char(']') => return self.switch(tabs[(now + 1) % tabs.len()]),
             KeyCode::BackTab | KeyCode::Char('[') => return self.switch(tabs[(now + tabs.len() - 1) % tabs.len()]),
-            KeyCode::Char(c @ '1'..='4') => return self.switch(tabs[c as usize - '1' as usize]),
+            KeyCode::Char(c @ '1'..='5') => return self.switch(tabs[c as usize - '1' as usize]),
             KeyCode::Left | KeyCode::Char('h') => return self.focus = self.focus.saturating_sub(1),
             KeyCode::Right | KeyCode::Char('l') => return self.focus = (self.focus + 1).min(self.panes() - 1),
             KeyCode::Down | KeyCode::Char('j') => return self.move_by(1),
@@ -522,6 +533,7 @@ impl App {
             Tab::Graph => self.on_graph(key.code),
             Tab::People => self.on_people(key.code),
             Tab::Drafts => self.on_drafts(key.code, term),
+            Tab::Discover => self.on_discover(key.code),
         }
     }
 
@@ -563,6 +575,7 @@ impl App {
             (Tab::People, 1) => step(&mut self.person_papers, person_papers, by),
             (Tab::People, _) => step(&mut self.maybe_list, maybe, by),
             (Tab::Drafts, _) => step(&mut self.draft_list, self.drafts.len(), by),
+            (Tab::Discover, _) => step(&mut self.rec_list, self.recs.len(), by),
         }
         self.scroll = 0;
     }
@@ -746,6 +759,27 @@ impl App {
                 let result = suspend(term, || crate::edit(&path));
                 self.report(result, "draft edited; a approves it".into());
                 self.reload();
+            }
+            _ => {}
+        }
+    }
+
+    fn rec(&self) -> Option<&Recommendation> {
+        self.rec_list.selected().and_then(|i| self.recs.get(i))
+    }
+
+    fn on_discover(&mut self, code: KeyCode) {
+        let Some(r) = self.rec().cloned() else { return };
+        match code {
+            KeyCode::Char('a') | KeyCode::Enter => self.add(move |lib| lib.add_recommended(&r.key)),
+            KeyCode::Char('d') | KeyCode::Char('x') => {
+                let result = self.lib.dismiss(&r.key);
+                self.report(result, format!("dismissed {}", r.title));
+                self.reload();
+            }
+            KeyCode::Char('o') => {
+                let result = crate::open(std::path::Path::new(&r.url));
+                self.report(result, format!("opening {}", r.url));
             }
             _ => {}
         }
@@ -963,6 +997,7 @@ impl App {
             Tab::Graph => self.draw_graph(f, body),
             Tab::People => self.draw_people(f, body),
             Tab::Drafts => self.draw_drafts(f, body),
+            Tab::Discover => self.draw_discover(f, body),
         }
         self.draw_selected(f, selected);
         f.render_widget(Paragraph::new(self.hints()), help);
@@ -1006,10 +1041,14 @@ impl App {
                     Span::raw("Drafts "),
                     Span::styled(self.drafts.len().to_string(), Style::new().fg(th.warning)),
                 ]),
+                "Discover" if !self.recs.is_empty() => Line::from(vec![
+                    Span::raw("Discover "),
+                    Span::styled(self.recs.len().to_string(), Style::new().fg(th.accent)),
+                ]),
                 t => Line::from(t),
             })
             .collect();
-        let at = [Tab::Library, Tab::Graph, Tab::People, Tab::Drafts].iter().position(|t| *t == self.tab).unwrap_or(0);
+        let at = TAB_ORDER.iter().position(|t| *t == self.tab).unwrap_or(0);
         f.render_widget(
             Tabs::new(titles)
                 .select(at)
@@ -1342,6 +1381,77 @@ impl App {
         f.render_widget(view.block(self.pane("Proposal".into(), false)), right);
     }
 
+    /// Recommendations, best first, and the selected one: who, where, why and how it starts.
+    fn draw_discover(&mut self, f: &mut Frame, area: Rect) {
+        let th = self.theme.clone();
+        let [left, right] = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(area);
+        let items: Vec<ListItem> = self
+            .recs
+            .iter()
+            .map(|r| {
+                let score = r.score.map_or("    ".into(), |s| format!("{:>3}%", (s * 100.0).round() as i32));
+                ListItem::new(Line::from(vec![
+                    Span::styled(score, Style::new().fg(th.accent)),
+                    Span::raw(" "),
+                    Span::styled(r.title.clone(), Style::new().fg(th.title)),
+                ]))
+            })
+            .collect();
+        let list = List::new(items)
+            .block(self.pane(format!("Recommended ({})", self.recs.len()), true))
+            .highlight_style(self.highlight());
+        f.render_stateful_widget(list, left, &mut self.rec_list);
+
+        let muted = |s: String| Line::from(Span::styled(s, Style::new().fg(th.muted)));
+        let mut lines = vec![];
+        match self.rec() {
+            None => {
+                lines.push(muted("No recommendations.".into()));
+                lines.push(Line::default());
+                lines.extend(text_lines(
+                    "Save Google Scholar's alert emails as .eml files into a folder `carrel consume` watches \
+                     (a mail filter can do that), or read them with `carrel recommended import <folder>`. Their \
+                     papers wait here until you add or dismiss them.",
+                ));
+            }
+            Some(r) => {
+                lines.push(Line::from(r.title.clone().bold()));
+                lines.push(Line::from(r.authors.join(", ")));
+                let venue: Vec<String> =
+                    [r.venue.clone(), r.year.map(|y| y.to_string())].into_iter().flatten().collect();
+                if !venue.is_empty() {
+                    lines.push(Line::from(Span::styled(venue.join(", "), Style::new().italic())));
+                }
+                lines.push(Line::default());
+                let mut why = vec![];
+                if let Some(s) = r.score {
+                    why.push(format!("{:.0}% alike to the library", s * 100.0));
+                }
+                let times = match r.dates.len() {
+                    1 => format!("recommended {}", r.dates[0]),
+                    n => format!("recommended {n}× (last {})", r.dates.last().cloned().unwrap_or_default()),
+                };
+                why.push(times);
+                if r.pdf {
+                    why.push("links a PDF".into());
+                }
+                lines.push(Line::from(Span::styled(why.join(" · "), Style::new().fg(th.accent))));
+                lines.push(muted(r.alerts.join(", ")));
+                lines.push(Line::default());
+                lines.extend(text_lines(&r.snippet));
+                lines.push(Line::default());
+                lines.push(muted(r.url.clone()));
+                if let Some(id) =
+                    r.doi.as_ref().map(|d| format!("DOI {d}")).or(r.arxiv.as_ref().map(|a| format!("arXiv {a}")))
+                {
+                    lines.push(muted(id));
+                }
+            }
+        }
+        let view = Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((self.scroll, 0));
+        f.render_widget(view.block(self.pane("Recommendation".into(), false)), right);
+    }
+
     fn draw_selected(&self, f: &mut Frame, area: Rect) {
         let th = &self.theme;
         let dim = |s: String| Span::styled(s, Style::new().fg(th.muted));
@@ -1355,6 +1465,10 @@ impl App {
             },
             Tab::Drafts => match self.draft() {
                 Some(d) => Line::from(Span::raw(describe(d)).bold()),
+                None => Line::default(),
+            },
+            Tab::Discover => match self.rec() {
+                Some(r) => Line::from(vec![Span::raw(r.title.clone()).bold(), sep(), dim(r.url.clone())]),
                 None => Line::default(),
             },
             _ => match self.selected() {
@@ -1433,6 +1547,15 @@ impl App {
                 ("a", "approve"),
                 ("r", "reject"),
                 ("e", "edit"),
+                ("J/K", "scroll"),
+                ("q", "quit"),
+            ],
+            (_, Tab::Discover) => &[
+                ("Tab/[]", "tabs"),
+                ("jk", "move"),
+                ("a", "add to the library"),
+                ("d", "dismiss"),
+                ("o", "open its page"),
                 ("J/K", "scroll"),
                 ("q", "quit"),
             ],

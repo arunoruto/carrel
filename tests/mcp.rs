@@ -130,6 +130,7 @@ fn tools() {
             "propose",
             "propose_people",
             "read_paper",
+            "recommended",
             "related",
             "search",
             "suggest",
@@ -169,6 +170,7 @@ fn tools() {
     let refs = ai.json("related", json!({"id": "vaswani2017attention"}));
     assert_eq!((refs[0]["source"].clone(), refs[0]["in_library"].clone()), (json!("ads"), json!("ho2020denoising")));
     assert_eq!(ai.json("suggest", json!({})), json!([]), "everything it cites is in the library");
+    assert_eq!(ai.json("recommended", json!({})), json!([]));
     assert!(ai.error("related", json!({"id": "ho2020denoising"})).contains("no source has its references"));
     ai.text("propose", json!({"id": "ho2020denoising", "field": "references", "content": "[{\"title\": \"Gone\"}]"}));
     assert_eq!(ai.json("suggest", json!({})), json!([]), "a draft counts only once approved");

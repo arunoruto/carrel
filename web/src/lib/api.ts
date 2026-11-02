@@ -52,6 +52,25 @@ export interface Reference {
   cited_by?: string[];
 }
 
+/** A paper recommended by an alert email (Google Scholar), waiting to be added or dismissed. */
+export interface Recommendation {
+  key: string;
+  title: string;
+  authors: string[];
+  venue?: string;
+  year?: number;
+  snippet: string;
+  url: string;
+  pdf?: boolean;
+  doi?: string;
+  arxiv?: string;
+  bibcode?: string;
+  dates: string[];
+  alerts: string[];
+  score?: number;
+  dismissed?: boolean;
+}
+
 export interface Info {
   version: string;
   library: string;
@@ -208,6 +227,9 @@ export const api = {
   drafts: () => call<Draft[]>('GET', 'drafts'),
   projects: () => call<Project[]>('GET', 'projects'),
   suggestions: (project?: string) => call<Reference[]>('GET', `suggestions${q({ project })}`),
+  recommended: () => call<Recommendation[]>('GET', 'recommended'),
+  addRecommended: (key: string) => call<Added>('POST', `recommended/${encodeURIComponent(key)}/add`),
+  dismiss: (key: string) => call<{}>('POST', `recommended/${encodeURIComponent(key)}/dismiss`),
   inbox: () => call<Inbox>('GET', 'inbox'),
   consume: (path: string) => call<Added>('POST', 'inbox/add', JSON.stringify({ path })),
   skip: (path: string) => call<{}>('POST', 'inbox/skip', JSON.stringify({ path })),

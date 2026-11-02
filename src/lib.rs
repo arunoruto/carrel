@@ -30,6 +30,7 @@ mod index;
 mod jabref;
 pub mod notify;
 mod projects;
+pub mod recommended;
 pub mod refs;
 pub mod remote;
 mod update;
@@ -391,7 +392,7 @@ impl Library {
     fn folders(&self) -> Vec<String> {
         let entries = fs::read_dir(&self.root).into_iter().flatten().flatten().filter(|e| e.path().is_dir());
         let names = entries.map(|e| e.file_name().to_string_lossy().into_owned());
-        let reserved = [projects::DIR, authors::DIR];
+        let reserved = [projects::DIR, authors::DIR, recommended::DIR];
         let mut names: Vec<String> =
             names.filter(|name| !name.starts_with('.') && !reserved.contains(&name.as_str())).collect();
         names.sort();
@@ -985,7 +986,12 @@ pub fn chunk(text: &str, offset: usize, length: usize) -> String {
 
 fn valid_id(id: &str) -> bool {
     let chars = id.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:".contains(c));
-    chars && !id.is_empty() && !id.starts_with(['.', '-']) && id != projects::DIR && id != authors::DIR
+    chars
+        && !id.is_empty()
+        && !id.starts_with(['.', '-'])
+        && id != projects::DIR
+        && id != authors::DIR
+        && id != recommended::DIR
 }
 
 /// The folder for a paper's supplementary material.

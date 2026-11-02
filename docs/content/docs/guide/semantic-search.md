@@ -1,6 +1,6 @@
 ---
 title: "Semantic search"
-weight: 6
+weight: 7
 aliases: ["/semantic-search.html"]
 ---
 

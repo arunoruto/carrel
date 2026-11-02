@@ -1,6 +1,6 @@
 ---
 title: "Clients and servers"
-weight: 12
+weight: 13
 aliases: ["/architecture.html"]
 ---
 

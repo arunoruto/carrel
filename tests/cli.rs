@@ -626,6 +626,19 @@ fn web_ui() {
     assert_eq!(status, 200, "{paper}");
     assert_eq!(json(&paper)["summary"], "An AI's summary.");
 
+    // Recommendations from alert emails wait until dismissed (or added).
+    c.tmp.write(
+        "lib/recommended/glass-beads.json",
+        r#"{"key": "glass-beads", "title": "Glass Beads", "authors": ["G Liu"], "url": "https://example.org/a", "dates": ["2026-10-24"]}"#,
+    );
+    let recommended = json(&api("GET", "/api/recommended", b"").1);
+    assert_eq!(recommended[0]["title"], "Glass Beads");
+    assert_eq!(api("POST", "/api/recommended/glass-beads/dismiss", b"").0, 200);
+    assert_eq!(api("GET", "/api/recommended", b"").1, "[]");
+    assert_eq!(json(&api("GET", "/api/recommended?all=1", b"").1)[0]["dismissed"], true);
+    assert_eq!(api("POST", "/api/recommended/..%2Fx/dismiss", b"").0, 400);
+    assert_eq!(api("POST", "/api/recommended/missing/add", b"").0, 400);
+
     // Files only from the paper's own folders.
     c.tmp.write(&format!("lib/{id}/figures/page-0001-01.png"), "png");
     let (status, head, _) =

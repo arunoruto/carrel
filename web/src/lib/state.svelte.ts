@@ -6,6 +6,8 @@ class App {
   info = $state<Info | null>(null);
   projects = $state<Project[]>([]);
   inbox = $state(0);
+  /** Papers recommended by alert emails, waiting in Discover. */
+  recommended = $state(0);
   total = $state(0);
   /** Every paper by id, for views that only get ids (people, trees, the map). */
   papers = $state<Record<string, PaperSummary>>({});
@@ -27,6 +29,10 @@ class App {
         .inbox()
         .then((inbox) => (this.inbox = inbox.files.filter((f) => !f.skipped).length))
         .catch(() => (this.inbox = 0));
+      api
+        .recommended()
+        .then((r) => (this.recommended = r.length))
+        .catch(() => (this.recommended = 0));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) this.loggedOut = true;
       else toasts.error(e, 'Cannot reach carrel');

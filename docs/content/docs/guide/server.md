@@ -1,6 +1,6 @@
 ---
 title: "Running a server"
-weight: 11
+weight: 12
 aliases: ["/server.html"]
 ---
 

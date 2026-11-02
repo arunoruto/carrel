@@ -1,6 +1,6 @@
 ---
 title: "The citation graph"
-weight: 4
+weight: 5
 aliases: ["/citations.html"]
 ---
 

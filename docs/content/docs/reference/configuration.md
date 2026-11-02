@@ -19,7 +19,7 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 # [remote]   where the library is shared, see Sharing a library
 # [serve]    carrel serve's settings, see Running a server
 # [embeddings]  where Ollama is, see Semantic search
-# [consume]  folders where new papers turn up, see Adding papers
+# [consume]  folders where new papers and alert emails turn up, see Adding papers and Recommendations
 # [notify]   how carrel tells you what happened, see below
 ```
 

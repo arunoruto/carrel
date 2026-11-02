@@ -1,6 +1,6 @@
 ---
 title: "Working with an AI"
-weight: 5
+weight: 6
 aliases: ["/ai.html"]
 ---
 

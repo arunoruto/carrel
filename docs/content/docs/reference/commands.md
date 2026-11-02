@@ -21,6 +21,7 @@ Run `carrel <command> --help` for every option.
 | `search -s <query>…` | [semantic search](/docs/guide/semantic-search.md): by meaning |
 | `embed [ids…] [--all]` | compute the embeddings for semantic search |
 | `consume [folders…] [--yes] [--again] [--days n]` | move new PDFs from [Downloads](/docs/guide/adding-papers.md#from-your-downloads) into the library |
+| `recommended [import <paths>… \| add <key>… \| dismiss <key>… \| score] [--all] [--json]` | papers [recommended](/docs/guide/recommendations.md) by alert emails (Google Scholar): list, read the emails, add, dismiss |
 | `notify [message]` | try the [notifiers](/docs/reference/configuration.md#notifications) |
 | `show <id> [--json]` | a paper's details |
 | `open <id>` | open its PDF |

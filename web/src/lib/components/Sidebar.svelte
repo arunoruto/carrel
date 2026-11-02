@@ -36,7 +36,7 @@
     { href: '#/', icon: Library, label: 'Library', count: app.total, active: router.path === '/' && !project },
     { href: '#/inbox', icon: Inbox, label: 'Inbox', count: app.inbox, active: router.path === '/inbox', loud: true },
     { href: '#/drafts', icon: FilePen, label: 'Drafts', count: app.info?.drafts ?? 0, active: router.path === '/drafts', loud: true },
-    { href: '#/discover', icon: Compass, label: 'Discover', count: 0, active: router.path === '/discover' },
+    { href: '#/discover', icon: Compass, label: 'Discover', count: app.recommended, active: router.path === '/discover' },
     { href: '#/map', icon: Network, label: 'Map', count: 0, active: router.path === '/map' },
     { href: '#/people', icon: Users, label: 'People', count: 0, active: router.path === '/people' },
     { href: '#/health', icon: HeartPulse, label: 'Health', count: 0, active: router.path === '/health' },

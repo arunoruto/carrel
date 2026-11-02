@@ -21,7 +21,8 @@ keywords before loading the full text with `read_paper`, which returns it in chu
 `get_figure`. When you have read a paper that has no summary or keywords yet, write them with `propose`; \
 they become drafts the user reviews. Use `bibtex` for citations. To find what else to read, `neighbors` \
 shows how a paper connects to the library (citations both ways, shared authors), `suggest` lists the \
-papers the library cites most but doesn't have, and `authors` who wrote what and with whom. Each reference says where it came from; when no source \
+papers the library cites most but doesn't have, `recommended` the ones alert emails (Google Scholar) \
+recommended, and `authors` who wrote what and with whom. Each reference says where it came from; when no source \
 knows a paper's references, read the reference list in its full text and `propose` them as `references`.";
 
 #[derive(Clone)]
@@ -110,6 +111,12 @@ struct PeopleArgs {
 struct SuggestArgs {
     /// Only what this project's papers cite.
     project: Option<String>,
+    /// Maximum number of papers (default 20).
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RecommendedArgs {
     /// Maximum number of papers (default 20).
     limit: Option<usize>,
 }
@@ -347,6 +354,15 @@ impl Server {
             Ok(pretty(json!(found.into_iter().take(a.limit.unwrap_or(20)).collect::<Vec<_>>())))
         });
         reply(found)
+    }
+
+    #[tool(
+        description = "Papers that alert emails (Google Scholar) recommended, not yet in the library, most alike to it first (`score`, 0 to 1, when embeddings are set up). Tell the user which fit their work; they add one with `carrel recommended add <key>`."
+    )]
+    async fn recommended(&self, Parameters(a): Parameters<RecommendedArgs>) -> Result<CallToolResult, ErrorData> {
+        let mut recs = self.lib.recommendations(false);
+        recs.truncate(a.limit.unwrap_or(20));
+        reply(Ok(pretty(json!(recs))))
     }
 
     #[tool(

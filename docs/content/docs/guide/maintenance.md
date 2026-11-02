@@ -1,6 +1,6 @@
 ---
 title: "Keeping the library healthy"
-weight: 9
+weight: 10
 aliases: ["/maintenance.html"]
 ---
 

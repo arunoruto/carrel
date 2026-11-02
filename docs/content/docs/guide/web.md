@@ -1,6 +1,6 @@
 ---
 title: "The web UI"
-weight: 8
+weight: 9
 aliases: ["/web.html"]
 ---
 
@@ -23,7 +23,7 @@ It is for this machine only, like the [TUI](/docs/guide/tui.md): it works on you
 - **Adding**: by DOI, arXiv id, URL or title, or by dropping PDFs anywhere on the page. A paper without a PDF takes one dropped on its page, or downloads it from arXiv.
 - **Inbox**: the new PDFs in your [Downloads](/docs/guide/adding-papers.md#from-your-downloads), as `carrel consume` would offer them, to add or skip.
 - **Drafts**: what an AI proposed, next to what it would change, to approve or reject.
-- **Discover**: the papers your library, or a project, cites most but doesn't have.
+- **Discover**: papers [recommended](/docs/guide/recommendations.md) by alert emails such as Google Scholar's, to add or dismiss, and the papers your library, or a project, cites most but doesn't have.
 - **Map**: the library as a network. Papers are dots, coloured by their project or by year and bigger the more links they have. Choose which links to draw; the choice is remembered, and only citations are on at first:
   - **citations**, blue arrows from the citing paper to the cited one;
   - **authors**, orange, thicker the more authors two papers share;

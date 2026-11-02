@@ -9,6 +9,7 @@ Everything carrel does, one topic per page.
 
 {{< cards >}}
   {{< card link="adding-papers" title="Adding papers" icon="document-add" >}}
+  {{< card link="recommendations" title="Recommendations" icon="light-bulb" >}}
   {{< card link="library" title="The library" icon="folder-open" >}}
   {{< card link="projects" title="Projects and bibliographies" icon="academic-cap" >}}
   {{< card link="citations" title="The citation graph" icon="share" >}}
