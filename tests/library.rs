@@ -750,11 +750,11 @@ impl carrel::remote::Remote for Rigged<'_> {
             false => self.folder.download(path, to),
         }
     }
-    fn upload(&self, path: &str, bytes: Vec<u8>) -> anyhow::Result<String> {
+    fn upload(&self, path: &str, bytes: Vec<u8>, replaces: Option<&str>) -> anyhow::Result<String> {
         if let Some(file) = &self.edit {
             fs::write(file, "edited during the upload").unwrap();
         }
-        self.folder.upload(path, bytes)
+        self.folder.upload(path, bytes, replaces)
     }
     fn delete(&self, path: &str) -> anyhow::Result<()> {
         self.folder.delete(path)

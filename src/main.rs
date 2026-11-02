@@ -965,6 +965,17 @@ fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>, verbos
             }
         }
     }
+    if !report.unshared.is_empty() {
+        println!(
+            "{} changed here but not shared: {} takes changes only from members; make a token on its web UI \
+             and put it in [remote] token",
+            report.unshared.len(),
+            remote.name()
+        );
+    }
+    if !report.restored.is_empty() {
+        println!("{} deleted here, but deleting there needs an admin; downloaded again", report.restored.len());
+    }
     for path in &report.skipped {
         eprintln!("warning: skipped {path:?} on the remote: not a file path inside the library");
     }

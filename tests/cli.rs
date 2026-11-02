@@ -658,6 +658,63 @@ fn logging_in() {
 }
 
 #[test]
+fn syncing_through_a_server() {
+    use std::io::{BufRead, BufReader};
+    let c = Carrel::new("cli-hub");
+    c.tmp.write("srv/lib/a2020/a2020.bib", "@misc{a2020, title = {A}}\n");
+    c.tmp.write("srv/config/carrel/config.toml", "[serve]\ntrusted = [\"127.0.0.1\"]\n");
+    let mut command = c.command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"]);
+    command.env("CARREL_HOME", c.tmp.path("srv/lib")).env("XDG_CONFIG_HOME", c.tmp.path("srv/config"));
+    let mut server = command.env("CARREL_SERVE_TOKEN", "admintok").stdout(Stdio::piped()).spawn().unwrap();
+    let mut log = BufReader::new(server.stdout.take().unwrap()).lines();
+    let serving = log.find_map(|l| l.ok().filter(|l| l.contains("serving"))).unwrap();
+    let addr =
+        serving.split_whitespace().last().unwrap().trim_start_matches("http://").trim_end_matches("/mcp").to_string();
+    let remote = |token: &str| {
+        let token = if token.is_empty() { String::new() } else { format!("token = \"{token}\"\n") };
+        c.tmp.write(
+            "config/carrel/config.toml",
+            format!("[remote]\ntype = \"carrel\"\nurl = \"http://{addr}\"\n{token}"),
+        );
+    };
+    let server_file = |path: &str| std::fs::read_to_string(c.tmp.path(&format!("srv/lib/{path}"))).ok();
+
+    // From a trusted network without a token: reading and adding.
+    remote("");
+    assert!(c.ok(&["sync"]).contains("download 1"), "the server's paper");
+    assert_eq!(read(c.tmp.path("lib/a2020/a2020.bib")), "@misc{a2020, title = {A}}\n");
+    c.tmp.write("lib/b2021/b2021.bib", "@misc{b2021, title = {B}}\n");
+    assert!(c.ok(&["sync"]).contains("upload 1"));
+    assert_eq!(server_file("b2021/b2021.bib").as_deref(), Some("@misc{b2021, title = {B}}\n"));
+    // Changes and deletions stay here, with word why.
+    c.tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {A, edited}}\n");
+    assert!(c.ok(&["sync"]).contains("1 changed here but not shared"));
+    assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A}}\n"));
+    std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
+    assert!(c.ok(&["sync"]).contains("deleting there needs an admin; downloaded again"));
+    assert!(c.tmp.path("lib/b2021/b2021.bib").exists());
+
+    // With an admin's token, both go through.
+    remote("admintok");
+    c.ok(&["sync"]);
+    assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A, edited}}\n"));
+    std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
+    c.ok(&["sync"]);
+    assert!(server_file("b2021/b2021.bib").is_none() && !c.tmp.path("srv/lib/b2021").exists());
+
+    // An upload over a version that is gone is refused; paths stay inside the library and out of .carrel.
+    let admin = "Authorization: Bearer admintok";
+    let put = |path: &str, headers: &[&str]| http(&addr, "PUT", path, &[&[admin][..], headers].concat(), b"new").0;
+    assert_eq!(put("/sync/a2020/a2020.bib", &["If-Match: \"0123\""]), 412);
+    assert_eq!(put("/sync/a2020/a2020.bib", &["If-None-Match: *"]), 412);
+    assert_eq!(http(&addr, "GET", "/sync/..%2Fsecret", &[admin], b"").0, 400);
+    assert_eq!(http(&addr, "GET", "/sync/.carrel/web-token", &[admin], b"").0, 400);
+    assert_eq!(http(&addr, "DELETE", "/sync/a2020/a2020.bib", &[], b"").0, 403, "trusted, but no admin");
+    server.kill().unwrap();
+    server.wait().unwrap();
+}
+
+#[test]
 fn web_ui() {
     use std::io::{BufRead, BufReader};
     let c = Carrel::new("cli-web");

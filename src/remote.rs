@@ -35,6 +35,9 @@ pub enum RemoteConfig {
     },
     /// A folder, e.g. on a network drive or a USB stick.
     Folder { path: String },
+    /// A `carrel serve` holding the library. Without a token, from its trusted networks, you may read and add;
+    /// a member's token (from its web UI) also lets you change, an admin's delete.
+    Carrel { url: String, token: Option<Secret> },
 }
 
 /// Somewhere files can be stored by their path in the library, `a2020/a2020.pdf`.
@@ -44,9 +47,22 @@ pub trait Remote: Sync {
     /// Every file and its version tag (its ETag: for files uploaded in one piece, their MD5).
     fn list(&self) -> Result<BTreeMap<String, String>>;
     fn download(&self, path: &str, to: &Path) -> Result<()>;
-    /// Uploads `bytes` and returns the new version tag.
-    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String>;
+    /// Uploads `bytes` over the version `replaces` (from the listing; `None` for a new file) and returns the new
+    /// version tag. A remote that can tell refuses when the file changed meanwhile.
+    fn upload(&self, path: &str, bytes: Vec<u8>, replaces: Option<&str>) -> Result<String>;
     fn delete(&self, path: &str) -> Result<()>;
+    /// What this remote lets you do, known after [`Remote::list`].
+    fn rights(&self) -> Rights {
+        Rights { edit: true, delete: true }
+    }
+}
+
+/// What a remote lets you do besides reading and adding files.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Rights {
+    /// Change files that are there.
+    pub edit: bool,
+    pub delete: bool,
 }
 
 impl RemoteConfig {
@@ -54,6 +70,11 @@ impl RemoteConfig {
         let env = |var: &str| std::env::var(var).ok().filter(|v| !v.trim().is_empty());
         Ok(match self {
             Self::Folder { path } => Box::new(Folder(crate::expand_home(path))),
+            Self::Carrel { url, token } => Box::new(Hub {
+                url: url.trim_end_matches('/').into(),
+                token: token.as_ref().map(Secret::read).transpose()?,
+                rights: Mutex::new(Rights::default()),
+            }),
             Self::S3 { endpoint, region, bucket, prefix, access_key, secret_key } => {
                 let endpoint =
                     env("AWS_ENDPOINT_URL").or(endpoint.clone()).context("the S3 remote needs an endpoint")?;
@@ -138,7 +159,7 @@ impl Remote for S3 {
         Ok(())
     }
 
-    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String> {
+    fn upload(&self, path: &str, bytes: Vec<u8>, _replaces: Option<&str>) -> Result<String> {
         let key = format!("{}{path}", self.prefix);
         let url = self.bucket.put_object(Some(&self.credentials), &key).sign(SIGNED_FOR);
         // ponytail: one PUT per file (S3 allows 5 GB); multipart when someone shares bigger files.
@@ -184,7 +205,7 @@ impl Remote for Folder {
         Ok(())
     }
 
-    fn upload(&self, path: &str, bytes: Vec<u8>) -> Result<String> {
+    fn upload(&self, path: &str, bytes: Vec<u8>, _replaces: Option<&str>) -> Result<String> {
         let to = self.0.join(path);
         fs::create_dir_all(to.parent().unwrap())?;
         fs::write(&to, &bytes)?;
@@ -197,6 +218,128 @@ impl Remote for Folder {
         remove_empty_parents(&file, &self.0);
         Ok(())
     }
+}
+
+/// A `carrel serve`'s library, through its `/sync` API.
+pub struct Hub {
+    url: String,
+    token: Option<String>,
+    rights: Mutex<Rights>,
+}
+
+impl Hub {
+    fn request(&self, method: &str, path: Option<&str>) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+        let url = match path {
+            Some(path) => format!("{}/sync/{}", self.url, encode_path(path)),
+            None => format!("{}/sync", self.url),
+        };
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION")))
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut request = match method {
+            "DELETE" => agent.delete(&url),
+            _ => agent.get(&url),
+        };
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", &format!("Bearer {token}"));
+        }
+        request
+    }
+
+    fn checked(&self, mut response: ureq::http::Response<ureq::Body>) -> Result<ureq::http::Response<ureq::Body>> {
+        let status = response.status().as_u16();
+        if status < 300 {
+            return Ok(response);
+        }
+        let reply: serde_json::Value = response.body_mut().read_json().unwrap_or_default();
+        let why = reply["error"].as_str().unwrap_or_default().to_string();
+        bail!(match status {
+            401 => format!("{} wants a token: put one from its web UI's Tokens page in [remote] token", self.url),
+            412 => "changed on the server meanwhile; the next sync sees it".into(),
+            _ => format!("{} answered {status}: {why}", self.url),
+        })
+    }
+}
+
+impl Remote for Hub {
+    fn name(&self) -> String {
+        self.url.clone()
+    }
+
+    fn list(&self) -> Result<BTreeMap<String, String>> {
+        let response = self.request("GET", None).call().with_context(|| format!("cannot reach {}", self.url))?;
+        let listing: serde_json::Value = self.checked(response)?.body_mut().read_json()?;
+        *self.rights.lock().unwrap() = Rights {
+            edit: listing["can"]["edit"].as_bool().unwrap_or(false),
+            delete: listing["can"]["delete"].as_bool().unwrap_or(false),
+        };
+        serde_json::from_value(listing["files"].clone()).context("not a carrel server's listing")
+    }
+
+    fn download(&self, path: &str, to: &Path) -> Result<()> {
+        let response = self.request("GET", Some(path)).call()?;
+        let mut body = self.checked(response)?.into_body();
+        std::io::copy(&mut body.as_reader(), &mut fs::File::create(to)?)?;
+        Ok(())
+    }
+
+    fn upload(&self, path: &str, bytes: Vec<u8>, replaces: Option<&str>) -> Result<String> {
+        let url = format!("{}/sync/{}", self.url, encode_path(path));
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION")))
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut request = agent.put(&url);
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", &format!("Bearer {token}"));
+        }
+        request = match replaces {
+            Some(etag) => request.header("If-Match", &format!("\"{etag}\"")),
+            None => request.header("If-None-Match", "*"),
+        };
+        let response = self.checked(request.send(&bytes[..])?)?;
+        let etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).unwrap_or_default();
+        Ok(etag.trim_matches('"').to_string())
+    }
+
+    fn delete(&self, path: &str) -> Result<()> {
+        self.checked(self.request("DELETE", Some(path)).call()?)?;
+        Ok(())
+    }
+
+    fn rights(&self) -> Rights {
+        *self.rights.lock().unwrap()
+    }
+}
+
+/// A library path for a URL: each segment percent-encoded, the `/` between them kept.
+fn encode_path(path: &str) -> String {
+    let segment = |s: &str| -> String {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+                _ => format!("%{b:02X}"),
+            })
+            .collect()
+    };
+    path.split('/').map(segment).collect::<Vec<_>>().join("/")
+}
+
+/// Whether a path names a file inside a library that sync handles: no `..`, no empty or hidden parts.
+pub fn plain(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\\')
+        && !path.split('/').any(|c| matches!(c, "" | "." | "..") || c.starts_with('.'))
+}
+
+/// The library's files as `/`-separated paths, skipping hidden files and folders.
+pub fn files(root: &Path) -> Result<Vec<String>> {
+    local_files(root)
 }
 
 /// The library's files as `/`-separated paths, skipping hidden files and folders.
@@ -226,11 +369,11 @@ fn md5_file(path: &Path) -> Result<String> {
     Ok(md5_hex(&fs::read(path)?))
 }
 
-fn md5_hex(bytes: &[u8]) -> String {
+pub fn md5_hex(bytes: &[u8]) -> String {
     Md5::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn remove_empty_parents(file: &Path, root: &Path) {
+pub fn remove_empty_parents(file: &Path, root: &Path) {
     let mut dir = file.parent();
     while let Some(d) = dir.filter(|d| *d != root && d.starts_with(root)) {
         if fs::remove_dir(d).is_err() {
@@ -321,6 +464,10 @@ pub struct Report {
     pub settled: Vec<String>,
     /// Where the local versions of those went, when the remote's were kept.
     pub conflicts: Option<PathBuf>,
+    /// Changed here, but the remote takes no changes from you; they stay here.
+    pub unshared: Vec<String>,
+    /// Deleted here, but the remote lets you delete nothing; downloaded again.
+    pub restored: Vec<String>,
 }
 
 impl Report {
@@ -407,6 +554,7 @@ impl Library {
             );
         }
 
+        let rights = remote.rights();
         let paths: BTreeSet<String> =
             local.keys().chain(remote_files.keys()).chain(state.files.keys()).cloned().collect();
         let mut plan = vec![];
@@ -417,6 +565,11 @@ impl Library {
                 outcome.settled.push(path.clone());
             }
             match decide(l, r, state.files.get(&path), keep) {
+                Some(Action::Upload) if r.is_some() && !rights.edit => outcome.unshared.push(path),
+                Some(Action::DeleteRemote) if !rights.delete => {
+                    outcome.restored.push(path.clone());
+                    plan.push((path, Action::Download));
+                }
                 Some(action) => plan.push((path, action)),
                 // In sync: remember both sides so the next sync can tell who changed what.
                 None => match (local.get(&path), r) {
@@ -502,7 +655,7 @@ impl Library {
                 let meta = fs::metadata(&file)?;
                 let bytes = fs::read(&file)?;
                 let md5 = md5_hex(&bytes);
-                let etag = remote.upload(path, bytes)?;
+                let etag = remote.upload(path, bytes, etag.map(String::as_str))?;
                 return Ok(Some(Synced { md5, etag, size: meta.len(), mtime: mtime(&meta) }));
             }
             Action::Download => {

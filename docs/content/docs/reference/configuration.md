@@ -33,7 +33,7 @@ key = "{{ author | lower }}{{ year }}{{ word | lower }}"
 
 `library` is the library folder. The environment variable `CARREL_HOME` overrides it. The default is `carrel` in your Documents folder.
 
-`[remote]` is where `carrel sync` shares it: an S3 bucket or a folder ([Sharing a library](/docs/guide/sharing.md)).
+`[remote]` is where `carrel sync` shares it: an S3 bucket, a folder, or a [carrel server](/docs/guide/sharing.md#through-a-carrel-server) ([Sharing a library](/docs/guide/sharing.md)).
 
 ## Citation keys
 

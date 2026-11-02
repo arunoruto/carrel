@@ -8,6 +8,7 @@ aliases: ["/server.html"]
 
 - it serves the [MCP tools](/docs/reference/mcp-tools.md) over HTTP at `/mcp`, so an AI anywhere on the network can use the library;
 - it serves the [web UI](/docs/guide/web.md) at its address, so the group can read and add papers in a browser without installing anything;
+- members can [sync through it](/docs/guide/sharing.md#through-a-carrel-server) instead of holding the bucket's keys themselves, with what they may change following their login;
 - every few minutes it [syncs](/docs/guide/sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs, looks up the references of new papers and, with `[embeddings]` in its config, computes their [embeddings](/docs/guide/semantic-search.md). Everyone else gets the results with their next `carrel sync`.
 - with `[consume]` and `auto = true` in its config, it adds the papers that turn up in a folder (a shared drop folder, say) and logs what it added;
 - with [notifiers](/docs/reference/configuration.md#notifications) in its config, it tells you about its own trouble, such as Ollama going away. Papers others drop in don't land in your inbox; only a `carrel consume` on your own machine tells you about your Downloads.

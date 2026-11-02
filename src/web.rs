@@ -93,7 +93,7 @@ pub fn token(path: &Path) -> Result<String> {
 
 pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: String) -> Result<()> {
     let port = listener.local_addr()?.port();
-    let web = Arc::new(Web { lib, token, port, local: true, auth: None, site: None });
+    let web = Arc::new(Web { lib, token, port, local: true, auth: None, site: None, hashes: Default::default() });
     loop {
         let (stream, _) = listener.accept().await?;
         let web = web.clone();
@@ -118,13 +118,18 @@ pub struct Web {
     auth: Option<Arc<crate::auth::Auth>>,
     /// The server's name as browsers reach it, the only one it answers to when known.
     site: Option<String>,
+    /// MD5s of the library's files for `/sync`.
+    hashes: Hashes,
 }
+
+/// MD5s by path, with the size and modification time they were taken at.
+type Hashes = Arc<std::sync::Mutex<HashMap<String, (u64, u128, String)>>>;
 
 impl Web {
     /// For `carrel serve`, which hands it every request but MCP's. `url` is where browsers reach it.
     pub fn server(lib: Library, token: String, port: u16, auth: Arc<crate::auth::Auth>, url: Option<&str>) -> Self {
         let site = url.map(|u| u.split_once("://").map_or(u, |(_, rest)| rest).trim_end_matches('/').to_string());
-        Self { lib, token, port, local: false, auth: Some(auth), site }
+        Self { lib, token, port, local: false, auth: Some(auth), site, hashes: Default::default() }
     }
 
     /// Whether a bearer token is a member's, for MCP.
@@ -202,6 +207,107 @@ impl Web {
         format!("carrel-{}", self.port)
     }
 
+    /// The library as a remote for `carrel sync` (`type = "carrel"`): `GET /sync` lists the files with their MD5s
+    /// and what the caller may do; `GET`, `PUT` and `DELETE /sync/<path>` move one. Adding a file needs the
+    /// right to add, overwriting one to edit, deleting one an admin. `If-Match` / `If-None-Match: *` say which
+    /// version an upload replaces, so two clients can't overwrite each other unseen.
+    async fn sync_call(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
+        use crate::auth::{Right, Role};
+        let role = self.who(&request, trusted).role;
+        if role == Role::None {
+            return json_status(StatusCode::UNAUTHORIZED, json!({"error": "send a token"}));
+        }
+        let method = request.method().clone();
+        let path = request.uri().path().strip_prefix("/sync/").map(decode);
+        let header =
+            |name| request.headers().get(name).and_then(|v| v.to_str().ok()).map(|v| v.trim_matches('"').to_string());
+        let (if_match, if_none) = (header(header::IF_MATCH), header(header::IF_NONE_MATCH).is_some_and(|v| v == "*"));
+        let body = match Limited::new(request.into_body(), MAX_BODY).collect().await {
+            Ok(body) => body.to_bytes(),
+            Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),
+        };
+        let (root, hashes) = (self.lib.root.clone(), self.hashes.clone());
+        let md5 = move |path: &str| -> Result<Option<String>> {
+            let file = root.join(path);
+            let Ok(meta) = fs::metadata(&file) else { return Ok(None) };
+            let stamp = meta.modified()?.duration_since(UNIX_EPOCH)?.as_nanos();
+            if let Some((size, at, md5)) = hashes.lock().unwrap().get(path)
+                && (*size, *at) == (meta.len(), stamp)
+            {
+                return Ok(Some(md5.clone()));
+            }
+            let md5 = carrel::remote::md5_hex(&fs::read(&file)?);
+            hashes.lock().unwrap().insert(path.into(), (meta.len(), stamp, md5.clone()));
+            Ok(Some(md5))
+        };
+        let root = self.lib.root.clone();
+        let reply = tokio::task::spawn_blocking(move || -> Result<Response<Body>> {
+            let refused = |status, why: &str| Ok(json_status(status, json!({"error": why})));
+            let Some(path) = path else {
+                let mut files = serde_json::Map::new();
+                for path in carrel::remote::files(&root)? {
+                    if let Some(md5) = md5(&path)? {
+                        files.insert(path, md5.into());
+                    }
+                }
+                let can = json!({"edit": role.can(Right::Edit), "delete": role.can(Right::Admin)});
+                return Ok(json_status(StatusCode::OK, json!({"files": files, "can": can})));
+            };
+            if !carrel::remote::plain(&path) {
+                return refused(StatusCode::BAD_REQUEST, "not a path in the library");
+            }
+            let file = root.join(&path);
+            let current = md5(&path)?;
+            match method {
+                Method::GET if current.is_some() => Ok(self::file(&file)),
+                Method::GET => refused(StatusCode::NOT_FOUND, "no such file"),
+                Method::PUT => {
+                    let right = if current.is_some() { Right::Edit } else { Right::Add };
+                    if !role.can(right) {
+                        return refused(StatusCode::FORBIDDEN, "changing files needs a member's token");
+                    }
+                    let sent = carrel::remote::md5_hex(&body);
+                    // Whoever got there first wins; the same bytes again are no change at all.
+                    let stale = match (&current, &if_match) {
+                        (Some(have), Some(expected)) => have != expected,
+                        (Some(_), None) => if_none,
+                        (None, Some(_)) => true,
+                        (None, None) => false,
+                    };
+                    if stale && current.as_ref() != Some(&sent) {
+                        return refused(StatusCode::PRECONDITION_FAILED, "changed on the server meanwhile");
+                    }
+                    let parts = root.join(".carrel").join("parts");
+                    fs::create_dir_all(&parts)?;
+                    let part = parts.join(format!("upload-{}", crate::auth::random(8)));
+                    fs::write(&part, &body)?;
+                    fs::create_dir_all(file.parent().unwrap())?;
+                    fs::rename(&part, &file)?;
+                    let mut response = json_status(StatusCode::OK, json!({}));
+                    response.headers_mut().insert(header::ETAG, format!("\"{sent}\"").parse()?);
+                    Ok(response)
+                }
+                Method::DELETE => {
+                    if !role.can(Right::Admin) {
+                        return refused(StatusCode::FORBIDDEN, "deleting needs an admin");
+                    }
+                    if current.is_some() {
+                        fs::remove_file(&file)?;
+                        carrel::remote::remove_empty_parents(&file, &root);
+                    }
+                    Ok(json_status(StatusCode::OK, json!({})))
+                }
+                _ => refused(StatusCode::METHOD_NOT_ALLOWED, "GET, PUT or DELETE"),
+            }
+        })
+        .await;
+        match reply {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{e:#}")})),
+            Err(e) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()})),
+        }
+    }
+
     /// `trusted`: from one of a server's trusted networks.
     pub async fn handle(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
         let host = request.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default();
@@ -220,6 +326,9 @@ impl Web {
         let query = query(request.uri().query().unwrap_or_default());
         if path.starts_with("/auth/") && self.auth.as_ref().is_some_and(|a| a.login()) {
             return self.auth_page(&request, &query).await;
+        }
+        if !self.local && (path == "/sync" || path.starts_with("/sync/")) {
+            return self.sync_call(request, trusted).await;
         }
         // The link `carrel web` prints: trade the token for a cookie, and drop it from the address bar.
         if let Some(sent) = query.get("token").filter(|_| self.link_works()) {

@@ -53,11 +53,30 @@ A few things carrel refuses:
 - names on the remote that aren't plain paths inside the library (`../x`, `/x`, `a//b`, folder markers like `papers/` that some S3 tools create): skipped, with a warning. Hidden ones (`.carrel/...`) are skipped quietly, as hidden files here are;
 - two syncs of one library at once (say `carrel sync` while `carrel serve` syncs): the second stops with "another sync is running".
 
+## Through a carrel server
+
+A group with a [server](/docs/guide/server.md) can sync through it instead of the bucket: only the server then holds the bucket's keys, and what each member may do follows their login.
+
+```toml
+[remote]
+type = "carrel"
+url = "https://papers.example.org"
+token = { file = "~/.config/carrel/token" }   # from the server's web UI, Tokens page
+```
+
+| with | `carrel sync` may |
+|---|---|
+| no token, from one of the server's trusted networks | download, and upload new files: new papers, new notes, new figures |
+| a member's token (group `carrel`) | also upload changes to files that are there |
+| an admin's token (group `admin`) | also delete |
+
+What a sync may not do stays on your machine, and it says so: a change that isn't shared yet is kept here, and a file deleted here that the server keeps is downloaded again. Each upload names the version it replaces; when someone else changed that file in between, the server refuses it, and the next sync sees a conflict as usual instead of one of you losing their edit unseen.
+
 ## Sharing with your group
 
 A shared library is one bucket that everyone syncs with. carrel has no accounts: whoever holds a key to the bucket can read it, and with write access change and delete anything in it.
 
-**A key per person.** Give each member a key of their own rather than passing one around, so one can be taken back without changing everyone's config. With [Garage](https://garagehq.deuxfleurs.fr):
+**A key per person.** With a [carrel server](#through-a-carrel-server), members sync through it with their own tokens and need no bucket keys at all. Syncing with the bucket directly, give each member a key of their own rather than passing one around, so one can be taken back without changing everyone's config. With [Garage](https://garagehq.deuxfleurs.fr):
 
 ```sh
 garage key create carrel-alice
