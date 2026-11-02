@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/arunoruto/carrel/compare/v0.3.0...v0.4.0) (2026-11-02)
+
+
+### Features
+
+* Homebrew tap and a full setup guide ([03b5b29](https://github.com/arunoruto/carrel/commit/03b5b290567f479c8d61ba2fdde591c87f1a391e))
+
+
+### Bug Fixes
+
+* say when Docling failed and PyMuPDF took over ([3da79f3](https://github.com/arunoruto/carrel/commit/3da79f32ebc505700aa799694eab1317896ef9bb))
+
 ## [0.3.0](https://github.com/arunoruto/carrel/compare/v0.2.0...v0.3.0) (2026-11-02)
 
 
