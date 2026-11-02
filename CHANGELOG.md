@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/arunoruto/carrel/compare/v0.4.0...v0.5.0) (2026-11-02)
+
+
+### Features
+
+* sync by itself every 10 minutes, keeping the shared side of conflicts ([fe660da](https://github.com/arunoruto/carrel/commit/fe660da109967e756eb041d04f5a730a87a3bae7))
+
 ## [0.4.0](https://github.com/arunoruto/carrel/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
