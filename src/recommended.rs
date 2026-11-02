@@ -71,6 +71,11 @@ impl Library {
             .filter_map(|e| serde_json::from_str(&fs::read_to_string(e.path()).ok()?).ok())
             .filter(|r: &Recommendation| all || !r.dismissed)
             .collect();
+        // Added some other way (its PDF, its DOI): it's in the library now, not a recommendation.
+        if !found.is_empty() {
+            let library: Vec<String> = self.papers().0.iter().map(|p| fetch::title_key(&p.bib.title())).collect();
+            found.retain(|r| !library.contains(&fetch::title_key(&r.title)));
+        }
         sort(&mut found);
         found
     }
@@ -622,6 +627,10 @@ mod tests {
         assert_eq!(lib.recommendations(true).len(), 1);
         assert!(lib.import_alerts(&[tmp.join("mail")]).unwrap().new.is_empty(), "dismissed stays dismissed");
         assert!(lib.recommendation("../x").is_err());
+
+        fs::create_dir_all(lib.root.join("b2025")).unwrap();
+        fs::write(lib.root.join("b2025/b2025.bib"), "@misc{b2025, title = {B-fields \\& {S}tars}}").unwrap();
+        assert!(lib.recommendations(true).is_empty(), "added some other way");
         fs::remove_dir_all(tmp).unwrap();
     }
 }
