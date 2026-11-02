@@ -30,6 +30,8 @@ mod index;
 mod jabref;
 pub mod notify;
 mod projects;
+/// The folder of the library that holds the projects.
+pub const PROJECTS: &str = projects::DIR;
 pub mod recommended;
 pub mod refs;
 pub mod remote;

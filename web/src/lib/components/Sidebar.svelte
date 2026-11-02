@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleUser, Compass, FilePen, Folder, HeartPulse, Inbox, KeyRound, Library, LogIn, LogOut, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
+  import { CircleUser, Compass, FilePen, Folder, HeartPulse, History, Inbox, KeyRound, Library, LogIn, LogOut, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
   import { api } from '../api';
   import { href, router } from '../router.svelte';
   import { app } from '../state.svelte';
@@ -46,6 +46,10 @@
     { href: '#/map', icon: Network, label: 'Map', count: 0, active: router.path === '/map' },
     { href: '#/people', icon: Users, label: 'People', count: 0, active: router.path === '/people' },
     { href: '#/health', icon: HeartPulse, label: 'Health', count: 0, active: router.path === '/health' },
+    // A server's changes and deletion requests, for those who may change the library.
+    ...(app.me?.server && app.can.edit
+      ? [{ href: '#/activity', icon: History, label: 'Activity', count: app.pending, active: router.path === '/activity', loud: true }]
+      : []),
   ]);
 </script>
 

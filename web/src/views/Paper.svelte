@@ -125,9 +125,18 @@
     act('project', () => api.toProject(id, name, true), `In ${name}`);
   }
 
+  // On a server deleting is only asked for, and an admin decides; locally it deletes.
+  const asks = $derived(!!app.me?.server);
+
   async function remove() {
+    removing = false;
     try {
-      await api.remove(id);
+      const { asked } = await api.remove(id);
+      if (asked) {
+        toasts.show('success', 'Asked to delete; an admin decides');
+        app.changed();
+        return;
+      }
       toasts.show('success', `Deleted ${id}`);
       app.changed();
       go('/');
@@ -257,7 +266,7 @@
               {#if p.pdf}
                 <Button variant="ghost" size="icon" busy={busy === 'extract'} disabled={locked} onclick={() => act('extract', () => api.extract(id), 'Text and figures extracted')} title={why ?? 'Extract the text and figures again'}><ScanText class="size-4" /></Button>
               {/if}
-              {#if app.can.admin}<Button variant="ghost" size="icon" onclick={() => (removing = true)} title="Delete"><Trash2 class="size-4 text-failed" /></Button>{/if}
+              {#if asks ? app.can.edit : app.can.admin}<Button variant="ghost" size="icon" onclick={() => (removing = true)} title={asks ? 'Ask to delete' : 'Delete'}><Trash2 class="size-4 text-failed" /></Button>{/if}
             </div>
           </div>
           <nav class="mt-4 flex gap-1 overflow-x-auto [scrollbar-width:none]">
@@ -445,11 +454,15 @@
     </div>
   {/if}
 
-  <Dialog bind:open={removing} title="Delete {p.id}?">
-    <p class="text-sm text-muted">This deletes the paper and all its files: PDF, text, figures and notes. Other machines move their copy to <code>.carrel/trash</code> at their next sync.</p>
+  <Dialog bind:open={removing} title="{asks ? 'Ask to delete' : 'Delete'} {p.id}?">
+    {#if asks}
+      <p class="text-sm text-muted">An admin other than you decides. Until then the paper stays; once accepted, its files can be restored for 30 days.</p>
+    {:else}
+      <p class="text-sm text-muted">This deletes the paper and all its files: PDF, text, figures and notes. Other machines move their copy to <code>.carrel/trash</code> at their next sync.</p>
+    {/if}
     {#snippet footer()}
       <Button variant="ghost" onclick={() => (removing = false)}>Cancel</Button>
-      <Button variant="danger" onclick={remove}><Trash2 class="size-4" />Delete</Button>
+      <Button variant="danger" onclick={remove}><Trash2 class="size-4" />{asks ? 'Ask to delete' : 'Delete'}</Button>
     {/snippet}
   </Dialog>
 {/if}

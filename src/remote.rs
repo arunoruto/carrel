@@ -50,11 +50,21 @@ pub trait Remote: Sync {
     /// Uploads `bytes` over the version `replaces` (from the listing; `None` for a new file) and returns the new
     /// version tag. A remote that can tell refuses when the file changed meanwhile.
     fn upload(&self, path: &str, bytes: Vec<u8>, replaces: Option<&str>) -> Result<String>;
-    fn delete(&self, path: &str) -> Result<()>;
+    fn delete(&self, path: &str) -> Result<Deleted>;
     /// What this remote lets you do, known after [`Remote::list`].
     fn rights(&self) -> Rights {
         Rights { edit: true, delete: true }
     }
+}
+
+/// What became of a deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Deleted {
+    Done,
+    /// Asked for: an admin of a carrel server decides.
+    Asked,
+    /// Turned down there: the file stays.
+    Declined,
 }
 
 /// What a remote lets you do besides reading and adding files.
@@ -168,11 +178,11 @@ impl Remote for S3 {
         Ok(etag.trim_matches('"').to_string())
     }
 
-    fn delete(&self, path: &str) -> Result<()> {
+    fn delete(&self, path: &str) -> Result<Deleted> {
         let key = format!("{}{path}", self.prefix);
         let url = self.bucket.delete_object(Some(&self.credentials), &key).sign(SIGNED_FOR);
         Self::agent().delete(url.as_str()).call().map_err(s3_error)?;
-        Ok(())
+        Ok(Deleted::Done)
     }
 }
 
@@ -212,11 +222,11 @@ impl Remote for Folder {
         Ok(md5_hex(&bytes))
     }
 
-    fn delete(&self, path: &str) -> Result<()> {
+    fn delete(&self, path: &str) -> Result<Deleted> {
         let file = self.0.join(path);
         fs::remove_file(&file)?;
         remove_empty_parents(&file, &self.0);
-        Ok(())
+        Ok(Deleted::Done)
     }
 }
 
@@ -307,9 +317,16 @@ impl Remote for Hub {
         Ok(etag.trim_matches('"').to_string())
     }
 
-    fn delete(&self, path: &str) -> Result<()> {
-        self.checked(self.request("DELETE", Some(path)).call()?)?;
-        Ok(())
+    fn delete(&self, path: &str) -> Result<Deleted> {
+        let response = self.request("DELETE", Some(path)).call()?;
+        Ok(match response.status().as_u16() {
+            202 => Deleted::Asked,
+            409 => Deleted::Declined,
+            _ => {
+                self.checked(response)?;
+                Deleted::Done
+            }
+        })
     }
 
     fn rights(&self) -> Rights {
@@ -466,8 +483,21 @@ pub struct Report {
     pub conflicts: Option<PathBuf>,
     /// Changed here, but the remote takes no changes from you; they stay here.
     pub unshared: Vec<String>,
-    /// Deleted here, but the remote lets you delete nothing; downloaded again.
+    /// Deleted here, but the remote lets you delete nothing, or turned the deletion down; downloaded again.
     pub restored: Vec<String>,
+    /// Deleted here and asked for there, waiting for an admin; they stay deleted here.
+    pub asked: Vec<String>,
+}
+
+/// What became of one file in a sync, for the state of the next.
+enum Applied {
+    /// Both sides hold this.
+    Holds(Synced),
+    Gone,
+    /// The remote's deletion is only asked for: the state stays, so the next sync asks again.
+    Asked,
+    /// Downloaded again after the remote turned its deletion down.
+    Restored(Synced),
 }
 
 impl Report {
@@ -614,8 +644,13 @@ impl Library {
                         let mut guard = shared.lock().unwrap();
                         let (state, outcome, _) = &mut *guard;
                         match result {
-                            Ok(Some(synced)) => drop(state.files.insert(path.clone(), synced)),
-                            Ok(None) => drop(state.files.remove(path)),
+                            Ok(Applied::Holds(synced)) => drop(state.files.insert(path.clone(), synced)),
+                            Ok(Applied::Gone) => drop(state.files.remove(path)),
+                            Ok(Applied::Asked) => outcome.asked.push(path.clone()),
+                            Ok(Applied::Restored(synced)) => {
+                                state.files.insert(path.clone(), synced);
+                                outcome.restored.push(path.clone());
+                            }
                             Err(e) => {
                                 outcome.failed.push((path.clone(), format!("{e:#}")));
                                 continue;
@@ -646,7 +681,7 @@ impl Library {
         action: Action,
         etag: Option<&String>,
         n: usize,
-    ) -> Result<Option<Synced>> {
+    ) -> Result<Applied> {
         let file = self.root.join(path);
         match action {
             Action::Upload => {
@@ -656,7 +691,7 @@ impl Library {
                 let bytes = fs::read(&file)?;
                 let md5 = md5_hex(&bytes);
                 let etag = remote.upload(path, bytes, etag.map(String::as_str))?;
-                return Ok(Some(Synced { md5, etag, size: meta.len(), mtime: mtime(&meta) }));
+                return Ok(Applied::Holds(Synced { md5, etag, size: meta.len(), mtime: mtime(&meta) }));
             }
             Action::Download => {
                 fs::create_dir_all(file.parent().unwrap())?;
@@ -668,16 +703,25 @@ impl Library {
                     self.trash(path)?;
                 }
                 fs::rename(&part, &file)?;
-                return synced(&file, etag.cloned().unwrap_or_default()).map(Some);
+                return synced(&file, etag.cloned().unwrap_or_default()).map(Applied::Holds);
             }
-            Action::DeleteRemote => remote.delete(path)?,
+            Action::DeleteRemote => match remote.delete(path)? {
+                Deleted::Done => {}
+                Deleted::Asked => return Ok(Applied::Asked),
+                Deleted::Declined => {
+                    return match self.apply(remote, path, Action::Download, etag, n)? {
+                        Applied::Holds(synced) => Ok(Applied::Restored(synced)),
+                        other => Ok(other),
+                    };
+                }
+            },
             Action::DeleteLocal => {
                 self.trash(path)?;
                 remove_empty_parents(&file, &self.root);
             }
             Action::Conflict => {}
         }
-        Ok(None)
+        Ok(Applied::Gone)
     }
 
     /// Moves a file into `.carrel/trash`, keeping its path.

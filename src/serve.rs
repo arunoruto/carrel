@@ -43,9 +43,11 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
     let auth = crate::auth::Auth::new(lib.root.join(".carrel"), oidc, url.as_deref(), token.clone())?;
     let auth = std::sync::Arc::new(auth);
 
+    let history = std::sync::Arc::new(crate::history::History::open(&lib.root));
     let worker = lib.clone();
+    let forget = history.clone();
     let jobs = Jobs { remote: config.remote, consume: config.consume, notify: config.notify };
-    std::thread::spawn(move || work(&worker, &jobs, every));
+    std::thread::spawn(move || work(&worker, &jobs, every, &forget));
 
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
@@ -60,7 +62,7 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
             Some(issuer) => log(&format!("web UI: {} (logging in with {issuer})", base.trim_end_matches('/'))),
             None => log(&format!("web UI: {}/?token={web_token}", base.trim_end_matches('/'))),
         }
-        let web = crate::web::Web::server(lib.clone(), web_token, local.port(), auth, url.as_deref());
+        let web = crate::web::Web::server(lib.clone(), web_token, local.port(), auth, url.as_deref(), history);
         let web = std::sync::Arc::new(web);
         tokio::select! {
             served = crate::mcp::serve_http(lib, listener, token, trusted, proxies, web) => served,
@@ -84,11 +86,16 @@ async fn stopped() {
 
 /// Syncs and catches up on work, round after round. Each paper gets one try per job while the server runs,
 /// so a paper no source knows isn't asked about every few minutes.
-fn work(lib: &Library, jobs: &Jobs, every: Duration) {
+fn work(lib: &Library, jobs: &Jobs, every: Duration, history: &crate::history::History) {
     let mut state = State::default();
     loop {
         if let Err(e) = round(lib, jobs, &mut state) {
             log(&format!("{e:#}"));
+        }
+        match history.purge() {
+            Ok(0) => {}
+            Ok(n) => log(&format!("forgot {n} changes and deletions older than 30 days")),
+            Err(e) => log(&format!("cannot forget old changes: {e:#}")),
         }
         std::thread::sleep(every);
     }

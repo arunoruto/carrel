@@ -93,7 +93,17 @@ pub fn token(path: &Path) -> Result<String> {
 
 pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: String) -> Result<()> {
     let port = listener.local_addr()?.port();
-    let web = Arc::new(Web { lib, token, port, local: true, auth: None, site: None, hashes: Default::default() });
+    let web = Arc::new(Web {
+        lib,
+        token,
+        port,
+        local: true,
+        auth: None,
+        site: None,
+        hashes: Default::default(),
+        history: None,
+        writes: Default::default(),
+    });
     loop {
         let (stream, _) = listener.accept().await?;
         let web = web.clone();
@@ -120,6 +130,9 @@ pub struct Web {
     site: Option<String>,
     /// MD5s of the library's files for `/sync`.
     hashes: Hashes,
+    /// A server's record of changes and deletions; changes go one at a time, so each is recorded alone.
+    history: Option<Arc<crate::history::History>>,
+    writes: Arc<std::sync::Mutex<()>>,
 }
 
 /// MD5s by path, with the size and modification time they were taken at.
@@ -127,9 +140,17 @@ type Hashes = Arc<std::sync::Mutex<HashMap<String, (u64, u128, String)>>>;
 
 impl Web {
     /// For `carrel serve`, which hands it every request but MCP's. `url` is where browsers reach it.
-    pub fn server(lib: Library, token: String, port: u16, auth: Arc<crate::auth::Auth>, url: Option<&str>) -> Self {
+    pub fn server(
+        lib: Library,
+        token: String,
+        port: u16,
+        auth: Arc<crate::auth::Auth>,
+        url: Option<&str>,
+        history: Arc<crate::history::History>,
+    ) -> Self {
         let site = url.map(|u| u.split_once("://").map_or(u, |(_, rest)| rest).trim_end_matches('/').to_string());
-        Self { lib, token, port, local: false, auth: Some(auth), site, hashes: Default::default() }
+        let (hashes, writes) = (Default::default(), Default::default());
+        Self { lib, token, port, local: false, auth: Some(auth), site, hashes, history: Some(history), writes }
     }
 
     /// Whether a bearer token is a member's, for MCP.
@@ -147,7 +168,8 @@ impl Web {
     fn who<B>(&self, request: &Request<B>, trusted: bool) -> crate::auth::Who {
         use crate::auth::{Role, Who};
         if self.link_works() && self.logged_in(request) {
-            return Who::role(Role::Admin);
+            // Whoever opened the link; on a server, one more admin.
+            return if self.local { Who::role(Role::Admin) } else { Who::named("link", Role::Admin) };
         }
         match &self.auth {
             Some(auth) => auth.who(request.headers(), trusted),
@@ -213,7 +235,8 @@ impl Web {
     /// version an upload replaces, so two clients can't overwrite each other unseen.
     async fn sync_call(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
         use crate::auth::{Right, Role};
-        let role = self.who(&request, trusted).role;
+        let who = self.who(&request, trusted);
+        let role = who.role;
         if role == Role::None {
             return json_status(StatusCode::UNAUTHORIZED, json!({"error": "send a token"}));
         }
@@ -227,6 +250,8 @@ impl Web {
             Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),
         };
         let (root, hashes) = (self.lib.root.clone(), self.hashes.clone());
+        let (history, writes) = (self.history.clone().expect("a server's"), self.writes.clone());
+        let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
         let md5 = move |path: &str| -> Result<Option<String>> {
             let file = root.join(path);
             let Ok(meta) = fs::metadata(&file) else { return Ok(None) };
@@ -250,7 +275,7 @@ impl Web {
                         files.insert(path, md5.into());
                     }
                 }
-                let can = json!({"edit": role.can(Right::Edit), "delete": role.can(Right::Admin)});
+                let can = json!({"edit": role.can(Right::Edit), "delete": role.can(Right::Edit)});
                 return Ok(json_status(StatusCode::OK, json!({"files": files, "can": can})));
             };
             if !carrel::remote::plain(&path) {
@@ -281,21 +306,29 @@ impl Web {
                     fs::create_dir_all(&parts)?;
                     let part = parts.join(format!("upload-{}", crate::auth::random(8)));
                     fs::write(&part, &body)?;
+                    let _one_at_a_time = writes.lock().unwrap_or_else(|e| e.into_inner());
+                    let paper = path.split_once('/').map(|(p, _)| p);
+                    let before = history.before(&name, "synced", paper, &[&path])?;
                     fs::create_dir_all(file.parent().unwrap())?;
                     fs::rename(&part, &file)?;
+                    history.after(before)?;
                     let mut response = json_status(StatusCode::OK, json!({}));
                     response.headers_mut().insert(header::ETAG, format!("\"{sent}\"").parse()?);
                     Ok(response)
                 }
+                // Deleting is asked for, and an admin other than who asks decides.
                 Method::DELETE => {
-                    if !role.can(Right::Admin) {
-                        return refused(StatusCode::FORBIDDEN, "deleting needs an admin");
+                    if !role.can(Right::Edit) {
+                        return refused(StatusCode::FORBIDDEN, "deleting needs a member's token");
                     }
-                    if current.is_some() {
-                        fs::remove_file(&file)?;
-                        carrel::remote::remove_empty_parents(&file, &root);
+                    if current.is_none() {
+                        return Ok(json_status(StatusCode::OK, json!({})));
                     }
-                    Ok(json_status(StatusCode::OK, json!({})))
+                    let paper = path.split_once('/').map(|(p, _)| p);
+                    if history.request_deletion(&name, paper, std::slice::from_ref(&path))? {
+                        return refused(StatusCode::CONFLICT, "an admin turned this deletion down");
+                    }
+                    Ok(json_status(StatusCode::ACCEPTED, json!({"asked": true})))
                 }
                 _ => refused(StatusCode::METHOD_NOT_ALLOWED, "GET, PUT or DELETE"),
             }
@@ -405,10 +438,28 @@ impl Web {
             Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),
         };
         let lib = self.lib.clone();
+        let (history, writes) = (self.history.clone(), self.writes.clone());
+        let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
+        let is_admin = who.role == Role::Admin;
         // The library blocks (files, SQLite, lookups online), so off the async threads.
         let reply = tokio::task::spawn_blocking(move || {
             let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
-            api_call(&lib, &method, &segments, &query, body)
+            let Some(history) = history else {
+                return api_call(&lib, &method, &segments, &query, body);
+            };
+            let _one_at_a_time = (method != Method::GET).then(|| writes.lock().unwrap_or_else(|e| e.into_inner()));
+            if let Some(reply) = activity_call(&lib, &history, &method, &segments, &query, &name, is_admin) {
+                return reply;
+            }
+            if method == Method::GET {
+                return api_call(&lib, &method, &segments, &query, body);
+            }
+            let (what, paper, folders) = described(&lib, &method, &segments);
+            let folders: Vec<&str> = folders.iter().map(String::as_str).collect();
+            let before = history.before(&name, &what, paper.as_deref(), &folders)?;
+            let reply = api_call(&lib, &method, &segments, &query, body);
+            history.after(before)?;
+            reply
         })
         .await;
         match reply {
@@ -462,6 +513,76 @@ enum Reply {
     Text(String),
     /// A file to save, with its name.
     Download(String, String),
+}
+
+/// A server's `/api/activity` calls, and deleting a paper, which there is asked for; `None` for the rest.
+fn activity_call(
+    lib: &Library,
+    history: &crate::history::History,
+    method: &Method,
+    path: &[&str],
+    query: &HashMap<String, String>,
+    who: &str,
+    admin: bool,
+) -> Option<Result<Reply>> {
+    let reply = match (method.as_str(), path) {
+        ("GET", ["activity"]) => {
+            let limit = query.get("limit").and_then(|l| l.parse().ok()).unwrap_or(200);
+            ok(json!(history.entries(limit)))
+        }
+        ("GET", ["activity", id, "diff"]) => (|| {
+            let (before, after) = history.diff(id, query.get("path").context("which file? ?path=")?)?;
+            ok(json!({"before": before, "after": after}))
+        })(),
+        ("DELETE", ["papers", id]) => (|| {
+            let p = lib.get(id)?;
+            let files = carrel::remote::files(&p.dir)?.into_iter().map(|f| format!("{}/{f}", p.id)).collect::<Vec<_>>();
+            if history.request_deletion(who, Some(&p.id), &files)? {
+                bail!("an admin turned down deleting {} lately", p.id);
+            }
+            ok(json!({"asked": true}))
+        })(),
+        ("POST", ["activity", id, "revert"]) if admin => history.revert(id, who).and_then(|()| ok(json!({}))),
+        ("POST", ["activity", id, action @ ("accept" | "decline")]) if admin => {
+            history.decide(id, who, *action == "accept").and_then(|()| ok(json!({})))
+        }
+        _ => return None,
+    };
+    Some(reply)
+}
+
+/// What a call changes, for the history: its description, its paper, and the top-level folders it may touch.
+/// New papers it adds are noticed anyway.
+fn described(lib: &Library, method: &Method, path: &[&str]) -> (String, Option<String>, Vec<String>) {
+    use carrel::{authors, recommended};
+    let what = match (method.as_str(), path) {
+        (_, ["add" | "upload"]) | (_, ["inbox", "add"]) => "added a paper",
+        (_, ["recommended", _, "add"]) => "added a recommendation",
+        (_, ["recommended", _, "dismiss"]) => "dismissed a recommendation",
+        (_, ["people", ..]) => "changed people",
+        (_, ["papers", _, "notes"]) => "edited the notes",
+        (_, ["papers", _, "update"]) => "updated the metadata",
+        (_, ["papers", _, "keywords"]) => "changed the keywords",
+        (_, ["papers", _, "projects", ..]) | (_, ["projects", ..]) => "changed a project",
+        (_, ["papers", _, "drafts", _, "approve"]) => "approved a draft",
+        (_, ["papers", _, "drafts", _, "reject"]) => "rejected a draft",
+        (_, ["papers", _, "pdf"]) => "attached a PDF",
+        (_, ["papers", _, "supplementary"]) => "added supplementary files",
+        (_, ["papers", _, "extract"]) => "extracted the text again",
+        _ => "changed",
+    };
+    let paper = match path {
+        ["papers", id, ..] => lib.get(id).ok().map(|p| p.id),
+        _ => None,
+    };
+    let mut folders: Vec<String> = paper.iter().cloned().collect();
+    match path {
+        ["papers", _, "projects", ..] | ["projects", ..] => folders.push(carrel::PROJECTS.into()),
+        ["people", ..] => folders.push(authors::DIR.into()),
+        ["recommended", ..] => folders.push(recommended::DIR.into()),
+        _ => {}
+    }
+    (what.into(), paper, folders)
 }
 
 fn ok(value: Value) -> Result<Reply> {

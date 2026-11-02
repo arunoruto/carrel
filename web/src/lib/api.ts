@@ -182,6 +182,20 @@ export interface Token {
   created: string;
 }
 
+/** A change on a server, or a request to delete; kept 30 days. Deletion requests are the ones with a status. */
+export interface Activity {
+  id: string;
+  /** Unix seconds. */
+  at: number;
+  who: string;
+  what: string;
+  paper: string | null;
+  files: { path: string; change: 'added' | 'changed' | 'removed' | 'delete'; after?: string }[];
+  status?: 'pending' | 'accepted' | 'declined' | 'restored';
+  /** Who reverted the change, or decided on the deletion, and when (Unix seconds). */
+  decided?: [string, number];
+}
+
 export interface Added {
   id: string;
   messages: string[];
@@ -235,7 +249,14 @@ export const api = {
   fulltext: (id: string) => call<string>('GET', `${paper(id)}/fulltext`, undefined, false),
   add: (source: string) => call<Added>('POST', 'add', JSON.stringify({ source })),
   upload: (file: File) => call<Added>('POST', `upload${q({ name: file.name })}`, file),
-  remove: (id: string) => call<{}>('DELETE', paper(id)),
+  /** On a server it only asks: `asked` is then true and an admin decides. */
+  remove: (id: string) => call<{ asked?: boolean }>('DELETE', paper(id)),
+  activity: () => call<Activity[]>('GET', 'activity?limit=200'),
+  activityDiff: (id: string, path: string) =>
+    call<{ before: string | null; after: string | null }>('GET', `activity/${encodeURIComponent(id)}/diff${q({ path })}`),
+  revert: (id: string) => call<{}>('POST', `activity/${encodeURIComponent(id)}/revert`),
+  decideDeletion: (id: string, accept: boolean) =>
+    call<{}>('POST', `activity/${encodeURIComponent(id)}/${accept ? 'accept' : 'decline'}`),
   attach: (id: string, file?: File) => call<{ messages: string[] }>('POST', `${paper(id)}/pdf`, file ?? ''),
   supplementary: (id: string, file: File) =>
     call<{ messages: string[] }>('POST', `${paper(id)}/supplementary${q({ name: file.name })}`, file),

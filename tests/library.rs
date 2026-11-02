@@ -756,7 +756,7 @@ impl carrel::remote::Remote for Rigged<'_> {
         }
         self.folder.upload(path, bytes, replaces)
     }
-    fn delete(&self, path: &str) -> anyhow::Result<()> {
+    fn delete(&self, path: &str) -> anyhow::Result<carrel::remote::Deleted> {
         self.folder.delete(path)
     }
 }

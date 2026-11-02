@@ -67,10 +67,9 @@ token = { file = "~/.config/carrel/token" }   # from the server's web UI, Tokens
 | with | `carrel sync` may |
 |---|---|
 | no token, from one of the server's trusted networks | download, and upload new files: new papers, new notes, new figures |
-| a member's token (group `carrel`) | also upload changes to files that are there |
-| an admin's token (group `admin`) | also delete |
+| a member's token (group `carrel`) | also upload changes to files that are there, and ask to delete |
 
-What a sync may not do stays on your machine, and it says so: a change that isn't shared yet is kept here, and a file deleted here that the server keeps is downloaded again. Each upload names the version it replaces; when someone else changed that file in between, the server refuses it, and the next sync sees a conflict as usual instead of one of you losing their edit unseen.
+Changes take effect on the server at once, and its admins can [revert them](/docs/guide/server.md#activity-changes-reverts-and-deletions). Deleting is only asked for: the files stay deleted on your machine and the sync says the deletion waits for an admin; accepted, they go for everyone, declined, the next sync downloads them again. What a sync may not do stays on your machine, and it says so: a change that isn't shared is kept here, and a file deleted here that you may not ask to delete is downloaded again. Each upload names the version it replaces; when someone else changed that file in between, the server refuses it, and the next sync sees a conflict as usual instead of one of you losing their edit unseen.
 
 ## Sharing with your group
 

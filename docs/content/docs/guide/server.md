@@ -112,12 +112,20 @@ or `CARREL_OIDC_ISSUER`, `CARREL_OIDC_CLIENT_ID` and `CARREL_OIDC_SECRET` in a c
 | who | may |
 |---|---|
 | anyone from a [trusted network](#networks-without-a-token), without logging in | read, and add papers and files |
-| group `carrel` | also change things: notes, metadata, drafts, projects, people |
-| group `admin` | also delete papers |
+| group `carrel` | also change things (notes, metadata, drafts, projects, people), and ask to delete |
+| group `admin` | also revert changes and decide on deletions |
 
 Someone in neither group can't log in. A login lasts 30 days. Members make **tokens** for their machines on the web UI's Tokens page, for the [AI](#connecting-an-ai) and other clients that can't log in through a browser; a token acts for the person who made it, with their groups at the time, until they revoke it. The server's own token (`CARREL_SERVE_TOKEN`) counts as an admin's.
 
 Sessions and tokens are kept in `.carrel/` in the library, only as hashes. carrel asks the provider who logged in, over HTTPS from the server, rather than reading it from the browser.
+
+### Activity: changes, reverts and deletions
+
+Every change on the server through the web UI, its API or [sync](/docs/guide/sharing.md#through-a-carrel-server) takes effect at once and shows on the web UI's **Activity** page: who, what, which paper, when, and for text files the lines that changed. Changes by one person to the same thing within ten minutes make one entry. An admin can **revert** any of them for 30 days; a file changed again since has to have that later change reverted first.
+
+Deleting goes the other way round: it is only **asked for**, by a member in the web UI or by a sync after `carrel rm`, and an admin other than the one asking accepts or declines it. Accepted, the files move to the archive and disappear for everyone; for 30 days an admin can still restore them. Declined, they stay, and a sync that asked downloads them again.
+
+All of it is kept in `.carrel/history` and `.carrel/archive` in the library and forgotten after 30 days. Changes that reach the server some other way aren't in it: members syncing with the bucket directly, the server's own extraction, and AIs over MCP, whose summaries and keywords arrive as drafts that someone approves in the web UI, which is.
 
 ### Without a login provider
 
@@ -127,7 +135,7 @@ Then the server prints a link with a token of its own when it starts:
 12:00:00 web UI: https://papers.example.org/?token=4f1c…
 ```
 
-(`docker logs carrel | grep "web UI"` finds it.) Opening it logs a browser in as an admin, for a year; trusted networks may still read and add without it. The token is kept in `.carrel/web-token`; delete that file and restart to change it, which logs everyone out. Set `url` in `[serve]` (or `CARREL_SERVE_URL`) to the address browsers use, so the link is one to click; the server then also answers to that name only.
+(`docker logs carrel | grep "web UI"` finds it.) Opening it logs a browser in as an admin named `link`, for a year; trusted networks may still read and add without it. The token is kept in `.carrel/web-token`; delete that file and restart to change it, which logs everyone out. Set `url` in `[serve]` (or `CARREL_SERVE_URL`) to the address browsers use, so the link is one to click; the server then also answers to that name only.
 
 ## Connecting an AI
 

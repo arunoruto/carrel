@@ -629,7 +629,8 @@ fn logging_in() {
     let alice = me(&[&session]);
     assert_eq!((alice["user"].as_str(), alice["role"].as_str()), (Some("alice"), Some("member")));
     assert_ne!(call("PUT", "/api/papers/x/notes", &[&session], b"{}").0, 403, "allowed, there just is no such paper");
-    assert!(call("DELETE", "/api/papers/x", &[&session], b"").2.contains("only admins"));
+    assert_ne!(call("DELETE", "/api/papers/x", &[&session], b"").0, 403, "members ask to delete");
+    assert!(call("POST", "/api/activity/x/accept", &[&session], b"").2.contains("only admins"));
     assert!(!std::fs::read_to_string(c.tmp.path("lib/.carrel/sessions.json")).unwrap().contains(&session[18..]));
 
     // A token for a laptop: shown once, then it stands for alice, in the API and for MCP.
@@ -691,16 +692,45 @@ fn syncing_through_a_server() {
     assert!(c.ok(&["sync"]).contains("1 changed here but not shared"));
     assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A}}\n"));
     std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
-    assert!(c.ok(&["sync"]).contains("deleting there needs an admin; downloaded again"));
+    assert!(c.ok(&["sync"]).contains("keeps them (no token to delete with, or an admin said no); downloaded again"));
     assert!(c.tmp.path("lib/b2021/b2021.bib").exists());
 
-    // With an admin's token, both go through.
+    // With an admin's token, changes go through; deleting is asked for, until another admin accepts.
     remote("admintok");
     c.ok(&["sync"]);
     assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A, edited}}\n"));
     std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
+    assert!(c.ok(&["sync"]).contains("1 deletions asked for"));
+    assert!(server_file("b2021/b2021.bib").is_some());
+    assert!(c.ok(&["sync"]).contains("1 deletions asked for"), "asked again, quietly the same request");
+    assert!(!c.tmp.path("lib/b2021/b2021.bib").exists(), "it stays deleted here meanwhile");
+
+    // Another admin (the server's link) sees it all, accepts the deletion and reverts the edit.
+    let link = log.find_map(|l| l.ok().and_then(|l| l.split_once("?token=").map(|(_, t)| t.to_string()))).unwrap();
+    let (_, head, _) = http(&addr, "GET", &format!("/?token={link}"), &[], b"");
+    let cookie = format!(
+        "Cookie: {}",
+        head.lines().find_map(|l| l.strip_prefix("set-cookie: ")).unwrap().split(';').next().unwrap()
+    );
+    let api = |method: &str, path: &str| {
+        let (status, _, body) = http(&addr, method, path, &[&cookie], b"");
+        (status, serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default())
+    };
+    let (_, feed) = api("GET", "/api/activity");
+    let entry = |what: &str| feed.as_array().unwrap().iter().find(|e| e["what"] == what).unwrap().clone();
+    let (asked, synced) = (entry("asked to delete"), entry("synced"));
+    assert_eq!((asked["who"].as_str(), asked["status"].as_str()), (Some("server"), Some("pending")));
+    assert_eq!(api("POST", &format!("/api/activity/{}/accept", asked["id"].as_str().unwrap())).0, 200);
+    assert!(server_file("b2021/b2021.bib").is_none() && c.tmp.path("srv/lib/.carrel/archive").exists());
     c.ok(&["sync"]);
-    assert!(server_file("b2021/b2021.bib").is_none() && !c.tmp.path("srv/lib/b2021").exists());
+    assert!(!c.ok(&["sync"]).contains("asked"), "settled");
+    let edit = feed.as_array().unwrap().iter().find(|e| e["who"] == "server" && e["what"] == "synced").unwrap();
+    assert_eq!(synced["who"], "server");
+    let (status, diff) =
+        api("GET", &format!("/api/activity/{}/diff?path=a2020/a2020.bib", edit["id"].as_str().unwrap()));
+    assert_eq!((status, diff["before"].as_str()), (200, Some("@misc{a2020, title = {A}}\n")));
+    assert_eq!(api("POST", &format!("/api/activity/{}/revert", edit["id"].as_str().unwrap())).0, 200);
+    assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A}}\n"));
 
     // An upload over a version that is gone is refused; paths stay inside the library and out of .carrel.
     let admin = "Authorization: Bearer admintok";

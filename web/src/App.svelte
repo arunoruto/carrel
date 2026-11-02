@@ -5,6 +5,7 @@
   import Toasts from './lib/components/Toasts.svelte';
   import { router } from './lib/router.svelte';
   import { app } from './lib/state.svelte';
+  import Activity from './views/Activity.svelte';
   import Discover from './views/Discover.svelte';
   import Drafts from './views/Drafts.svelte';
   import Health from './views/Health.svelte';
@@ -62,6 +63,8 @@
           <Health />
         {:else if router.path === '/tokens'}
           <Tokens />
+        {:else if router.path === '/activity'}
+          <Activity />
         {:else}
           {#key router.params.toString()}<Library />{/key}
         {/if}

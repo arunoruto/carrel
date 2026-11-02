@@ -1,4 +1,5 @@
 mod auth;
+mod history;
 mod install;
 mod mcp;
 mod serve;
@@ -974,7 +975,14 @@ fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>, verbos
         );
     }
     if !report.restored.is_empty() {
-        println!("{} deleted here, but deleting there needs an admin; downloaded again", report.restored.len());
+        println!(
+            "{} deleted here, but {} keeps them (no token to delete with, or an admin said no); downloaded again",
+            report.restored.len(),
+            remote.name()
+        );
+    }
+    if !report.asked.is_empty() {
+        println!("{} deletions asked for at {}; an admin decides", report.asked.len(), remote.name());
     }
     for path in &report.skipped {
         eprintln!("warning: skipped {path:?} on the remote: not a file path inside the library");

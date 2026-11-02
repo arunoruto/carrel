@@ -9,6 +9,8 @@ class App {
   inbox = $state(0);
   /** Papers recommended by alert emails, waiting in Discover. */
   recommended = $state(0);
+  /** A server's deletion requests waiting for an admin. */
+  pending = $state(0);
   total = $state(0);
   /** Every paper by id, for views that only get ids (people, trees, the map). */
   papers = $state<Record<string, PaperSummary>>({});
@@ -37,6 +39,11 @@ class App {
         .recommended()
         .then((r) => (this.recommended = r.length))
         .catch(() => (this.recommended = 0));
+      if (this.me.server && this.me.can.edit)
+        api
+          .activity()
+          .then((a) => (this.pending = a.filter((e) => e.status === 'pending').length))
+          .catch(() => (this.pending = 0));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) this.loggedOut = true;
       else toasts.error(e, 'Cannot reach carrel');

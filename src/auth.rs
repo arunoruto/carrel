@@ -69,10 +69,11 @@ impl Role {
 /// What an API call needs; the paths are the segments after `/api/`.
 pub fn needed(method: &str, path: &[&str]) -> Right {
     match (method, path) {
-        ("GET", ["tokens", ..]) => Right::Edit,
+        ("GET", ["tokens" | "activity", ..]) => Right::Edit,
         ("GET", _) => Right::Read,
+        ("POST", ["activity", ..]) => Right::Admin,
         ("POST", ["add" | "upload"] | ["recommended", _, "add"] | ["papers", _, "pdf" | "supplementary"]) => Right::Add,
-        ("DELETE", ["papers", _]) => Right::Admin,
+        // On a server deleting is only asked for; an admin decides.
         _ => Right::Edit,
     }
 }
@@ -89,6 +90,10 @@ pub struct Who {
 impl Who {
     pub fn role(role: Role) -> Self {
         Who { user: None, name: None, role, groups: vec![] }
+    }
+
+    pub fn named(user: &str, role: Role) -> Self {
+        Who { user: Some(user.into()), name: None, role, groups: vec![] }
     }
 }
 
@@ -437,8 +442,10 @@ mod tests {
         assert!(!Role::Anonymous.can(needed("PUT", &["papers", "a2020", "notes"])));
         assert!(!Role::Anonymous.can(needed("GET", &["tokens"])));
         assert!(Role::Member.can(needed("PUT", &["papers", "a2020", "notes"])));
-        assert!(!Role::Member.can(needed("DELETE", &["papers", "a2020"])));
-        assert!(Role::Admin.can(needed("DELETE", &["papers", "a2020"])));
+        assert!(Role::Member.can(needed("DELETE", &["papers", "a2020"])), "asking to");
+        assert!(!Role::Member.can(needed("POST", &["activity", "1-a", "accept"])));
+        assert!(Role::Admin.can(needed("POST", &["activity", "1-a", "revert"])));
+        assert!(!Role::Anonymous.can(needed("GET", &["activity"])));
         assert!(!Role::None.can(Right::Read));
         assert_eq!(Role::of(&["carrel".into()]), Role::Member);
         assert_eq!(Role::of(&["carrel".into(), "admin".into()]), Role::Admin);
