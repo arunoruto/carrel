@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/arunoruto/carrel/compare/v0.2.0...v0.3.0) (2026-11-02)
+
+
+### Features
+
+* Google Scholar alerts as recommendations ([9175919](https://github.com/arunoruto/carrel/commit/917591939c5c4225b340deb087567b0f91f72e5d))
+* sync lists recommendations only with --verbose ([255efe7](https://github.com/arunoruto/carrel/commit/255efe737aedded1502cd9725526a24411c68f93))
+
+
+### Bug Fixes
+
+* recommendations already in the library drop off the list ([4cb8d33](https://github.com/arunoruto/carrel/commit/4cb8d3306dbad89479a63623fd105e5477e7e186))
+
 ## [0.2.0](https://github.com/arunoruto/carrel/compare/v0.1.0...v0.2.0) (2026-10-31)
 
 
