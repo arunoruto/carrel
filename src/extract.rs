@@ -167,7 +167,10 @@ impl Extractor for Fallback {
             return self.1.extract(pdf, out);
         }
         let Err(first) = self.0.extract(pdf, out) else { return Ok(()) };
-        self.1.extract(pdf, out).map_err(|second| anyhow::anyhow!("{first:#}; {second:#}"))
+        self.1.extract(pdf, out).map_err(|second| anyhow::anyhow!("{first:#}; {second:#}"))?;
+        // Otherwise a worse extraction passes for a good one.
+        eprintln!("{} failed, used {}: {first:#}", self.0.name(), self.1.name());
+        Ok(())
     }
 }
 
