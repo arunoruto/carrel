@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Badge from './Badge.svelte';
   import { CircleUser, Compass, FilePen, Folder, HeartPulse, History, Inbox, KeyRound, Library, LogIn, LogOut, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
   import { api } from '../api';
   import { href, router } from '../router.svelte';
@@ -95,9 +96,12 @@
   <div class="space-y-2 border-t px-3 py-3">
     {#if me?.user}
       <div class="flex items-center gap-1">
-        <div class="flex min-w-0 flex-1 items-center gap-2 px-2.5 text-sm" title={me.role === 'admin' ? `${me.user}, admin` : me.user}>
+        <div class="flex min-w-0 flex-1 items-center gap-2 px-2.5 text-sm" title={me.user}>
           <CircleUser class="size-4 shrink-0 text-muted" />
           <span class="truncate">{me.name ?? me.user}</span>
+          <Badge tone={me.role === 'admin' ? 'accent' : 'neutral'} title={me.role === 'admin' ? 'Reverts changes and decides on deletions' : 'Adds and changes papers, asks to delete'}>
+            {me.role === 'admin' ? 'admin' : 'member'}
+          </Badge>
         </div>
         <a href="#/tokens" onclick={onnavigate} class="rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground {router.path === '/tokens' ? 'bg-hover text-foreground' : ''}" aria-label="Tokens" title="Tokens">
           <KeyRound class="size-4" />
