@@ -48,13 +48,13 @@ command -v uv docling
 
 With Nix but without Home Manager: `nix profile install github:arunoruto/carrel`.
 
-**Without Nix** (Linux x86_64 or arm64, macOS on Apple silicon), use the install script. It verifies the checksum and installs to `~/.local/bin`:
+**Without Nix** (Linux x86_64 or arm64, macOS on Apple silicon): if `brew` is there, `brew install arunoruto/tap/carrel`, which brings uv along. Otherwise use the install script. It verifies the checksum and installs to `~/.local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | sh
 ```
 
-If `~/.local/bin` is not on `PATH`, ask before adding it to the human's shell profile. Other routes, such as Cargo, bin and Docker, are at https://arunoruto.github.io/carrel/docs/installation/.
+If `~/.local/bin` is not on `PATH`, ask before adding it to the human's shell profile. Other routes, such as Cargo, bin and Docker, are at https://arunoruto.github.io/carrel/docs/installation/. For Docling, semantic search and the rest of the setup, follow https://arunoruto.github.io/carrel/docs/setup/.
 
 **Text extraction:** outside Nix and Docker, carrel needs `uv`, which fetches pymupdf4llm on first use, or `docling`. If neither is there, offer to install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Without either, papers are still added, just without their text.
 

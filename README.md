@@ -114,12 +114,16 @@ A server is optional; without one, sync alone shares the library. See [Clients a
 
 ### Prerequisites
 
-Outside of Nix and the Docker image, text extraction needs [uv](https://docs.astral.sh/uv/), or [Docling](https://github.com/docling-project/docling), which carrel prefers when it is installed. Semantic search needs an [Ollama](https://ollama.com) with an embedding model (`ollama pull bge-m3`); everything else works without it. Building from source with the web UI needs [Node.js](https://nodejs.org) (`npm ci && npm run build` in `web/` before `cargo build`); without it, `carrel web` serves only its API.
+Outside of Nix and the Docker image, text extraction needs [uv](https://docs.astral.sh/uv/), or [Docling](https://github.com/docling-project/docling), which carrel prefers when it is installed. Semantic search needs an [Ollama](https://ollama.com) with an embedding model (`ollama pull bge-m3`); everything else works without it. The [full setup](https://arunoruto.github.io/carrel/docs/setup/) walks through all of it. Building from source with the web UI needs [Node.js](https://nodejs.org) (`npm ci && npm run build` in `web/` before `cargo build`); without it, `carrel web` serves only its API.
 
 ### Installation
 
 Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [releases page][release-url].
 
+* Homebrew, for macOS and Linux (brings uv along)
+  ```sh
+  brew install arunoruto/tap/carrel
+  ```
 * Install script, for Linux and macOS
   ```sh
   curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | sh

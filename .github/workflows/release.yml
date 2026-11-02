@@ -79,3 +79,38 @@ jobs:
       - run: gh release upload "$TAG" carrel-*.tar.gz carrel-*.tar.gz.sha256
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # The formula in github.com/arunoruto/homebrew-tap (`brew install arunoruto/tap/carrel`), then
+  # installed from there as a check. Pushes with the secret HOMEBREW_TAP_KEY, the private half of a
+  # deploy key with write access to that repository; without it the tap is left alone.
+  homebrew:
+    needs: [release-please, binaries]
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: macos-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
+      TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - if: env.TAP_KEY == ''
+        run: echo "::warning::no HOMEBREW_TAP_KEY secret, so the Homebrew tap wasn't updated"
+      - if: env.TAP_KEY != ''
+        run: |
+          key="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes"
+          git clone git@github.com:arunoruto/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          sh packaging/homebrew.sh "$TAG" > tap/Formula/carrel.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/carrel.rb
+          git commit -m "carrel ${TAG#v}"
+          git push
+          rm "$key"
+      - if: env.TAP_KEY != ''
+        run: |
+          brew install arunoruto/tap/carrel
+          brew test carrel

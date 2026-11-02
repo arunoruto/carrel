@@ -6,6 +6,17 @@ aliases: ["/installation.html"]
 
 carrel runs on Linux (x86_64 and arm64) and macOS (Apple silicon). On Windows, use WSL.
 
+## Homebrew
+
+On macOS (Apple silicon) and Linux:
+
+```sh
+brew install arunoruto/tap/carrel
+brew upgrade carrel                        # later, to get a new release
+```
+
+It brings [uv](https://docs.astral.sh/uv/) along for the [text extractor](#the-text-extractor). For Docling, semantic search and the rest, see the [full setup](/docs/setup.md).
+
 ## Install script
 
 On Linux and macOS:
@@ -67,7 +78,7 @@ The Nix package comes with its text extractor (Python with pymupdf4llm from nixp
 
 ## macOS
 
-Use the install script above, or Nix (with [nix-darwin](https://github.com/nix-darwin/nix-darwin) or Home Manager). There is no Homebrew formula. Background services are launchd agents, from `carrel service` or the Home Manager module (see below). The first time `carrel consume` reads Downloads, macOS asks for permission; if the prompt never comes, allow carrel under System Settings → Privacy & Security → Files and Folders.
+Use Homebrew or the install script above, or Nix (with [nix-darwin](https://github.com/nix-darwin/nix-darwin) or Home Manager). Only Apple silicon Macs are supported. Background services are launchd agents, from `carrel service` or the Home Manager module (see below). The first time `carrel consume` reads Downloads, macOS asks for permission; if the prompt never comes, allow carrel under System Settings → Privacy & Security → Files and Folders.
 
 ## Docker
 
