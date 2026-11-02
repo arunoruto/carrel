@@ -7,6 +7,7 @@ aliases: ["/server.html"]
 `carrel serve` runs the library on a server, for a group and its AIs:
 
 - it serves the [MCP tools](/docs/reference/mcp-tools.md) over HTTP at `/mcp`, so an AI anywhere on the network can use the library;
+- it serves the [web UI](/docs/guide/web.md) at its address, so the group can read and add papers in a browser without installing anything;
 - every few minutes it [syncs](/docs/guide/sharing.md) with the remote and does the slow work once, for everyone: it extracts the text and figures of new PDFs, looks up the references of new papers and, with `[embeddings]` in its config, computes their [embeddings](/docs/guide/semantic-search.md). Everyone else gets the results with their next `carrel sync`.
 - with `[consume]` and `auto = true` in its config, it adds the papers that turn up in a folder (a shared drop folder, say) and logs what it added;
 - with [notifiers](/docs/reference/configuration.md#notifications) in its config, it tells you about its own trouble, such as Ollama going away. Papers others drop in don't land in your inbox; only a `carrel consume` on your own machine tells you about your Downloads.
@@ -86,6 +87,18 @@ The flake has a module:
 ```
 
 The library lives in `/var/lib/carrel/library`. `settings` is the [config](/docs/reference/configuration.md) as Nix; keep secrets in `environmentFile`, since `settings` ends up in the Nix store.
+
+## The web UI
+
+The server's address opens the [web UI](/docs/guide/web.md), the same as `carrel web` on your own machine: papers, the reader, adding by DOI or by dropping PDFs, Discover, the map. Papers added there are extracted by the server and reach everyone with its next sync.
+
+It asks for a token of its own, from trusted networks too, and prints the link with it when it starts:
+
+```
+12:00:00 web UI: https://papers.example.org/?token=4f1c…
+```
+
+(`docker logs carrel | grep "web UI"` finds it.) Opening the link once logs a browser in for a year; pass it on to whoever should get in. The token is kept in `.carrel/web-token` in the library, so it survives restarts; delete that file and restart to change it, which logs everyone out. Set `url` in `[serve]`, or `CARREL_SERVE_URL`, to the address browsers use, so the link in the log is one to click. Text extraction needs an extractor on the server: the image has PyMuPDF, and `CARREL_DOCLING` (or `docling` in its config) can point it at a [docling-serve](/docs/reference/configuration.md#the-extractor).
 
 ## Connecting an AI
 

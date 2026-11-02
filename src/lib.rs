@@ -226,6 +226,9 @@ pub struct Serve {
     /// Reverse proxies in front of carrel, whose `X-Forwarded-For` says where a request came from.
     #[serde(default)]
     pub proxies: Vec<String>,
+    /// Where browsers reach the server (`https://carrel.example.org`), for the web UI's link in the log;
+    /// `CARREL_SERVE_URL` overrides it.
+    pub url: Option<String>,
 }
 
 /// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.

@@ -109,6 +109,7 @@ every = 5                 # minutes between rounds of syncing and background wor
 token = { file = "/run/secrets/carrel-token" }   # what clients must send; CARREL_SERVE_TOKEN overrides it
 trusted = ["127.0.0.0/8", "100.64.0.0/10"]       # networks that need no token, here the server and Tailscale
 proxies = ["172.18.0.0/16"]                      # reverse proxies whose X-Forwarded-For carrel believes
+url = "https://papers.example.org"               # where browsers reach it, for the web UI's link; CARREL_SERVE_URL overrides it
 ```
 
 See [Networks without a token](/docs/guide/server.md#networks-without-a-token) before trusting anything behind a reverse proxy.
@@ -162,5 +163,6 @@ An environment variable wins over the config. `carrel config` lists the tokens i
 | `OPENALEX_API_KEY` | a free [OpenAlex key](https://openalex.org/settings/api); without one, everyone on your network shares about 1000 requests a day |
 | `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | override an S3 [remote](/docs/guide/sharing.md)'s settings |
 | `CARREL_SERVE_TOKEN` | the token [`carrel serve`](/docs/guide/server.md)'s clients must send |
+| `CARREL_SERVE_URL` | where browsers reach that server, for the web UI's link in its log |
 | `OLLAMA_HOST` | where Ollama is, for [semantic search](/docs/guide/semantic-search.md) |
 | `VISUAL`, `EDITOR` | the editor for `.bib` files and notes |

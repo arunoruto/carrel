@@ -410,7 +410,11 @@ fn serving_over_http() {
         // The output stays open: a server whose log can't be written fails.
         (server, url.replace("0.0.0.0", "127.0.0.1"), lines)
     };
-    let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
+    let (mut server, url, mut log) = start("127.0.0.1:0", Some("s3cret"));
+    let web_link = log.find_map(|l| l.ok().and_then(|l| l.split_once("web UI: ").map(|(_, u)| u.to_string())));
+    let web_link = web_link.expect("the web UI's link in the log");
+    let web_token = web_link.split("token=").nth(1).unwrap().to_string();
+    assert_eq!(std::fs::read_to_string(c.tmp.path("lib/.carrel/web-token")).unwrap(), web_token);
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -436,6 +440,19 @@ fn serving_over_http() {
     assert_eq!(ok.status().as_u16(), 200);
     let body = ok.body_mut().read_to_string().unwrap();
     assert!(body.contains("\"name\":\"carrel\""), "{body}");
+    // The web UI, beside MCP: its own token, under the server's own name rather than localhost's.
+    let addr = url.trim_start_matches("http://").to_string();
+    let named = "Host: carrel.example.org";
+    let get = |path: &str, headers: &[&str]| http(&addr, "GET", path, headers, b"").0;
+    assert_eq!(get("/api/info", &[named]), 401);
+    assert_eq!(get("/?token=guess", &[named]), 403);
+    let (status, head, _) = http(&addr, "GET", &format!("/?token={web_token}"), &[named], b"");
+    assert_eq!(status, 303, "{head}");
+    let cookie = head.lines().find_map(|l| l.strip_prefix("set-cookie: ")).expect("a cookie").to_string();
+    let cookie = format!("Cookie: {}", cookie.split(';').next().unwrap());
+    assert_eq!(get("/api/info", &[named, &cookie]), 200);
+    let elsewhere = ["Origin: https://evil.example", named, &cookie];
+    assert_eq!(http(&addr, "POST", "/api/add", &elsewhere, b"{}").0, 403, "writes only from its own pages");
     // SIGTERM, as from `docker stop`, stops it at once.
     unsafe { libc::kill(server.id() as i32, libc::SIGTERM) };
     let started = std::time::Instant::now();
@@ -444,8 +461,12 @@ fn serving_over_http() {
 
     // Trusted networks need no token; everyone else does, and without one set nobody else gets in.
     c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"127.0.0.1\"]\n");
-    let (mut server, url, _log) = start("127.0.0.1:0", Some("s3cret"));
+    let (mut server, url, mut log) = start("127.0.0.1:0", Some("s3cret"));
     assert_eq!(post_to(&url, "").status().as_u16(), 200, "trusted");
+    let addr = url.trim_start_matches("http://");
+    assert_eq!(http(addr, "GET", "/api/info", &[], b"").0, 401, "the web UI wants its token from trusted networks too");
+    let again = log.find_map(|l| l.ok().filter(|l| l.contains("web UI: "))).unwrap();
+    assert!(again.ends_with(&format!("/?token={web_token}")), "the same token after a restart: {again}");
     server.kill().unwrap();
     // Behind a proxy, what it says in X-Forwarded-For.
     c.tmp.write("config/carrel/config.toml", "[serve]\ntrusted = [\"100.64.0.0/10\"]\nproxies = [\"127.0.0.1\"]\n");

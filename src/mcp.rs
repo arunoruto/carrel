@@ -416,6 +416,7 @@ pub async fn serve_http(
     token: Option<String>,
     trusted: Vec<Network>,
     proxies: Vec<Network>,
+    web: std::sync::Arc<crate::web::Web>,
 ) -> anyhow::Result<()> {
     use http_body_util::{BodyExt, Full};
     use hyper::{Response, StatusCode};
@@ -434,9 +435,10 @@ pub async fn serve_http(
     loop {
         let (stream, peer) = listener.accept().await?;
         let (mcp, token, trusted, proxies) = (mcp.clone(), token.clone(), trusted.clone(), proxies.clone());
+        let web = web.clone();
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
-                let (mcp, token) = (mcp.clone(), token.clone());
+                let (mcp, token, web) = (mcp.clone(), token.clone(), web.clone());
                 let client = client(&request, peer.ip(), &proxies);
                 let trusted = open || client.is_some_and(|ip| trusted.iter().any(|n| n.contains(ip)));
                 async move {
@@ -446,14 +448,16 @@ pub async fn serve_http(
                         response
                     };
                     let path = request.uri().path();
+                    let is_mcp = path == "/mcp" || path.starts_with("/mcp/");
                     let response = if path == "/health" {
                         plain(StatusCode::OK, "ok\n")
+                    } else if !is_mcp {
+                        // The web UI, which asks for its own token wherever a request comes from.
+                        web.handle(request).await
                     } else if !trusted && !authorized(&request, token.as_deref()) {
                         plain(StatusCode::UNAUTHORIZED, "send the server's token: Authorization: Bearer <token>\n")
-                    } else if path == "/mcp" || path.starts_with("/mcp/") {
-                        mcp.handle(request).await
                     } else {
-                        plain(StatusCode::NOT_FOUND, "carrel serves MCP at /mcp\n")
+                        mcp.handle(request).await
                     };
                     Ok::<_, std::convert::Infallible>(response)
                 }

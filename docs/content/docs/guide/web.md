@@ -10,7 +10,7 @@ aliases: ["/web.html"]
 carrel web
 ```
 
-It prints a link like `http://127.0.0.1:7700/?token=…` and opens it. The browser keeps a cookie from that link, so later `http://127.0.0.1:7700` is enough, also after a restart. Stop it with `Ctrl-C`. `carrel web --get-url` prints that link again without starting anything, for a second browser or when carrel runs as a service.
+It prints a link like `http://127.0.0.1:7700/?token=…` and opens it. The browser keeps a cookie from that link, so later `http://127.0.0.1:7700` is enough, also after a restart. Stop it with `Ctrl-C`. `carrel web --get-url` prints that link again without starting anything, for a second browser or when carrel runs as a service. A [server](/docs/guide/server.md#the-web-ui) serves the same UI to a group, with a link in its log.
 
 It is for this machine only, like the [TUI](/docs/guide/tui.md): it works on your local library and listens on `127.0.0.1`. To share a library with others, [sync it](/docs/guide/sharing.md) or [run a server](/docs/guide/server.md).
 

@@ -4,6 +4,10 @@
 //! Only loopback, and still guarded: any website you visit can make your browser send requests to
 //! localhost. So requests must name localhost in `Host` (against DNS rebinding) and carry a cookie that
 //! only the link `carrel web` prints sets (against other sites and other users on the machine).
+//!
+//! `carrel serve` serves the same UI to a group ([`Web::server`]). There the cookie alone keeps strangers
+//! out, from trusted networks too: browsers send it only to the server's own name, so a rebound name
+//! doesn't get it either.
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
@@ -47,12 +51,13 @@ fn link(port: u16, token: &str) -> String {
 /// `carrel web --get-url`, for machines without a journal to find it in.
 pub fn url(listen: Option<String>) -> Result<String> {
     let addr = address(listen)?;
-    Ok(link(addr.port(), &token()?))
+    let path = carrel::state_dir().context("no folder to keep the web UI's token in")?.join("web-token");
+    Ok(link(addr.port(), &token(&path)?))
 }
 
 pub fn run(lib: Library, listen: Option<String>, open: bool) -> Result<()> {
     let addr = address(listen)?;
-    let token = token()?;
+    let token = token(&carrel::state_dir().context("no folder to keep the web UI's token in")?.join("web-token"))?;
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
@@ -68,10 +73,9 @@ pub fn run(lib: Library, listen: Option<String>, open: bool) -> Result<()> {
     })
 }
 
-/// The secret in the link, kept across restarts so a logged-in browser stays logged in.
-fn token() -> Result<String> {
-    let path = carrel::state_dir().context("no folder to keep the web UI's token in")?.join("web-token");
-    if let Ok(token) = fs::read_to_string(&path)
+/// The secret in the link, kept in `path` across restarts so a logged-in browser stays logged in.
+pub fn token(path: &Path) -> Result<String> {
+    if let Ok(token) = fs::read_to_string(path)
         && token.trim().len() >= 32
     {
         return Ok(token.trim().to_string());
@@ -82,14 +86,14 @@ fn token() -> Result<String> {
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path)?;
+    let mut file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
     std::io::Write::write_all(&mut file, token.as_bytes())?;
     Ok(token)
 }
 
 pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: String) -> Result<()> {
     let port = listener.local_addr()?.port();
-    let web = Arc::new(Web { lib, token, port });
+    let web = Arc::new(Web { lib, token, port, local: true });
     loop {
         let (stream, _) = listener.accept().await?;
         let web = web.clone();
@@ -104,21 +108,32 @@ pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: Strin
     }
 }
 
-struct Web {
+pub struct Web {
     lib: Library,
     token: String,
     port: u16,
+    /// `carrel web`, answering only to localhost; not `carrel serve`'s.
+    local: bool,
 }
 
 impl Web {
+    /// For `carrel serve`, which hands it every request but MCP's.
+    pub fn server(lib: Library, token: String, port: u16) -> Self {
+        Self { lib, token, port, local: false }
+    }
+
+    fn where_link(&self) -> &'static str {
+        if self.local { "open the link `carrel web` printed" } else { "open the link in the server's log" }
+    }
+
     fn cookie(&self) -> String {
         format!("carrel-{}", self.port)
     }
 
-    async fn handle(&self, request: Request<hyper::body::Incoming>) -> Response<Body> {
+    pub async fn handle(&self, request: Request<hyper::body::Incoming>) -> Response<Body> {
         let host = request.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default();
         let local = ["127.0.0.1", "localhost", "[::1]"].iter().any(|name| host == format!("{name}:{}", self.port));
-        if !local {
+        if self.local && !local {
             return text(StatusCode::FORBIDDEN, "carrel web only answers to localhost\n");
         }
         let path = request.uri().path().to_string();
@@ -126,7 +141,7 @@ impl Web {
         // The link `carrel web` prints: trade the token for a cookie, and drop it from the address bar.
         if let Some(sent) = query.get("token") {
             if !same(sent, &self.token) {
-                return text(StatusCode::FORBIDDEN, "that link is out of date; open the one `carrel web` printed\n");
+                return text(StatusCode::FORBIDDEN, format!("that link is out of date; {}\n", self.where_link()));
             }
             let mut response = redirect(&path);
             let cookie =
@@ -144,11 +159,13 @@ impl Web {
             return response;
         };
         if !self.logged_in(&request) {
-            return json_status(StatusCode::UNAUTHORIZED, json!({"error": "open the link `carrel web` printed"}));
+            return json_status(StatusCode::UNAUTHORIZED, json!({"error": self.where_link()}));
         }
-        // SameSite keeps the cookie off other sites' requests; Origin is the second lock on writes.
+        // SameSite keeps the cookie off other sites' requests; Origin is the second lock on writes. Only its
+        // name is compared: behind a proxy the page is https while carrel itself speaks http.
         let origin = request.headers().get(header::ORIGIN).and_then(|o| o.to_str().ok());
-        if request.method() != Method::GET && origin.is_some_and(|o| o != format!("http://{host}")) {
+        if request.method() != Method::GET && origin.is_some_and(|o| o.split_once("://").map(|(_, h)| h) != Some(host))
+        {
             return json_status(StatusCode::FORBIDDEN, json!({"error": "not from this page"}));
         }
         let method = request.method().clone();

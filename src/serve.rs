@@ -1,4 +1,5 @@
-//! `carrel serve`: a library on a server, for a group and its AIs. It serves MCP over HTTP and, every few
+//! `carrel serve`: a library on a server, for a group and its AIs. It serves MCP over HTTP, the web UI (with
+//! a link of its own, printed at start) and, every few
 //! minutes, syncs with the remote and does the slow work for everyone: extracting text and figures,
 //! looking up references, and computing embeddings. Its notifiers only hear about its own trouble.
 
@@ -30,6 +31,10 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
     }
     let every = Duration::from_secs(60 * every.or(config.serve.every).unwrap_or(5).max(1));
 
+    // The web UI's token, kept with the library (hidden, so never synced) across container restarts.
+    let web_token = crate::web::token(&lib.root.join(".carrel").join("web-token"))?;
+    let url = std::env::var("CARREL_SERVE_URL").ok().filter(|u| !u.trim().is_empty()).or(config.serve.url);
+
     let worker = lib.clone();
     let jobs = Jobs { remote: config.remote, consume: config.consume, notify: config.notify };
     std::thread::spawn(move || work(&worker, &jobs, every));
@@ -37,12 +42,16 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
-        log(&format!("serving {} at http://{}/mcp", lib.root.display(), listener.local_addr()?));
+        let local = listener.local_addr()?;
+        log(&format!("serving {} at http://{local}/mcp", lib.root.display()));
         if !config.serve.trusted.is_empty() {
-            log(&format!("no token needed from {}", config.serve.trusted.join(", ")));
+            log(&format!("no token needed for MCP from {}", config.serve.trusted.join(", ")));
         }
+        let base = url.unwrap_or_else(|| format!("http://{local}"));
+        log(&format!("web UI: {}/?token={web_token}", base.trim_end_matches('/')));
+        let web = std::sync::Arc::new(crate::web::Web::server(lib.clone(), web_token, local.port()));
         tokio::select! {
-            served = crate::mcp::serve_http(lib, listener, token, trusted, proxies) => served,
+            served = crate::mcp::serve_http(lib, listener, token, trusted, proxies, web) => served,
             () = stopped() => {
                 log("stopping");
                 Ok(())
