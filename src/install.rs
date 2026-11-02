@@ -16,6 +16,8 @@ pub enum Service {
     Web,
     /// `carrel consume` whenever a PDF lands in Downloads, and hourly
     Consume,
+    /// `carrel sync` every 10 minutes; conflicts keep the shared version, yours is kept aside
+    Sync,
 }
 
 /// The AI agents `carrel integrate` knows.
@@ -70,6 +72,7 @@ impl Service {
         match self {
             Service::Web => "web",
             Service::Consume => "consume",
+            Service::Sync => "sync",
         }
     }
 
@@ -77,6 +80,9 @@ impl Service {
         match self {
             Service::Web => ["web", "--no-open", "--listen", listen].map(String::from).to_vec(),
             Service::Consume => vec!["consume".into()],
+            // Unattended, so conflicts can't wait for someone: the shared version wins, as it is what everyone
+            // else has, and the local one goes to .carrel/conflicts with a notification.
+            Service::Sync => ["sync", "--keep", "remote"].map(String::from).to_vec(),
         }
     }
 
@@ -145,6 +151,20 @@ fn systemd(service: Service, unit: &Unit) -> Vec<(String, String)> {
                 ),
             ]
         }
+        Service::Sync => vec![
+            (
+                "carrel-sync.service".into(),
+                format!(
+                    "[Unit]\nDescription=carrel: share the library\n\n[Service]\nType=oneshot\n{env}ExecStart={exec}\n"
+                ),
+            ),
+            (
+                "carrel-sync.timer".into(),
+                "[Unit]\nDescription=carrel: share the library every 10 minutes\n\n[Timer]\nOnStartupSec=1min\n\
+                 OnUnitActiveSec=10min\n\n[Install]\nWantedBy=timers.target\n"
+                    .into(),
+            ),
+        ],
     }
 }
 
@@ -168,6 +188,7 @@ fn launchd(service: Service, unit: &Unit, logs: &Path) -> String {
             "  <key>WatchPaths</key>\n  <array>\n{}  </array>\n  <key>StartInterval</key><integer>3600</integer>\n",
             strings(&mut unit.folders.iter().map(|f| f.to_string_lossy().into_owned()))
         ),
+        Service::Sync => "  <key>StartInterval</key><integer>600</integer>\n".to_string(),
     };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -197,6 +218,7 @@ fn systemd_started(service: Service) -> &'static [&'static str] {
     match service {
         Service::Web => &["carrel-web.service"],
         Service::Consume => &["carrel-consume.path", "carrel-consume.timer"],
+        Service::Sync => &["carrel-sync.timer"],
     }
 }
 
@@ -449,6 +471,12 @@ mod tests {
         let web = Unit { args: Service::Web.args("127.0.0.1:7701"), ..unit() };
         let web = &systemd(Service::Web, &web)[0].1;
         assert!(web.contains("\"web\" \"--no-open\" \"--listen\" \"127.0.0.1:7701\"\nRestart=on-failure"));
+        let sync = systemd(Service::Sync, &Unit { args: Service::Sync.args(""), ..unit() });
+        assert_eq!(
+            sync.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["carrel-sync.service", "carrel-sync.timer"]
+        );
+        assert!(sync[0].1.contains("\"sync\" \"--keep\" \"remote\"\n") && sync[1].1.contains("OnUnitActiveSec=10min"));
     }
 
     #[test]
@@ -462,6 +490,9 @@ mod tests {
         let web = launchd(Service::Web, &Unit { args: Service::Web.args("a&b"), ..unit() }, Path::new("/l"));
         assert!(web.contains("<string>a&amp;b</string>") && web.contains("<key>SuccessfulExit</key><false/>"));
         assert!(!web.contains("WatchPaths"));
+        let sync = launchd(Service::Sync, &Unit { args: Service::Sync.args(""), ..unit() }, Path::new("/l"));
+        assert!(sync.contains("<string>--keep</string>\n    <string>remote</string>"));
+        assert!(sync.contains("<key>StartInterval</key><integer>600</integer>") && !sync.contains("WatchPaths"));
     }
 
     #[test]

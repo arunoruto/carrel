@@ -692,6 +692,17 @@ fn sharing_through_a_remote() {
     assert_eq!(sync(&b, Some(Keep::Remote)), [(format!("{id}/notes.md"), Action::Download)]);
     assert_eq!(fs::read_to_string(b.root.join(&id).join("notes.md")).unwrap(), "a's");
     assert_eq!(fs::read_to_string(b.root.join(".carrel/trash").join(&id).join("notes.md")).unwrap(), "b's");
+    // Settled for the remote as the sync service does, b's version is kept apart too, beyond the trash's
+    // next overwrite.
+    fs::write(b.root.join(&id).join("notes.md"), "b's again").unwrap();
+    fs::write(a.root.join(&id).join("notes.md"), "a's again").unwrap();
+    sync(&a, None);
+    let report = b.sync(&remote, Some(Keep::Remote), false, |_, _| {}).unwrap();
+    assert_eq!(report.settled, [format!("{id}/notes.md")]);
+    let kept = report.conflicts.unwrap().join(&id).join("notes.md");
+    assert_eq!(fs::read_to_string(kept).unwrap(), "b's again");
+    assert_eq!(fs::read_to_string(b.root.join(&id).join("notes.md")).unwrap(), "a's again");
+    assert!(b.sync(&remote, Some(Keep::Remote), false, |_, _| {}).unwrap().settled.is_empty());
 
     // An edit beats a deletion; a deletion of an unchanged file goes through, into the trash.
     fs::write(b.root.join(&id).join("notes.md"), "b edits").unwrap();

@@ -47,4 +47,4 @@ Run `carrel <command> --help` for every option.
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](/docs/guide/ai.md) on stdin/stdout |
 | `integrate [agent] [--remove]` | [connect an AI agent](/docs/guide/ai.md#connecting): claude, opencode, codex, gemini, cursor |
-| `service [install\|remove web\|consume]` | [run in the background](/docs/installation.md#running-in-the-background): systemd on Linux, launchd on macOS |
+| `service [install\|remove web\|consume\|sync]` | [run in the background](/docs/installation.md#running-in-the-background): systemd on Linux, launchd on macOS |

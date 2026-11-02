@@ -113,6 +113,7 @@ Turning PDFs into text and figures is done by an external program (see [Configur
 ```sh
 carrel service install web        # http://127.0.0.1:7700; `carrel web --get-url` prints the link to open
 carrel service install consume    # whenever a PDF lands in Downloads, and hourly
+carrel service install sync       # every 10 minutes, with the config's remote (Sharing a library)
 carrel service                    # what runs
 carrel service remove web
 ```

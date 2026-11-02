@@ -301,6 +301,15 @@ fn decide(local: Option<&str>, remote: Option<&str>, base: Option<&Synced>, keep
     })
 }
 
+/// Whether a library file is made from the PDF or looked up online (text, figures, embeddings, references,
+/// affiliations), so carrel can make it again; a conflict over one of those loses nobody's work.
+pub fn generated(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let parts: Vec<&str> = path.split('/').collect();
+    matches!(parts[..], [_, "figures", _, ..])
+        || ["fulltext.md", crate::embed::FILE, crate::graph::FILE, crate::affiliations::FILE].contains(&name)
+}
+
 /// The outcome of a sync, file by file.
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
@@ -308,6 +317,10 @@ pub struct Report {
     pub failed: Vec<(String, String)>,
     /// Remote keys that aren't plain paths inside the library (`../x`, `/x`, folder markers `x/`).
     pub skipped: Vec<String>,
+    /// Conflicts that `keep` settled.
+    pub settled: Vec<String>,
+    /// Where the local versions of those went, when the remote's were kept.
+    pub conflicts: Option<PathBuf>,
 }
 
 impl Report {
@@ -400,6 +413,9 @@ impl Library {
         for path in paths {
             let l = local.get(&path).map(|(md5, ..)| md5.as_str());
             let r = remote_files.get(&path).map(String::as_str);
+            if keep.is_some() && decide(l, r, state.files.get(&path), None) == Some(Action::Conflict) {
+                outcome.settled.push(path.clone());
+            }
             match decide(l, r, state.files.get(&path), keep) {
                 Some(action) => plan.push((path, action)),
                 // In sync: remember both sides so the next sync can tell who changed what.
@@ -415,6 +431,18 @@ impl Library {
             }
         }
 
+        // The losing local versions are kept apart, one folder per sync: the trash holds only a file's latest
+        // copy, and the next download of that file would replace it there.
+        if keep == Some(Keep::Remote) && !dry_run && !outcome.settled.is_empty() {
+            let when = std::time::SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            let dir = carrel.join("conflicts").join(when.to_string());
+            for path in &outcome.settled {
+                let to = dir.join(path);
+                fs::create_dir_all(to.parent().unwrap())?;
+                fs::copy(self.root.join(path), &to).with_context(|| format!("cannot keep a copy of {path}"))?;
+            }
+            outcome.conflicts = Some(dir);
+        }
         let (listed, plan): (Vec<_>, Vec<_>) = plan.into_iter().partition(|(_, a)| dry_run || *a == Action::Conflict);
         for (path, action) in listed {
             progress(&path, action);
@@ -554,5 +582,8 @@ mod tests {
         }
         assert_eq!(decide(Some("x"), Some("y"), b, Some(Keep::Local)), Some(Action::Upload));
         assert_eq!(decide(Some("x"), Some("y"), b, Some(Keep::Remote)), Some(Action::Download));
+        assert!(generated("a2020/fulltext.md") && generated("a2020/figures/image_000.png"));
+        assert!(generated("a2020/embeddings.json") && generated("a2020/references.json"));
+        assert!(!generated("a2020/a2020.bib") && !generated("a2020/notes.md") && !generated("projects/figures"));
     }
 }

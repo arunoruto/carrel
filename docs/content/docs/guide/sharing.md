@@ -53,6 +53,31 @@ A few things carrel refuses:
 - names on the remote that aren't plain paths inside the library (`../x`, `/x`, `a//b`, folder markers like `papers/` that some S3 tools create): skipped, with a warning. Hidden ones (`.carrel/...`) are skipped quietly, as hidden files here are;
 - two syncs of one library at once (say `carrel sync` while `carrel serve` syncs): the second stops with "another sync is running".
 
+## Sharing with your group
+
+A shared library is one bucket that everyone syncs with. carrel has no accounts: whoever holds a key to the bucket can read it, and with write access change and delete anything in it.
+
+**A key per person.** Give each member a key of their own rather than passing one around, so one can be taken back without changing everyone's config. With [Garage](https://garagehq.deuxfleurs.fr):
+
+```sh
+garage key create carrel-alice
+garage bucket allow --read --write papers --key carrel-alice   # without --write, alice can only read
+```
+
+It prints the key's ID and secret once; they go in alice's `[remote]` as `access_key` and `secret_key`. Her first `carrel sync` downloads the whole library.
+
+**Syncing by itself.** The longer people go between syncs, the more their edits cross. A service syncs every 10 minutes and at login:
+
+```sh
+carrel service install sync     # Home Manager: services.carrel.sync.enable = true;
+```
+
+**Conflicts.** A file changed by two people between syncs is a conflict. `carrel sync` by hand leaves it alone and says so, until `--keep local` or `--keep remote` settles it. The service can't wait for anyone, so it keeps the shared version, which everyone else already has, and saves yours in `.carrel/conflicts/<time>/` in the library, keeping its path. It tells you through your [notifiers](/docs/reference/configuration.md#notifications) about the files someone wrote, naming them: metadata, notes, summaries, drafts, projects. Text, figures, embeddings and references are made again from the PDF, so their conflicts are settled without a message. To bring your edit back, compare the two and copy what you want over the shared file; the next sync shares it.
+
+Most files belong to one paper and change rarely, so conflicts are rare in practice: two people editing the same paper's notes, metadata or summary within minutes, or re-extracting the same PDF.
+
+**Everything is shared**, including what isn't a paper: [recommendations](/docs/guide/recommendations.md) (one person's dismiss hides it for everyone), drafts, projects and confirmed people. So are deletions: `carrel rm` removes the paper for all. Only the trash on each machine that synced keeps a copy, so back up the bucket itself now and then, for instance with a nightly `rclone sync` to another disk.
+
 ## With Git
 
 Git keeps history, at the price of committing by hand. PDFs, figures and supplementary files go to [Git LFS](https://git-lfs.com), which GitHub, GitLab, Gitea and Forgejo all support. Don't sync the same library through Git and a bucket.

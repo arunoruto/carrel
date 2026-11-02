@@ -3,6 +3,8 @@
 #   case one slipped by. Without a terminal it adds nothing unless `[consume] auto = true`, and tells you
 #   through the config's [notify] what it found or added.
 # - services.carrel.web: `carrel web`, the library in your browser at http://127.0.0.1:7700.
+# - services.carrel.sync: `carrel sync` every 10 minutes with the config's [remote]. Conflicts keep the shared
+#   version; the local one goes to .carrel/conflicts in the library, and [notify] tells you.
 # - services.carrel.docling.package: extract text with Docling, in the shell and in these services.
 {
   config,
@@ -64,10 +66,14 @@ in
         description = "Where to serve it; loopback only. `carrel web --get-url` prints the link to open.";
       };
     };
+
+    sync.enable = lib.mkEnableOption "carrel sync every 10 minutes, sharing the library through the config's [remote]";
   };
 
   config = lib.mkMerge [
-    { home.packages = lib.mkIf (cfg.consume.enable || cfg.web.enable) [ cfg.package ]; }
+    {
+      home.packages = lib.mkIf (cfg.consume.enable || cfg.web.enable || cfg.sync.enable) [ cfg.package ];
+    }
 
     (lib.mkIf (cfg.docling.package != null) {
       home.packages = [ cfg.docling.package ];
@@ -106,6 +112,21 @@ in
       };
     })
 
+    (lib.mkIf (cfg.sync.enable && isDarwin) {
+      launchd.agents.carrel-sync = {
+        enable = true;
+        config = agent "sync" // {
+          ProgramArguments = [
+            carrel
+            "sync"
+            "--keep"
+            "remote"
+          ];
+          StartInterval = 600;
+        };
+      };
+    })
+
     (lib.mkIf (cfg.consume.enable && !isDarwin) {
       systemd.user.services.carrel-consume = {
         Unit.Description = "carrel: pick up new papers";
@@ -128,6 +149,25 @@ in
         Timer = {
           OnCalendar = "hourly";
           Persistent = true;
+        };
+        Install.WantedBy = [ "timers.target" ];
+      };
+    })
+
+    (lib.mkIf (cfg.sync.enable && !isDarwin) {
+      systemd.user.services.carrel-sync = {
+        Unit.Description = "carrel: share the library";
+        Service = {
+          Type = "oneshot";
+          ExecStart = "${carrel} sync --keep remote";
+        };
+      };
+
+      systemd.user.timers.carrel-sync = {
+        Unit.Description = "carrel: share the library every 10 minutes";
+        Timer = {
+          OnStartupSec = "1min";
+          OnUnitActiveSec = "10min";
         };
         Install.WantedBy = [ "timers.target" ];
       };

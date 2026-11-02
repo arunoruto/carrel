@@ -405,7 +405,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Cmd::Service { cmd: None } => {
-            for service in [install::Service::Web, install::Service::Consume] {
+            for service in [install::Service::Web, install::Service::Consume, install::Service::Sync] {
                 println!("{}", install::status(service)?);
             }
             return Ok(());
@@ -909,8 +909,8 @@ fn ollama(lib: &Library) -> Result<carrel::embed::Ollama> {
 
 fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>, verbose: bool) -> Result<()> {
     use carrel::remote::Action;
-    let config = Config::load()?.remote.context("no remote to sync with; add [remote] to the config")?;
-    let remote = config.open()?;
+    let config = Config::load()?;
+    let remote = config.remote.as_ref().context("no remote to sync with; add [remote] to the config")?.open()?;
     println!("syncing with {}", remote.name());
     let arrow = |action| match action {
         Action::Upload => "↑",
@@ -939,6 +939,30 @@ fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>, verbos
     let conflicts = report.count(Action::Conflict);
     if conflicts > 0 {
         println!("{conflicts} changed on both sides and left alone; settle them with --keep local or --keep remote");
+    }
+    if !report.settled.is_empty() && !dry_run {
+        let n = report.settled.len();
+        let (kept, yours) = match &report.conflicts {
+            Some(dir) => ("the shared version", format!("; yours are in {}", dir.display())),
+            None => ("your version", String::new()),
+        };
+        let body = format!(
+            "{n} changed here and by someone else since the last sync; kept {kept}{yours}:\n{}\n",
+            report.settled.join("\n")
+        );
+        print!("{body}");
+        // From the sync service, which no one watches; only about what someone wrote, as text, figures and
+        // the like are made again from the PDF.
+        let written: Vec<&String> = report.settled.iter().filter(|p| !carrel::remote::generated(p)).collect();
+        if !written.is_empty() && !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            let n = written.len();
+            let list = written.iter().map(|p| p.as_str()).collect::<Vec<_>>().join("\n");
+            let body =
+                format!("{n} changed here and by someone else since the last sync; kept {kept}{yours}:\n{list}\n");
+            for failed in carrel::notify::send(&config.notify, &format!("carrel: {n} sync conflicts settled"), &body) {
+                eprintln!("cannot notify: {failed}");
+            }
+        }
     }
     for path in &report.skipped {
         eprintln!("warning: skipped {path:?} on the remote: not a file path inside the library");
