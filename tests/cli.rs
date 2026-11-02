@@ -165,12 +165,16 @@ fn config_file() {
     assert!(c.fails(&["embed", "--all"]).contains("cannot reach Ollama"));
     std::fs::create_dir_all(c.tmp.path("shared")).unwrap();
     c.tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {A}}\n");
+    c.tmp.write("lib/recommended/one.json", "{}");
+    c.tmp.write("lib/recommended/two.json", "{}");
     c.tmp.write(
         "config/carrel/config.toml",
         format!("[remote]\ntype = \"folder\"\npath = \"{}\"\n", c.tmp.path("shared").display()),
     );
     let dry = c.ok(&["sync", "-n"]);
     assert!(dry.contains("a2020/a2020.bib") && dry.contains("would upload"), "{dry}");
+    assert!(dry.contains("2 recommendations (--verbose") && !dry.contains("one.json"), "{dry}");
+    assert!(c.ok(&["sync", "-n", "-v"]).contains("recommended/one.json"));
     assert!(!c.tmp.path("shared/a2020").exists());
     assert!(c.ok(&["sync"]).contains("download 0, delete 0 here and 0 remotely"));
     assert_eq!(read(c.tmp.path("shared/a2020/a2020.bib")), "@misc{a2020, title = {A}}\n");

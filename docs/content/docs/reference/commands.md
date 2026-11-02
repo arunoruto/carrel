@@ -42,7 +42,7 @@ Run `carrel <command> --help` for every option.
 | `bib [ids…] [-p project] [--jabref]` | BibTeX for papers, a project, or the library; `--jabref` adds [file links and projects as groups](/docs/guide/projects.md#jabref) |
 | `doctor [--all] [--online] [--json]` | [check the library](/docs/guide/maintenance.md) |
 | `rm <id>` | delete a paper and its files |
-| `sync [-n] [--keep local\|remote]` | [share the library](/docs/guide/sharing.md) through the config's remote |
+| `sync [-n] [-v] [--keep local\|remote]` | [share the library](/docs/guide/sharing.md) through the config's remote |
 | `serve [--listen addr] [--every minutes]` | [run the library on a server](/docs/guide/server.md): MCP over HTTP, syncing and background work |
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](/docs/guide/ai.md) on stdin/stdout |

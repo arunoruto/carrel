@@ -210,6 +210,9 @@ enum Cmd {
         /// Settle files changed on both sides by keeping this side's version
         #[arg(long)]
         keep: Option<carrel::remote::Keep>,
+        /// List every recommendation file too, not just how many
+        #[arg(short, long)]
+        verbose: bool,
     },
     /// Move new PDFs from Downloads (or the config's [consume] folders) into the library, asking for each.
     /// Without a terminal (from a timer) it doesn't ask: it tells through the notifiers, or with
@@ -450,7 +453,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Doctor { json, all, online } => doctor(&lib, json, all, online)?,
-        Cmd::Sync { dry_run, keep } => sync(&lib, dry_run, keep)?,
+        Cmd::Sync { dry_run, keep, verbose } => sync(&lib, dry_run, keep, verbose)?,
         Cmd::ImportIlibrarian { data } => {
             let imported = lib.import_ilibrarian(&data)?;
             imported.messages.iter().for_each(|m| println!("{m}"));
@@ -904,21 +907,33 @@ fn ollama(lib: &Library) -> Result<carrel::embed::Ollama> {
     carrel::embed::Ollama::connect(config)
 }
 
-fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>) -> Result<()> {
+fn sync(lib: &Library, dry_run: bool, keep: Option<carrel::remote::Keep>, verbose: bool) -> Result<()> {
     use carrel::remote::Action;
     let config = Config::load()?.remote.context("no remote to sync with; add [remote] to the config")?;
     let remote = config.open()?;
     println!("syncing with {}", remote.name());
+    let arrow = |action| match action {
+        Action::Upload => "↑",
+        Action::Download => "↓",
+        Action::DeleteRemote => "✗ remote",
+        Action::DeleteLocal => "✗ here",
+        Action::Conflict => "! conflict",
+    };
+    // Recommendations come by the hundred: counted, unless asked for or in conflict.
+    let mut recommended: Vec<(Action, usize)> = Vec::new();
     let report = lib.sync(&*remote, keep, dry_run, |path, action| {
-        let arrow = match action {
-            Action::Upload => "↑",
-            Action::Download => "↓",
-            Action::DeleteRemote => "✗ remote",
-            Action::DeleteLocal => "✗ here",
-            Action::Conflict => "! conflict",
-        };
-        println!("{arrow:<10} {path}");
+        if !verbose && action != Action::Conflict && path.starts_with("recommended/") {
+            match recommended.iter_mut().find(|(a, _)| *a == action) {
+                Some((_, n)) => *n += 1,
+                None => recommended.push((action, 1)),
+            }
+        } else {
+            println!("{:<10} {path}", arrow(action));
+        }
     })?;
+    for (action, n) in recommended {
+        println!("{:<10} {n} recommendation{} (--verbose lists them)", arrow(action), if n == 1 { "" } else { "s" });
+    }
     let verb = if dry_run { "would " } else { "" };
     println!("{verb}{}", report.summary());
     let conflicts = report.count(Action::Conflict);
