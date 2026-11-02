@@ -72,8 +72,8 @@
             <span class="text-muted">: {d.same ? 'one person' : 'different people'}</span>
             {#if d.reason}<div class="mt-0.5 text-xs text-muted">{d.reason}</div>{/if}
           </div>
-          <Button size="sm" variant="ghost" busy={busy === `people/${d.id}`} onclick={() => decidePeople(d, false)}><X class="size-3.5" />Reject</Button>
-          <Button size="sm" variant="primary" busy={busy === `people/${d.id}`} onclick={() => decidePeople(d, true)}><Check class="size-3.5" />Approve</Button>
+          <Button size="sm" variant="ghost" busy={busy === `people/${d.id}`} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decidePeople(d, false)}><X class="size-3.5" />Reject</Button>
+          <Button size="sm" variant="primary" busy={busy === `people/${d.id}`} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decidePeople(d, true)}><Check class="size-3.5" />Approve</Button>
         </header>
       </article>
     {/each}
@@ -84,8 +84,8 @@
           <a href={paperHref(d.id)} class="flex min-w-0 flex-1 items-center gap-1 font-medium hover:text-accent">
             <span class="truncate">{d.title}</span><ArrowUpRight class="size-4 shrink-0 text-faint" />
           </a>
-          <Button size="sm" variant="ghost" busy={busy === `${d.id}/${d.field}`} onclick={() => decide(d, false)}><X class="size-3.5" />Reject</Button>
-          <Button size="sm" variant="primary" busy={busy === `${d.id}/${d.field}`} onclick={() => decide(d, true)}><Check class="size-3.5" />Approve</Button>
+          <Button size="sm" variant="ghost" busy={busy === `${d.id}/${d.field}`} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decide(d, false)}><X class="size-3.5" />Reject</Button>
+          <Button size="sm" variant="primary" busy={busy === `${d.id}/${d.field}`} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decide(d, true)}><Check class="size-3.5" />Approve</Button>
         </header>
         <div class="grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
           <div class="max-h-96 overflow-y-auto px-5 py-4">

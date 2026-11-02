@@ -93,14 +93,14 @@ pub fn token(path: &Path) -> Result<String> {
 
 pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: String) -> Result<()> {
     let port = listener.local_addr()?.port();
-    let web = Arc::new(Web { lib, token, port, local: true });
+    let web = Arc::new(Web { lib, token, port, local: true, auth: None, site: None });
     loop {
         let (stream, _) = listener.accept().await?;
         let web = web.clone();
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request| {
                 let web = web.clone();
-                async move { Ok::<_, Infallible>(web.handle(request).await) }
+                async move { Ok::<_, Infallible>(web.handle(request, false).await) }
             });
             let io = hyper_util::rt::TokioIo::new(stream);
             let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, service).await;
@@ -114,12 +114,84 @@ pub struct Web {
     port: u16,
     /// `carrel web`, answering only to localhost; not `carrel serve`'s.
     local: bool,
+    /// `carrel serve`'s logins, tokens and roles.
+    auth: Option<Arc<crate::auth::Auth>>,
+    /// The server's name as browsers reach it, the only one it answers to when known.
+    site: Option<String>,
 }
 
 impl Web {
-    /// For `carrel serve`, which hands it every request but MCP's.
-    pub fn server(lib: Library, token: String, port: u16) -> Self {
-        Self { lib, token, port, local: false }
+    /// For `carrel serve`, which hands it every request but MCP's. `url` is where browsers reach it.
+    pub fn server(lib: Library, token: String, port: u16, auth: Arc<crate::auth::Auth>, url: Option<&str>) -> Self {
+        let site = url.map(|u| u.split_once("://").map_or(u, |(_, rest)| rest).trim_end_matches('/').to_string());
+        Self { lib, token, port, local: false, auth: Some(auth), site }
+    }
+
+    /// Whether a bearer token is a member's, for MCP.
+    pub fn member<B>(&self, request: &Request<B>) -> bool {
+        use crate::auth::Role;
+        self.auth.as_ref().is_some_and(|a| a.who(request.headers(), false).role >= Role::Member)
+    }
+
+    /// With logins, the link's token is off: people log in instead.
+    fn link_works(&self) -> bool {
+        self.local || !self.auth.as_ref().is_some_and(|a| a.login())
+    }
+
+    /// Who sent a request, from a trusted network or not.
+    fn who<B>(&self, request: &Request<B>, trusted: bool) -> crate::auth::Who {
+        use crate::auth::{Role, Who};
+        if self.link_works() && self.logged_in(request) {
+            return Who::role(Role::Admin);
+        }
+        match &self.auth {
+            Some(auth) => auth.who(request.headers(), trusted),
+            None => Who::role(Role::None),
+        }
+    }
+
+    /// The `/auth/` pages of a server with logins.
+    async fn auth_page(
+        &self,
+        request: &Request<hyper::body::Incoming>,
+        query: &HashMap<String, String>,
+    ) -> Response<Body> {
+        let auth = self.auth.clone().expect("only with logins");
+        let path = request.uri().path();
+        if path == "/auth/logout" && request.method() == Method::POST {
+            let _ = auth.logout(request.headers());
+            let mut response = json_status(StatusCode::OK, json!({}));
+            response.headers_mut().insert(header::SET_COOKIE, auth.cookie("").parse().unwrap());
+            return response;
+        }
+        if let Some(error) = query.get("error") {
+            let why = query.get("error_description").unwrap_or(error);
+            return text(StatusCode::FORBIDDEN, format!("the login was refused: {why}\n"));
+        }
+        let (code, state) = (query.get("code").cloned(), query.get("state").cloned());
+        let next = query.get("next").cloned().unwrap_or_else(|| "/".into());
+        let login = path == "/auth/login";
+        // The provider is asked over the network, which blocks.
+        let reply = tokio::task::spawn_blocking(move || -> Result<(Option<String>, String)> {
+            match (login, code, state) {
+                (true, ..) => Ok((None, auth.login_url(&next)?)),
+                (false, Some(code), Some(state)) => auth.callback(&code, &state).map(|(id, next)| (Some(id), next)),
+                _ => bail!("not a login page"),
+            }
+        })
+        .await;
+        match reply {
+            Ok(Ok((session, to))) => {
+                let mut response = redirect(&to);
+                if let Some(id) = session {
+                    let cookie = self.auth.as_ref().unwrap().cookie(&id);
+                    response.headers_mut().insert(header::SET_COOKIE, cookie.parse().unwrap());
+                }
+                response
+            }
+            Ok(Err(e)) => text(StatusCode::BAD_REQUEST, format!("cannot log in: {e:#}\n")),
+            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}\n")),
+        }
     }
 
     fn where_link(&self) -> &'static str {
@@ -130,16 +202,27 @@ impl Web {
         format!("carrel-{}", self.port)
     }
 
-    pub async fn handle(&self, request: Request<hyper::body::Incoming>) -> Response<Body> {
+    /// `trusted`: from one of a server's trusted networks.
+    pub async fn handle(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
         let host = request.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default();
         let local = ["127.0.0.1", "localhost", "[::1]"].iter().any(|name| host == format!("{name}:{}", self.port));
         if self.local && !local {
             return text(StatusCode::FORBIDDEN, "carrel web only answers to localhost\n");
         }
+        // A server lets trusted networks in without a cookie, so a name pointed at it (DNS rebinding) must not
+        // pass for it.
+        if let Some(site) = &self.site
+            && host != site
+        {
+            return text(StatusCode::FORBIDDEN, format!("this server answers to {site}\n"));
+        }
         let path = request.uri().path().to_string();
         let query = query(request.uri().query().unwrap_or_default());
+        if path.starts_with("/auth/") && self.auth.as_ref().is_some_and(|a| a.login()) {
+            return self.auth_page(&request, &query).await;
+        }
         // The link `carrel web` prints: trade the token for a cookie, and drop it from the address bar.
-        if let Some(sent) = query.get("token") {
+        if let Some(sent) = query.get("token").filter(|_| self.link_works()) {
             if !same(sent, &self.token) {
                 return text(StatusCode::FORBIDDEN, format!("that link is out of date; {}\n", self.where_link()));
             }
@@ -158,8 +241,31 @@ impl Web {
             response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, csp.parse().unwrap());
             return response;
         };
-        if !self.logged_in(&request) {
-            return json_status(StatusCode::UNAUTHORIZED, json!({"error": self.where_link()}));
+        use crate::auth::{Right, Role};
+        let who = self.who(&request, trusted);
+        let method = request.method().clone();
+        let segments: Vec<String> = api.split('/').filter(|s| !s.is_empty()).map(decode).collect();
+        let segments_ref: Vec<&str> = segments.iter().map(String::as_str).collect();
+        if segments_ref == ["me"] {
+            let can = |right| who.role.can(right);
+            let login = self.auth.as_ref().is_some_and(|a| a.login());
+            return json_status(
+                StatusCode::OK,
+                json!({
+                    "user": who.user, "name": who.name, "role": who.role, "login": login, "server": !self.local,
+                    "can": {"read": can(Right::Read), "add": can(Right::Add), "edit": can(Right::Edit), "admin": can(Right::Admin)},
+                }),
+            );
+        }
+        if !who.role.can(crate::auth::needed(method.as_str(), &segments_ref)) {
+            return match who.role {
+                Role::None if self.auth.as_ref().is_some_and(|a| a.login()) => {
+                    json_status(StatusCode::UNAUTHORIZED, json!({"error": "log in"}))
+                }
+                Role::None => json_status(StatusCode::UNAUTHORIZED, json!({"error": self.where_link()})),
+                Role::Anonymous => json_status(StatusCode::FORBIDDEN, json!({"error": "log in to change the library"})),
+                _ => json_status(StatusCode::FORBIDDEN, json!({"error": "only admins may do that"})),
+            };
         }
         // SameSite keeps the cookie off other sites' requests; Origin is the second lock on writes. Only its
         // name is compared: behind a proxy the page is https while carrel itself speaks http.
@@ -168,8 +274,23 @@ impl Web {
         {
             return json_status(StatusCode::FORBIDDEN, json!({"error": "not from this page"}));
         }
-        let method = request.method().clone();
-        let segments: Vec<String> = api.split('/').filter(|s| !s.is_empty()).map(decode).collect();
+        if let (Some(auth), ["tokens", rest @ ..]) = (&self.auth, &segments_ref[..]) {
+            let reply = match (method.as_str(), rest) {
+                ("GET", []) => Ok(auth.tokens(&who)),
+                ("POST", []) => {
+                    let body = Limited::new(request.into_body(), 4096).collect().await.map(|b| b.to_bytes());
+                    let name = body.ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                    let name = name.as_ref().and_then(|v| v["name"].as_str()).unwrap_or_default().to_string();
+                    auth.create_token(&who, &name)
+                }
+                ("DELETE", [id]) => auth.revoke_token(&who, id).map(|()| json!({})),
+                _ => return json_status(StatusCode::NOT_FOUND, json!({"error": "no such API call"})),
+            };
+            return match reply {
+                Ok(value) => json_status(StatusCode::OK, value),
+                Err(e) => json_status(StatusCode::BAD_REQUEST, json!({"error": format!("{e:#}")})),
+            };
+        }
         let body = match Limited::new(request.into_body(), MAX_BODY).collect().await {
             Ok(body) => body.to_bytes(),
             Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),

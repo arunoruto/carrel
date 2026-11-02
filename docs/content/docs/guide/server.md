@@ -90,19 +90,47 @@ The library lives in `/var/lib/carrel/library`. `settings` is the [config](/docs
 
 ## The web UI
 
-The server's address opens the [web UI](/docs/guide/web.md), the same as `carrel web` on your own machine: papers, the reader, adding by DOI or by dropping PDFs, Discover, the map. Papers added there are extracted by the server and reach everyone with its next sync.
+The server's address opens the [web UI](/docs/guide/web.md), the same as `carrel web` on your own machine: papers, the reader, adding by DOI or by dropping PDFs, Discover, the map. Papers added there are extracted by the server and reach everyone with its next sync. Text extraction needs an extractor on the server: the image has PyMuPDF, and `CARREL_DOCLING` (or `docling` in its config) can point it at a [docling-serve](/docs/reference/configuration.md#the-extractor).
 
-It asks for a token of its own, from trusted networks too, and prints the link with it when it starts:
+### Logging in
+
+With a login provider that speaks OpenID Connect ([pocket-id](https://pocket-id.org), Keycloak, Authentik, ...), people log in with their accounts there:
+
+```toml
+[serve]
+url = "https://papers.example.org"          # where browsers reach carrel
+
+[serve.oidc]
+issuer = "https://id.example.org"
+client_id = "..."
+client_secret = { file = "/run/secrets/carrel-oidc" }
+```
+
+or `CARREL_OIDC_ISSUER`, `CARREL_OIDC_CLIENT_ID` and `CARREL_OIDC_SECRET` in a container. At the provider, make a client with the callback `https://papers.example.org/auth/callback`; carrel asks for the scopes `openid profile email groups`. Two groups there decide what people may do:
+
+| who | may |
+|---|---|
+| anyone from a [trusted network](#networks-without-a-token), without logging in | read, and add papers and files |
+| group `carrel` | also change things: notes, metadata, drafts, projects, people |
+| group `admin` | also delete papers |
+
+Someone in neither group can't log in. A login lasts 30 days. Members make **tokens** for their machines on the web UI's Tokens page, for the [AI](#connecting-an-ai) and other clients that can't log in through a browser; a token acts for the person who made it, with their groups at the time, until they revoke it. The server's own token (`CARREL_SERVE_TOKEN`) counts as an admin's.
+
+Sessions and tokens are kept in `.carrel/` in the library, only as hashes. carrel asks the provider who logged in, over HTTPS from the server, rather than reading it from the browser.
+
+### Without a login provider
+
+Then the server prints a link with a token of its own when it starts:
 
 ```
 12:00:00 web UI: https://papers.example.org/?token=4f1c…
 ```
 
-(`docker logs carrel | grep "web UI"` finds it.) Opening the link once logs a browser in for a year; pass it on to whoever should get in. The token is kept in `.carrel/web-token` in the library, so it survives restarts; delete that file and restart to change it, which logs everyone out. Set `url` in `[serve]`, or `CARREL_SERVE_URL`, to the address browsers use, so the link in the log is one to click. Text extraction needs an extractor on the server: the image has PyMuPDF, and `CARREL_DOCLING` (or `docling` in its config) can point it at a [docling-serve](/docs/reference/configuration.md#the-extractor).
+(`docker logs carrel | grep "web UI"` finds it.) Opening it logs a browser in as an admin, for a year; trusted networks may still read and add without it. The token is kept in `.carrel/web-token`; delete that file and restart to change it, which logs everyone out. Set `url` in `[serve]` (or `CARREL_SERVE_URL`) to the address browsers use, so the link is one to click; the server then also answers to that name only.
 
 ## Connecting an AI
 
-Clients send the token in a header. For Claude Code:
+Clients send a token in a header: a member's own from the Tokens page, or the server's. For Claude Code:
 
 ```sh
 claude mcp add --transport http carrel https://papers.example.org/mcp \

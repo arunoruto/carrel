@@ -164,6 +164,24 @@ export interface Neighbors {
   references_known: boolean;
 }
 
+/** Who the browser is to carrel, and what it may do. */
+export interface Me {
+  user: string | null;
+  name: string | null;
+  role: 'none' | 'anonymous' | 'member' | 'admin';
+  can: { read: boolean; add: boolean; edit: boolean; admin: boolean };
+  /** The server offers logging in (OIDC). */
+  login: boolean;
+  /** `carrel serve`, not `carrel web`. */
+  server: boolean;
+}
+
+export interface Token {
+  id: string;
+  name: string;
+  created: string;
+}
+
 export interface Added {
   id: string;
   messages: string[];
@@ -202,6 +220,13 @@ const q = (params: Record<string, string | number | boolean | undefined>) => {
 const paper = (id: string) => `papers/${encodeURIComponent(id)}`;
 
 export const api = {
+  me: () => call<Me>('GET', 'me'),
+  tokens: () => call<Token[]>('GET', 'tokens'),
+  createToken: (name: string) => call<Token & { token: string }>('POST', 'tokens', JSON.stringify({ name })),
+  revokeToken: (id: string) => call<{}>('DELETE', `tokens/${encodeURIComponent(id)}`),
+  logout: () => fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }),
+  /** The login page, coming back here afterwards. */
+  loginUrl: () => `/auth/login?next=${encodeURIComponent(location.pathname + location.hash)}`,
   info: () => call<Info>('GET', 'info'),
   papers: (project?: string) => call<PaperSummary[]>('GET', `papers${q({ project })}`),
   search: (query: string, semantic: boolean, limit = 100) =>

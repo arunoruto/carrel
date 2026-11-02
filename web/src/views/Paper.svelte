@@ -97,6 +97,10 @@
     busy = null;
   }
 
+  // Without the right to change the library (a server's visitor who isn't logged in), its buttons are off.
+  const locked = $derived(!app.can.edit);
+  const why = $derived(locked ? 'Log in to change the library' : undefined);
+
   const decide = (field: FieldName, approve: boolean) =>
     act(`draft-${field}`, () => api.decide(id, field, approve), approve ? `Approved the ${field}` : `Rejected the ${field}`);
 
@@ -249,11 +253,11 @@
               {:else}
                 <Button variant="primary" busy={busy === 'attach'} onclick={() => pdfPicker.click()}><Paperclip class="size-4" />Attach PDF</Button>
               {/if}
-              <Button variant="ghost" size="icon" busy={busy === 'update'} onclick={() => act('update', () => api.update(id), 'Metadata updated')} title="Fetch the metadata again"><RefreshCw class="size-4" /></Button>
+              <Button variant="ghost" size="icon" busy={busy === 'update'} disabled={locked} onclick={() => act('update', () => api.update(id), 'Metadata updated')} title={why ?? 'Fetch the metadata again'}><RefreshCw class="size-4" /></Button>
               {#if p.pdf}
-                <Button variant="ghost" size="icon" busy={busy === 'extract'} onclick={() => act('extract', () => api.extract(id), 'Text and figures extracted')} title="Extract the text and figures again"><ScanText class="size-4" /></Button>
+                <Button variant="ghost" size="icon" busy={busy === 'extract'} disabled={locked} onclick={() => act('extract', () => api.extract(id), 'Text and figures extracted')} title={why ?? 'Extract the text and figures again'}><ScanText class="size-4" /></Button>
               {/if}
-              <Button variant="ghost" size="icon" onclick={() => (removing = true)} title="Delete"><Trash2 class="size-4 text-failed" /></Button>
+              {#if app.can.admin}<Button variant="ghost" size="icon" onclick={() => (removing = true)} title="Delete"><Trash2 class="size-4 text-failed" /></Button>{/if}
             </div>
           </div>
           <nav class="mt-4 flex gap-1 overflow-x-auto [scrollbar-width:none]">
@@ -301,8 +305,8 @@
                   <div class="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2.5">
                     <NotebookPen class="size-4 text-warning" />
                     <span class="flex-1 text-sm font-medium">An AI proposes {field === 'keywords' ? 'keywords' : `a ${field === 'references' ? 'list of references' : field}`}</span>
-                    <Button size="sm" variant="ghost" busy={busy === `draft-${field}`} onclick={() => decide(field, false)}><X class="size-3.5" />Reject</Button>
-                    <Button size="sm" variant="primary" busy={busy === `draft-${field}`} onclick={() => decide(field, true)}><Check class="size-3.5" />Approve</Button>
+                    <Button size="sm" variant="ghost" busy={busy === `draft-${field}`} disabled={locked} title={why} onclick={() => decide(field, false)}><X class="size-3.5" />Reject</Button>
+                    <Button size="sm" variant="primary" busy={busy === `draft-${field}`} disabled={locked} title={why} onclick={() => decide(field, true)}><Check class="size-3.5" />Approve</Button>
                   </div>
                   <div class="max-h-96 overflow-y-auto px-4 py-3">
                     {#if field === 'keywords'}
@@ -341,10 +345,10 @@
                   {#each p.keywords as k}
                     <span class="group inline-flex items-center gap-1 rounded-md bg-hover px-2 py-0.5 text-xs">
                       <a href="#/?q={encodeURIComponent(`keywords:"${k}"`)}" class="hover:text-accent">{k}</a>
-                      <button class="hidden cursor-pointer text-faint group-hover:block hover:text-failed" onclick={() => act('keywords', () => api.keywords(id, p.keywords.filter((x) => x !== k)))} aria-label="Remove {k}"><X class="size-3" /></button>
+                      <button class="hidden cursor-pointer text-faint hover:text-failed {locked ? '' : 'group-hover:block'}" onclick={() => act('keywords', () => api.keywords(id, p.keywords.filter((x) => x !== k)))} aria-label="Remove {k}"><X class="size-3" /></button>
                     </span>
                   {/each}
-                  <form onsubmit={addKeyword}>
+                  <form onsubmit={addKeyword} class:hidden={locked}>
                     <input bind:value={keywordInput} placeholder="+ keyword" class="h-6 w-28 rounded-md border border-dashed bg-transparent px-2 text-xs outline-none placeholder:text-faint focus:border-accent" />
                   </form>
                 </div>
@@ -356,10 +360,10 @@
                   {#each p.projects as name}
                     <span class="group inline-flex items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent">
                       <Folder class="size-3" /><a href="#/?project={encodeURIComponent(name)}" class="hover:underline">{name}</a>
-                      <button class="hidden cursor-pointer group-hover:block hover:text-failed" onclick={() => act('project', () => api.toProject(id, name, false))} aria-label="Take out of {name}"><X class="size-3" /></button>
+                      <button class="hidden cursor-pointer hover:text-failed {locked ? '' : 'group-hover:block'}" onclick={() => act('project', () => api.toProject(id, name, false))} aria-label="Take out of {name}"><X class="size-3" /></button>
                     </span>
                   {/each}
-                  <form onsubmit={addProject} class="flex items-center">
+                  <form onsubmit={addProject} class="flex items-center" class:hidden={locked}>
                     <FolderPlus class="mr-1 size-3.5 text-faint" />
                     <input bind:value={projectInput} list="projects" placeholder="add to project" class="h-6 w-32 rounded-md border border-dashed bg-transparent px-2 text-xs outline-none placeholder:text-faint focus:border-accent" />
                     <datalist id="projects">{#each app.projects.filter((x) => !p.projects.includes(x.name)) as x}<option value={x.name}></option>{/each}</datalist>
@@ -396,11 +400,11 @@
                 <div class="flex items-center justify-end gap-2">
                   <span class="mr-auto text-xs text-faint">Ctrl+S saves</span>
                   {#if p.notes}<Button variant="ghost" onclick={() => ((notes = p.notes ?? ''), (editingNotes = false))}>Cancel</Button>{/if}
-                  <Button variant="primary" busy={busy === 'notes'} onclick={saveNotes} disabled={notes === (p.notes ?? '')}>Save notes</Button>
+                  <Button variant="primary" busy={busy === 'notes'} onclick={saveNotes} disabled={locked || notes === (p.notes ?? '')} title={why}>Save notes</Button>
                 </div>
               </div>
             {:else}
-              <div class="mb-3 flex justify-end"><Button size="sm" onclick={() => (editingNotes = true)}><NotebookPen class="size-3.5" />Edit</Button></div>
+              <div class="mb-3 flex justify-end"><Button size="sm" disabled={locked} title={why} onclick={() => (editingNotes = true)}><NotebookPen class="size-3.5" />Edit</Button></div>
               <div class="prose">{@html markdown(p.notes)}</div>
             {/if}
           {:else if tab === 'text'}

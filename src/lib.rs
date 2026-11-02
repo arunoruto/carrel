@@ -226,9 +226,22 @@ pub struct Serve {
     /// Reverse proxies in front of carrel, whose `X-Forwarded-For` says where a request came from.
     #[serde(default)]
     pub proxies: Vec<String>,
-    /// Where browsers reach the server (`https://carrel.example.org`), for the web UI's link in the log;
-    /// `CARREL_SERVE_URL` overrides it.
+    /// Where browsers reach the server (`https://carrel.example.org`), for the web UI's link in the log
+    /// and the way back from logging in; `CARREL_SERVE_URL` overrides it.
     pub url: Option<String>,
+    /// Logging in with OpenID Connect.
+    pub oidc: Option<Oidc>,
+}
+
+/// `[serve.oidc]`: the login provider (pocket-id, Keycloak, ...) and this server's client there.
+/// `CARREL_OIDC_ISSUER`, `CARREL_OIDC_CLIENT_ID` and `CARREL_OIDC_SECRET` override it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Oidc {
+    /// The provider's address, where `/.well-known/openid-configuration` is.
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: Option<Secret>,
 }
 
 /// API tokens in the config: `ads = "..."` or `ads = { file = "~/.secrets/ads" }`.

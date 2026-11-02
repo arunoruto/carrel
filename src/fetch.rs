@@ -185,7 +185,7 @@ pub fn title_key(title: &str) -> String {
         .to_lowercase()
 }
 
-pub(crate) fn agent() -> ureq::Agent {
+pub fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION"), " (personal paper library)"))
         .timeout_global(Some(Duration::from_secs(60)))

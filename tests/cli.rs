@@ -464,7 +464,8 @@ fn serving_over_http() {
     let (mut server, url, mut log) = start("127.0.0.1:0", Some("s3cret"));
     assert_eq!(post_to(&url, "").status().as_u16(), 200, "trusted");
     let addr = url.trim_start_matches("http://");
-    assert_eq!(http(addr, "GET", "/api/info", &[], b"").0, 401, "the web UI wants its token from trusted networks too");
+    assert_eq!(http(addr, "GET", "/api/info", &[], b"").0, 200, "trusted networks may read");
+    assert_eq!(http(addr, "PUT", "/api/papers/x/notes", &[], b"{}").0, 403, "but change nothing");
     let again = log.find_map(|l| l.ok().filter(|l| l.contains("web UI: "))).unwrap();
     assert!(again.ends_with(&format!("/?token={web_token}")), "the same token after a restart: {again}");
     server.kill().unwrap();
@@ -560,6 +561,100 @@ fn http(addr: &str, method: &str, path: &str, headers: &[&str], body: &[u8]) -> 
         body = text.split("\r\n").skip(1).step_by(2).collect::<String>().into_bytes();
     }
     (status, head, body)
+}
+
+#[test]
+fn logging_in() {
+    use base64::Engine;
+    use sha2::Digest;
+    use std::io::{BufRead, BufReader};
+    let c = Carrel::new("cli-login");
+    let (issuer, token_requests) = fake_oidc();
+    c.tmp.write(
+        "config/carrel/config.toml",
+        format!(
+            "[serve]\nurl = \"https://carrel.test\"\ntrusted = [\"127.0.0.1\"]\n\
+             [serve.oidc]\nissuer = \"{issuer}\"\nclient_id = \"carrel\"\nclient_secret = \"sh\"\n"
+        ),
+    );
+    let mut command = c.command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"]);
+    let mut server = command.env("CARREL_SERVE_TOKEN", "s3cret").stdout(Stdio::piped()).spawn().unwrap();
+    let mut log = BufReader::new(server.stdout.take().unwrap()).lines();
+    let serving = log.find_map(|l| l.ok().filter(|l| l.contains("serving"))).unwrap();
+    let addr =
+        serving.split_whitespace().last().unwrap().trim_start_matches("http://").trim_end_matches("/mcp").to_string();
+    let web = log.find_map(|l| l.ok().filter(|l| l.contains("web UI"))).unwrap();
+    assert!(web.ends_with(&format!("web UI: https://carrel.test (logging in with {issuer})")), "no link token: {web}");
+
+    let site = "Host: carrel.test";
+    let call = |method: &str, path: &str, headers: &[&str], body: &[u8]| {
+        let mut all = vec![site, "Origin: https://carrel.test"];
+        all.extend_from_slice(headers);
+        let (status, head, body) = http(&addr, method, path, &all, body);
+        (status, head, String::from_utf8_lossy(&body).into_owned())
+    };
+    let me =
+        |headers: &[&str]| serde_json::from_str::<serde_json::Value>(&call("GET", "/api/me", headers, b"").2).unwrap();
+    assert_eq!(http(&addr, "GET", "/api/me", &["Host: elsewhere.test"], b"").0, 403, "only its own name");
+    // A trusted network, not logged in: reading and adding, nothing else.
+    let anonymous = me(&[]);
+    assert_eq!((anonymous["role"].as_str(), anonymous["login"].as_bool()), (Some("anonymous"), Some(true)));
+    assert_eq!(call("GET", "/api/papers", &[], b"").0, 200);
+    let refused = call("PUT", "/api/papers/x/notes", &[], b"{}");
+    assert_eq!(refused.0, 403);
+    assert!(refused.2.contains("log in to change"), "{}", refused.2);
+    assert_eq!(call("GET", "/api/tokens", &[], b"").0, 403);
+    assert_eq!(call("GET", "/?token=whatever", &[], b"").0, 200, "no link to log in by");
+
+    // Logging in: to the provider with PKCE, back with a code, and a session that remembers where to go.
+    let (status, head, _) = call("GET", "/auth/login?next=/%23/tokens", &[], b"");
+    assert_eq!(status, 303, "{head}");
+    let to = head.lines().find_map(|l| l.strip_prefix("location: ")).unwrap().trim().to_string();
+    assert!(to.starts_with(&format!("{issuer}/authorize?response_type=code&client_id=carrel")), "{to}");
+    assert!(to.contains("redirect_uri=https%3A%2F%2Fcarrel.test%2Fauth%2Fcallback"), "{to}");
+    let param =
+        |name: &str| to.split(['?', '&']).find_map(|p| p.strip_prefix(&format!("{name}="))).unwrap().to_string();
+    let (state, challenge) = (param("state"), param("code_challenge"));
+    let (status, head, _) = call("GET", &format!("/auth/callback?code=member&state={state}"), &[], b"");
+    assert_eq!(status, 303, "{head}");
+    assert!(head.contains("location: /#/tokens"), "{head}");
+    let cookie = head.lines().find_map(|l| l.strip_prefix("set-cookie: ")).unwrap().to_string();
+    assert!(cookie.contains("HttpOnly") && cookie.contains("Secure") && cookie.contains("SameSite=Lax"), "{cookie}");
+    let sent = token_requests.lock().unwrap()[0].clone();
+    let verifier = sent.split('&').find_map(|p| p.strip_prefix("code_verifier=")).unwrap();
+    let hashed = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+    assert_eq!(hashed, challenge, "PKCE");
+    assert_eq!(call("GET", &format!("/auth/callback?code=member&state={state}"), &[], b"").0, 400, "once only");
+    let session = format!("Cookie: {}", cookie.split(';').next().unwrap());
+    let alice = me(&[&session]);
+    assert_eq!((alice["user"].as_str(), alice["role"].as_str()), (Some("alice"), Some("member")));
+    assert_ne!(call("PUT", "/api/papers/x/notes", &[&session], b"{}").0, 403, "allowed, there just is no such paper");
+    assert!(call("DELETE", "/api/papers/x", &[&session], b"").2.contains("only admins"));
+    assert!(!std::fs::read_to_string(c.tmp.path("lib/.carrel/sessions.json")).unwrap().contains(&session[18..]));
+
+    // A token for a laptop: shown once, then it stands for alice, in the API and for MCP.
+    let (status, _, made) = call("POST", "/api/tokens", &[&session], br#"{"name": "laptop"}"#);
+    assert_eq!(status, 200, "{made}");
+    let made: serde_json::Value = serde_json::from_str(&made).unwrap();
+    let bearer = format!("Authorization: Bearer {}", made["token"].as_str().unwrap());
+    assert_eq!(me(&[&bearer])["user"], "alice");
+    let listed = call("GET", "/api/tokens", &[&session], b"").2;
+    assert!(listed.contains("laptop") && !listed.contains(made["token"].as_str().unwrap()), "{listed}");
+    let revoke = format!("/api/tokens/{}", made["id"].as_str().unwrap());
+    assert_eq!(call("DELETE", &revoke, &[&session], b"").0, 200);
+    assert_eq!(me(&[&bearer])["role"], "anonymous", "revoked");
+    assert_eq!(me(&["Authorization: Bearer s3cret"])["role"], "admin", "the server's own token");
+
+    // Someone outside carrel's groups doesn't get in; logging out ends the session.
+    let (_, head, _) = call("GET", "/auth/login", &[], b"");
+    let to = head.lines().find_map(|l| l.strip_prefix("location: ")).unwrap().to_string();
+    let state = to.split(['?', '&']).find_map(|p| p.strip_prefix("state=")).unwrap().trim().to_string();
+    let outsider = call("GET", &format!("/auth/callback?code=outsider&state={state}"), &[], b"");
+    assert!(outsider.0 == 400 && outsider.2.contains("neither of carrel's groups"), "{}", outsider.2);
+    assert_eq!(call("POST", "/auth/logout", &[&session], b"").0, 200);
+    assert_eq!(me(&[&session])["role"], "anonymous");
+    server.kill().unwrap();
+    server.wait().unwrap();
 }
 
 #[test]

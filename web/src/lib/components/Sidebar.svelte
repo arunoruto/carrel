@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Compass, FilePen, Folder, HeartPulse, Inbox, Library, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
+  import { CircleUser, Compass, FilePen, Folder, HeartPulse, Inbox, KeyRound, Library, LogIn, LogOut, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
   import { api } from '../api';
   import { href, router } from '../router.svelte';
   import { app } from '../state.svelte';
@@ -31,6 +31,12 @@
     syncing = false;
   }
 
+  async function logout() {
+    await api.logout();
+    location.reload();
+  }
+
+  const me = $derived(app.me);
   const project = $derived(router.path === '/' ? router.params.get('project') : null);
   const nav = $derived([
     { href: '#/', icon: Library, label: 'Library', count: app.total, active: router.path === '/' && !project },
@@ -83,6 +89,24 @@
   </div>
 
   <div class="space-y-2 border-t px-3 py-3">
+    {#if me?.user}
+      <div class="flex items-center gap-1">
+        <div class="flex min-w-0 flex-1 items-center gap-2 px-2.5 text-sm" title={me.role === 'admin' ? `${me.user}, admin` : me.user}>
+          <CircleUser class="size-4 shrink-0 text-muted" />
+          <span class="truncate">{me.name ?? me.user}</span>
+        </div>
+        <a href="#/tokens" onclick={onnavigate} class="rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground {router.path === '/tokens' ? 'bg-hover text-foreground' : ''}" aria-label="Tokens" title="Tokens">
+          <KeyRound class="size-4" />
+        </a>
+        <button class="cursor-pointer rounded-lg p-2 text-muted hover:bg-hover hover:text-foreground" onclick={logout} aria-label="Log out" title="Log out">
+          <LogOut class="size-4" />
+        </button>
+      </div>
+    {:else if me?.role === 'anonymous' && me.login}
+      <button class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted hover:bg-hover hover:text-foreground" onclick={() => (location.href = api.loginUrl())}>
+        <LogIn class="size-4" />Log in to change the library
+      </button>
+    {/if}
     {#if app.info?.embeddings}
       {@const e = app.info.embeddings}
       <div class="flex items-center gap-2 px-2.5 text-xs text-muted" title={'error' in e ? e.error : `${e.model} on ${e.url}`}>
@@ -92,7 +116,7 @@
     {/if}
     <div class="flex items-center gap-1">
       {#if app.info?.remote}
-        <button class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted hover:bg-hover hover:text-foreground" onclick={sync} disabled={syncing}>
+        <button class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted hover:bg-hover hover:text-foreground" onclick={sync} disabled={syncing || !app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'}>
           {#if syncing}<Spinner />{:else}<RefreshCw class="size-4" />{/if}
           {syncing ? 'Syncing…' : 'Sync'}
         </button>

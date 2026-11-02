@@ -452,9 +452,9 @@ pub async fn serve_http(
                     let response = if path == "/health" {
                         plain(StatusCode::OK, "ok\n")
                     } else if !is_mcp {
-                        // The web UI, which asks for its own token wherever a request comes from.
-                        web.handle(request).await
-                    } else if !trusted && !authorized(&request, token.as_deref()) {
+                        // The web UI, which decides itself what each visitor may do.
+                        web.handle(request, trusted).await
+                    } else if !trusted && !authorized(&request, token.as_deref()) && !web.member(&request) {
                         plain(StatusCode::UNAUTHORIZED, "send the server's token: Authorization: Bearer <token>\n")
                     } else {
                         mcp.handle(request).await

@@ -14,6 +14,7 @@
   import Library from './views/Library.svelte';
   import Login from './views/Login.svelte';
   import Paper from './views/Paper.svelte';
+  import Tokens from './views/Tokens.svelte';
 
   let menu = $state(false);
   app.refresh();
@@ -59,6 +60,8 @@
           <People />
         {:else if router.path === '/health'}
           <Health />
+        {:else if router.path === '/tokens'}
+          <Tokens />
         {:else}
           {#key router.params.toString()}<Library />{/key}
         {/if}

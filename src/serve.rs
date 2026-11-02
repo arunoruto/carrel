@@ -34,6 +34,14 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
     // The web UI's token, kept with the library (hidden, so never synced) across container restarts.
     let web_token = crate::web::token(&lib.root.join(".carrel").join("web-token"))?;
     let url = std::env::var("CARREL_SERVE_URL").ok().filter(|u| !u.trim().is_empty()).or(config.serve.url);
+    let env = |name| std::env::var(name).ok().filter(|v: &String| !v.trim().is_empty());
+    let oidc = match (env("CARREL_OIDC_ISSUER"), env("CARREL_OIDC_CLIENT_ID")) {
+        (Some(issuer), Some(client_id)) => Some(carrel::Oidc { issuer, client_id, client_secret: None }),
+        _ => config.serve.oidc,
+    };
+    let issuer = oidc.as_ref().map(|o| o.issuer.clone());
+    let auth = crate::auth::Auth::new(lib.root.join(".carrel"), oidc, url.as_deref(), token.clone())?;
+    let auth = std::sync::Arc::new(auth);
 
     let worker = lib.clone();
     let jobs = Jobs { remote: config.remote, consume: config.consume, notify: config.notify };
@@ -47,9 +55,13 @@ pub fn run(lib: Library, listen: Option<String>, every: Option<u64>) -> Result<(
         if !config.serve.trusted.is_empty() {
             log(&format!("no token needed for MCP from {}", config.serve.trusted.join(", ")));
         }
-        let base = url.unwrap_or_else(|| format!("http://{local}"));
-        log(&format!("web UI: {}/?token={web_token}", base.trim_end_matches('/')));
-        let web = std::sync::Arc::new(crate::web::Web::server(lib.clone(), web_token, local.port()));
+        let base = url.clone().unwrap_or_else(|| format!("http://{local}"));
+        match &issuer {
+            Some(issuer) => log(&format!("web UI: {} (logging in with {issuer})", base.trim_end_matches('/'))),
+            None => log(&format!("web UI: {}/?token={web_token}", base.trim_end_matches('/'))),
+        }
+        let web = crate::web::Web::server(lib.clone(), web_token, local.port(), auth, url.as_deref());
+        let web = std::sync::Arc::new(web);
         tokio::select! {
             served = crate::mcp::serve_http(lib, listener, token, trusted, proxies, web) => served,
             () = stopped() => {

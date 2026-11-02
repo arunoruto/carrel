@@ -1,3 +1,4 @@
+mod auth;
 mod install;
 mod mcp;
 mod serve;

@@ -105,8 +105,8 @@
                     {[m.papers.length ? `${m.papers.length} library papers` : 'cited only', m.with.length ? `with ${m.with.join(', ')}` : ''].filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <Button size="sm" variant="ghost" busy={busy === m.name} onclick={() => decide(p, m, false)}><Split class="size-3.5" />Different</Button>
-                <Button size="sm" variant="primary" busy={busy === m.name} onclick={() => decide(p, m, true)}><Check class="size-3.5" />Same person</Button>
+                <Button size="sm" variant="ghost" busy={busy === m.name} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decide(p, m, false)}><Split class="size-3.5" />Different</Button>
+                <Button size="sm" variant="primary" busy={busy === m.name} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => decide(p, m, true)}><Check class="size-3.5" />Same person</Button>
               </div>
             {/each}
           </section>

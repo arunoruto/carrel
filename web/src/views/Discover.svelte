@@ -115,7 +115,7 @@
             {#if busy.has(r.key)}
               <div class="flex items-center gap-2 pt-1 text-xs text-muted"><Spinner />Working…</div>
             {:else}
-              <Button size="sm" variant="ghost" onclick={() => act(r, false)} title="Not interested; don't show it again"><EyeOff class="size-3.5" />Dismiss</Button>
+              <Button size="sm" variant="ghost" disabled={!app.can.edit} onclick={() => act(r, false)} title={app.can.edit ? "Not interested; don't show it again" : 'Log in to change the library'}><EyeOff class="size-3.5" />Dismiss</Button>
               <Button size="sm" onclick={() => act(r, true)}><Plus class="size-3.5" />Add</Button>
             {/if}
           </div>

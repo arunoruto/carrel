@@ -190,3 +190,72 @@ pub fn mail_body(mail: &str) -> String {
     let body = mail.split("\r\n\r\n").nth(1).unwrap().replace("\r\n", "");
     String::from_utf8(base64::engine::general_purpose::STANDARD.decode(body).unwrap()).unwrap()
 }
+
+/// A login provider that knows two codes: `member` logs in alice (group `carrel`), `outsider` bob (no
+/// carrel group). Returns its address and the token requests' bodies, to check what carrel sent.
+pub fn fake_oidc() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+    let (issuer, requests) = (url.clone(), seen.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let (mut head, mut length, mut authorization) = (String::new(), 0, String::new());
+            reader.read_line(&mut head).unwrap();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let lower = line.to_lowercase();
+                if let Some(n) = lower.strip_prefix("content-length:") {
+                    length = n.trim().parse().unwrap();
+                }
+                if lower.starts_with("authorization:") {
+                    authorization = line["authorization:".len()..].trim().to_string();
+                }
+                if line.trim().is_empty() {
+                    break;
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let body = String::from_utf8_lossy(&body).into_owned();
+            let path = head.split_whitespace().nth(1).unwrap_or_default().to_string();
+            let (status, reply) = match path.as_str() {
+                "/.well-known/openid-configuration" => (
+                    200,
+                    serde_json::json!({
+                        "issuer": issuer,
+                        "authorization_endpoint": format!("{issuer}/authorize"),
+                        "token_endpoint": format!("{issuer}/token"),
+                        "userinfo_endpoint": format!("{issuer}/userinfo"),
+                    }),
+                ),
+                // Basic base64("carrel:sh") is the client's id and secret.
+                "/token" if authorization == "Basic Y2FycmVsOnNo" => {
+                    requests.lock().unwrap().push(body.clone());
+                    let access = if body.contains("code=member") { "at-alice" } else { "at-bob" };
+                    (200, serde_json::json!({ "access_token": access, "token_type": "Bearer" }))
+                }
+                "/token" => (401, serde_json::json!({ "error": "invalid_client" })),
+                "/userinfo" if authorization == "Bearer at-alice" => (
+                    200,
+                    serde_json::json!({"sub": "1", "preferred_username": "alice", "name": "Alice", "groups": ["carrel"]}),
+                ),
+                "/userinfo" if authorization == "Bearer at-bob" => {
+                    (200, serde_json::json!({"sub": "2", "preferred_username": "bob", "groups": ["staff"]}))
+                }
+                _ => (404, serde_json::json!({ "error": "not found" })),
+            };
+            let reply = reply.to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+        }
+    });
+    (url, seen)
+}

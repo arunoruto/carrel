@@ -60,7 +60,7 @@
     <div class="flex gap-2">
       <Button variant="ghost" onclick={load}><RefreshCw class="size-4" />Refresh</Button>
       {#if likely.length > 1}
-        <Button variant="primary" onclick={() => likely.forEach((f) => act(f, true))}><Sparkles class="size-4" />Add the {likely.length} papers</Button>
+        <Button variant="primary" disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => likely.forEach((f) => act(f, true))}><Sparkles class="size-4" />Add the {likely.length} papers</Button>
       {/if}
     </div>
   </header>
@@ -86,8 +86,8 @@
           {#if busy.has(f.path)}
             <div class="flex items-center gap-2 text-xs text-muted"><Spinner />Adding…</div>
           {:else}
-            <Button size="sm" variant="ghost" onclick={() => act(f, false)} title="Leave it, and don't offer it again"><EyeOff class="size-3.5" />Skip</Button>
-            <Button size="sm" variant={f.clue ? 'primary' : 'outline'} onclick={() => act(f, true)}><Check class="size-3.5" />Add</Button>
+            <Button size="sm" variant="ghost" disabled={!app.can.edit} onclick={() => act(f, false)} title={app.can.edit ? "Leave it, and don't offer it again" : 'Log in to change the library'}><EyeOff class="size-3.5" />Skip</Button>
+            <Button size="sm" variant={f.clue ? 'primary' : 'outline'} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => act(f, true)}><Check class="size-3.5" />Add</Button>
           {/if}
         </div>
       {:else}
@@ -108,7 +108,7 @@
           {#each skipped as f (f.path)}
             <div class="flex items-center gap-4 border-b px-5 py-2.5 text-sm text-muted last:border-b-0">
               <span class="min-w-0 flex-1 truncate">{f.name}</span>
-              <Button size="sm" variant="ghost" busy={busy.has(f.path)} onclick={() => act(f, true)}>Add anyway</Button>
+              <Button size="sm" variant="ghost" busy={busy.has(f.path)} disabled={!app.can.edit} title={app.can.edit ? undefined : 'Log in to change the library'} onclick={() => act(f, true)}>Add anyway</Button>
             </div>
           {/each}
         </div>
