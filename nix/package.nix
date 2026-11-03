@@ -2,6 +2,7 @@
   lib,
   callPackage,
   craneLib,
+  linkFarm,
   python3,
 }:
 
@@ -25,8 +26,61 @@ let
     };
     strictDeps = true;
   };
-  # The dependencies alone, built again only when Cargo.lock changes; CI keeps them between runs.
-  cargoArtifacts = craneLib.buildDepsOnly common;
+  # The dependencies alone, from a stub of carrel with its own version left out: built again only when the
+  # dependencies change, not with each release. Your Nix store and CI keep them.
+  unversioned =
+    file: from: to:
+    builtins.toFile (baseNameOf file) (
+      builtins.replaceStrings [ from ] [ to ] (builtins.readFile file)
+    );
+  cargoLock =
+    unversioned ../Cargo.lock
+      ''
+        name = "carrel"
+        version = "${cargoToml.version}"
+      ''
+      ''
+        name = "carrel"
+        version = "0.0.0"
+      '';
+  stub = linkFarm "carrel-deps-src" [
+    {
+      name = "Cargo.toml";
+      path =
+        unversioned ../Cargo.toml
+          ''
+            version = "${cargoToml.version}"
+          ''
+          ''
+            version = "0.0.0"
+          '';
+    }
+    {
+      name = "Cargo.lock";
+      path = cargoLock;
+    }
+    {
+      name = "build.rs";
+      path = builtins.toFile "build.rs" "fn main() {}";
+    }
+    {
+      name = "src/main.rs";
+      path = builtins.toFile "main.rs" "fn main() {}";
+    }
+    {
+      name = "src/lib.rs";
+      path = builtins.toFile "lib.rs" "";
+    }
+  ];
+  cargoArtifacts = craneLib.buildDepsOnly (
+    removeAttrs common [ "src" ]
+    // {
+      # Given outright, so nothing is read from a build's output while evaluating.
+      dummySrc = stub;
+      cargoVendorDir = craneLib.vendorCargoDeps { inherit cargoLock; };
+      version = "0.0.0";
+    }
+  );
 in
 craneLib.buildPackage (
   common
