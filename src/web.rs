@@ -110,7 +110,7 @@ pub async fn serve(lib: Library, listener: tokio::net::TcpListener, token: Strin
         tokio::spawn(async move {
             let service = hyper::service::service_fn(move |request| {
                 let web = web.clone();
-                async move { Ok::<_, Infallible>(web.handle(request, false).await) }
+                async move { Ok::<_, Infallible>(web.handle(request, None, false).await) }
             });
             let io = hyper_util::rt::TokioIo::new(stream);
             let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, service).await;
@@ -154,9 +154,9 @@ impl Web {
     }
 
     /// Whether a bearer token is a member's, for MCP.
-    pub fn member<B>(&self, request: &Request<B>) -> bool {
+    pub fn member<B>(&self, request: &Request<B>, from: Option<std::net::IpAddr>) -> bool {
         use crate::auth::Role;
-        self.auth.as_ref().is_some_and(|a| a.who(request.headers(), false).role >= Role::Member)
+        self.auth.as_ref().is_some_and(|a| a.who(request.headers(), false, from).role >= Role::Member)
     }
 
     /// With logins, the link's token is off: people log in instead.
@@ -164,15 +164,23 @@ impl Web {
         self.local || !self.auth.as_ref().is_some_and(|a| a.login())
     }
 
-    /// Who sent a request, from a trusted network or not.
-    fn who<B>(&self, request: &Request<B>, trusted: bool) -> crate::auth::Who {
+    /// Who sent a request, from a trusted network or not, with the name its client claims.
+    fn who<B>(&self, request: &Request<B>, trusted: bool, from: Option<std::net::IpAddr>) -> crate::auth::Who {
+        let client = request.headers().get("x-carrel-client").and_then(|v| v.to_str().ok());
+        let client = client.map(|c| c.chars().filter(|c| !c.is_control()).take(64).collect::<String>());
+        let mut who = self.who_alone(request, trusted, from);
+        who.client = client.filter(|c| !c.is_empty());
+        who
+    }
+
+    fn who_alone<B>(&self, request: &Request<B>, trusted: bool, from: Option<std::net::IpAddr>) -> crate::auth::Who {
         use crate::auth::{Role, Who};
         if self.link_works() && self.logged_in(request) {
             // Whoever opened the link; on a server, one more admin.
             return if self.local { Who::role(Role::Admin) } else { Who::named("link", Role::Admin) };
         }
         match &self.auth {
-            Some(auth) => auth.who(request.headers(), trusted),
+            Some(auth) => auth.who(request.headers(), trusted, from),
             None => Who::role(Role::None),
         }
     }
@@ -233,9 +241,14 @@ impl Web {
     /// and what the caller may do; `GET`, `PUT` and `DELETE /sync/<path>` move one. Adding a file needs the
     /// right to add, overwriting one to edit, deleting one an admin. `If-Match` / `If-None-Match: *` say which
     /// version an upload replaces, so two clients can't overwrite each other unseen.
-    async fn sync_call(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
+    async fn sync_call(
+        &self,
+        request: Request<hyper::body::Incoming>,
+        from: Option<std::net::IpAddr>,
+        trusted: bool,
+    ) -> Response<Body> {
         use crate::auth::{Right, Role};
-        let who = self.who(&request, trusted);
+        let who = self.who(&request, trusted, from);
         let role = who.role;
         if role == Role::None {
             return json_status(StatusCode::UNAUTHORIZED, json!({"error": "send a token"}));
@@ -252,6 +265,7 @@ impl Web {
         let (root, hashes) = (self.lib.root.clone(), self.hashes.clone());
         let (history, writes) = (self.history.clone().expect("a server's"), self.writes.clone());
         let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
+        let client = who.client.clone();
         let md5 = move |path: &str| -> Result<Option<String>> {
             let file = root.join(path);
             let Ok(meta) = fs::metadata(&file) else { return Ok(None) };
@@ -308,7 +322,7 @@ impl Web {
                     fs::write(&part, &body)?;
                     let _one_at_a_time = writes.lock().unwrap_or_else(|e| e.into_inner());
                     let paper = path.split_once('/').map(|(p, _)| p);
-                    let before = history.before(&name, "synced", paper, &[&path])?;
+                    let before = history.before(&name, client.as_deref(), "synced", paper, &[&path])?;
                     fs::create_dir_all(file.parent().unwrap())?;
                     fs::rename(&part, &file)?;
                     history.after(before)?;
@@ -342,7 +356,12 @@ impl Web {
     }
 
     /// `trusted`: from one of a server's trusted networks.
-    pub async fn handle(&self, request: Request<hyper::body::Incoming>, trusted: bool) -> Response<Body> {
+    pub async fn handle(
+        &self,
+        request: Request<hyper::body::Incoming>,
+        from: Option<std::net::IpAddr>,
+        trusted: bool,
+    ) -> Response<Body> {
         let host = request.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default();
         let local = ["127.0.0.1", "localhost", "[::1]"].iter().any(|name| host == format!("{name}:{}", self.port));
         if self.local && !local {
@@ -361,7 +380,7 @@ impl Web {
             return self.auth_page(&request, &query).await;
         }
         if !self.local && (path == "/sync" || path.starts_with("/sync/")) {
-            return self.sync_call(request, trusted).await;
+            return self.sync_call(request, from, trusted).await;
         }
         // The link `carrel web` prints: trade the token for a cookie, and drop it from the address bar.
         if let Some(sent) = query.get("token").filter(|_| self.link_works()) {
@@ -384,7 +403,7 @@ impl Web {
             return response;
         };
         use crate::auth::{Right, Role};
-        let who = self.who(&request, trusted);
+        let who = self.who(&request, trusted, from);
         let method = request.method().clone();
         let segments: Vec<String> = api.split('/').filter(|s| !s.is_empty()).map(decode).collect();
         let segments_ref: Vec<&str> = segments.iter().map(String::as_str).collect();
@@ -418,7 +437,7 @@ impl Web {
         }
         if let (Some(auth), ["tokens", rest @ ..]) = (&self.auth, &segments_ref[..]) {
             let reply = match (method.as_str(), rest) {
-                ("GET", []) => Ok(auth.tokens(&who)),
+                ("GET", []) => Ok(auth.tokens(&who, query.contains_key("all"))),
                 ("POST", []) => {
                     let body = Limited::new(request.into_body(), 4096).collect().await.map(|b| b.to_bytes());
                     let name = body.ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
@@ -440,6 +459,7 @@ impl Web {
         let lib = self.lib.clone();
         let (history, writes) = (self.history.clone(), self.writes.clone());
         let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
+        let client = who.client.clone();
         let is_admin = who.role == Role::Admin;
         // The library blocks (files, SQLite, lookups online), so off the async threads.
         let reply = tokio::task::spawn_blocking(move || {
@@ -456,7 +476,7 @@ impl Web {
             }
             let (what, paper, folders) = described(&lib, &method, &segments);
             let folders: Vec<&str> = folders.iter().map(String::as_str).collect();
-            let before = history.before(&name, &what, paper.as_deref(), &folders)?;
+            let before = history.before(&name, client.as_deref(), &what, paper.as_deref(), &folders)?;
             let reply = api_call(&lib, &method, &segments, &query, body);
             history.after(before)?;
             reply

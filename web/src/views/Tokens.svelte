@@ -3,6 +3,8 @@
   import { api, type Token } from '../lib/api';
   import Button from '../lib/components/Button.svelte';
   import Dialog from '../lib/components/Dialog.svelte';
+  import { ago } from '../lib/markdown';
+  import { app } from '../lib/state.svelte';
   import { toasts } from '../lib/toast.svelte';
 
   // Personal tokens for the machines and AIs that sync with this server or use its MCP: one per machine,
@@ -13,13 +15,29 @@
   let created = $state<(Token & { token: string }) | null>(null);
   let revoking = $state<Token | null>(null);
   let confirming = $state(false);
+  // Admins can look at everyone's.
+  let everyone = $state(false);
 
   const load = () =>
     api
-      .tokens()
+      .tokens(everyone)
       .then((t) => (tokens = t))
-      .catch((e) => toasts.error(e, 'Cannot load your tokens'));
-  load();
+      .catch((e) => toasts.error(e, 'Cannot load the tokens'));
+  $effect(() => {
+    everyone;
+    load();
+  });
+
+  /** carrel's own name as is, a browser as "browser", anything else by its first word. */
+  const agent = (a: string) => (a.startsWith('carrel/') ? a : a.includes('Mozilla') ? 'browser' : a.split(' ')[0]);
+  const idle = (t: Token) => Math.floor((Date.now() / 1000 - (t.last?.at ?? Date.parse(t.created) / 1000)) / 86400);
+  const used = (t: Token) => {
+    if (!t.last) return 'Never used';
+    const { at, from, agent: a, client } = t.last;
+    return [`Last used ${ago(at)}${from ? ` from ${from}` : ''}`, a && agent(a), client].filter(Boolean).join(' · ');
+  };
+  const tabClass = (on: boolean) =>
+    `cursor-pointer rounded-md px-3 py-1 text-sm font-medium transition ${on ? 'bg-card shadow-sm' : 'text-muted hover:text-foreground'}`;
 
   async function create(e: SubmitEvent) {
     e.preventDefault();
@@ -60,9 +78,17 @@
 {/snippet}
 
 <div class="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-6 lg:px-10 lg:py-8">
-  <header>
-    <h1 class="text-2xl font-semibold tracking-tight">Tokens</h1>
-    <p class="mt-1 text-sm text-muted">For the machines that sync with this server and the AIs that use it. Make one per machine, so you can revoke one alone.</p>
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Tokens</h1>
+      <p class="mt-1 text-sm text-muted">For the machines that sync with this server and the AIs that use it. Make one per machine, so you can revoke one alone.</p>
+    </div>
+    {#if app.me?.role === 'admin'}
+      <div class="flex rounded-lg bg-hover p-0.5">
+        <button class={tabClass(!everyone)} onclick={() => (everyone = false)}>Mine</button>
+        <button class={tabClass(everyone)} onclick={() => (everyone = true)}>Everyone's</button>
+      </div>
+    {/if}
   </header>
 
   <form class="flex gap-2" onsubmit={create}>
@@ -88,10 +114,18 @@
 
   <section class="overflow-hidden rounded-xl border">
     {#each tokens as t}
-      <div class="flex items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0">
-        <KeyRound class="size-4 text-faint" />
-        <span class="flex-1 font-medium">{t.name}</span>
-        <span class="text-xs text-faint">since {t.created}</span>
+      {@const days = idle(t)}
+      <div class="flex items-center gap-3 border-b px-4 py-3 text-sm last:border-b-0 {days >= 30 ? 'opacity-60' : ''}">
+        <KeyRound class="size-4 shrink-0 text-faint" />
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-baseline gap-x-2">
+            <span class="font-medium">{t.name}</span>
+            {#if everyone && t.user}<span class="text-xs text-muted">{t.user}</span>{/if}
+            <span class="text-xs text-faint">since {t.created}</span>
+            {#if days >= 30}<span class="text-xs text-warning">unused for {days} days</span>{/if}
+          </div>
+          <p class="truncate text-xs text-muted" title={t.last?.agent ?? undefined}>{used(t)}</p>
+        </div>
         <Button variant="ghost" size="icon" title="Revoke" onclick={() => ((revoking = t), (confirming = true))}><Trash2 class="size-4" /></Button>
       </div>
     {:else}

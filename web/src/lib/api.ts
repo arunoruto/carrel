@@ -179,7 +179,11 @@ export interface Me {
 export interface Token {
   id: string;
   name: string;
+  /** Whose it is. */
+  user?: string;
   created: string;
+  /** Its last use, if any: Unix seconds, the address, the program, and the machine it said it was. */
+  last?: { at: number; from: string | null; agent: string | null; client: string | null } | null;
 }
 
 /** A change on a server, or a request to delete; kept 30 days. Deletion requests are the ones with a status. */
@@ -188,6 +192,8 @@ export interface Activity {
   /** Unix seconds. */
   at: number;
   who: string;
+  /** The machine or person the client said it was; unchecked. */
+  client?: string;
   what: string;
   paper: string | null;
   files: { path: string; change: 'added' | 'changed' | 'removed' | 'delete'; after?: string }[];
@@ -235,7 +241,7 @@ const paper = (id: string) => `papers/${encodeURIComponent(id)}`;
 
 export const api = {
   me: () => call<Me>('GET', 'me'),
-  tokens: () => call<Token[]>('GET', 'tokens'),
+  tokens: (all = false) => call<Token[]>('GET', all ? 'tokens?all=1' : 'tokens'),
   createToken: (name: string) => call<Token & { token: string }>('POST', 'tokens', JSON.stringify({ name })),
   revokeToken: (id: string) => call<{}>('DELETE', `tokens/${encodeURIComponent(id)}`),
   logout: () => fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }),

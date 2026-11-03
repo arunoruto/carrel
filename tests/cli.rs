@@ -638,7 +638,12 @@ fn logging_in() {
     assert_eq!(status, 200, "{made}");
     let made: serde_json::Value = serde_json::from_str(&made).unwrap();
     let bearer = format!("Authorization: Bearer {}", made["token"].as_str().unwrap());
-    assert_eq!(me(&[&bearer])["user"], "alice");
+    assert_eq!(me(&[&bearer, "X-Carrel-Client: alice@laptop", "User-Agent: carrel/9 sync"])["user"], "alice");
+    let mine: serde_json::Value = serde_json::from_str(&call("GET", "/api/tokens?all=1", &[&session], b"").2).unwrap();
+    let last = &mine[0]["last"];
+    assert_eq!((last["client"].as_str(), last["from"].as_str()), (Some("alice@laptop"), Some("127.0.0.1")), "{mine}");
+    assert_eq!(last["agent"], "carrel/9 sync");
+    assert_eq!(mine.as_array().unwrap().len(), 1, "a member sees only their own, all=1 or not");
     let listed = call("GET", "/api/tokens", &[&session], b"").2;
     assert!(listed.contains("laptop") && !listed.contains(made["token"].as_str().unwrap()), "{listed}");
     let revoke = format!("/api/tokens/{}", made["id"].as_str().unwrap());
@@ -680,12 +685,23 @@ fn syncing_through_a_server() {
     };
     let server_file = |path: &str| std::fs::read_to_string(c.tmp.path(&format!("srv/lib/{path}"))).ok();
 
-    // From a trusted network without a token: reading and adding.
+    // Connected without a token, from a trusted network: reading and adding.
+    c.tmp.write("config/carrel/config.toml", "library = \"~/elsewhere\"\n[remote]\ntype = \"folder\"\npath = \"/x\"\n");
+    let connected =
+        c.command(&["connect", &format!("http://{addr}"), "--no-service"]).env("USER", "tester").output().unwrap();
+    let said = String::from_utf8_lossy(&connected.stdout);
+    assert!(said.contains("connected without a token, as tester@") && said.contains("config.toml.bak"), "{said}");
+    let config = read(c.tmp.path("config/carrel/config.toml"));
+    assert!(
+        config.starts_with("library = ") && config.contains("type = \"carrel\"") && !config.contains("folder"),
+        "{config}"
+    );
     remote("");
     assert!(c.ok(&["sync"]).contains("download 1"), "the server's paper");
     assert_eq!(read(c.tmp.path("lib/a2020/a2020.bib")), "@misc{a2020, title = {A}}\n");
     c.tmp.write("lib/b2021/b2021.bib", "@misc{b2021, title = {B}}\n");
-    assert!(c.ok(&["sync"]).contains("upload 1"));
+    let synced = c.command(&["sync"]).env("USER", "tester").output().unwrap();
+    assert!(String::from_utf8_lossy(&synced.stdout).contains("upload 1"));
     assert_eq!(server_file("b2021/b2021.bib").as_deref(), Some("@misc{b2021, title = {B}}\n"));
     // Changes and deletions stay here, with word why.
     c.tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {A, edited}}\n");
@@ -696,7 +712,25 @@ fn syncing_through_a_server() {
     assert!(c.tmp.path("lib/b2021/b2021.bib").exists());
 
     // With an admin's token, changes go through; deleting is asked for, until another admin accepts.
-    remote("admintok");
+    c.tmp.write("admintok", "admintok\n");
+    let connected = c.ok(&[
+        "connect",
+        &format!("http://{addr}"),
+        "--token",
+        &c.tmp.path("admintok").to_string_lossy(),
+        "--no-service",
+    ]);
+    assert!(connected.contains("connected as server (admin)"), "{connected}");
+    use std::os::unix::fs::PermissionsExt;
+    let kept = std::fs::metadata(c.tmp.path("config/carrel/token")).unwrap();
+    assert_eq!(
+        (kept.permissions().mode() & 0o777, read(c.tmp.path("config/carrel/token"))),
+        (0o600, "admintok".into())
+    );
+    assert!(
+        c.fails(&["connect", &format!("http://{addr}"), "--token", "/dev/null/x", "--no-service"])
+            .contains("cannot read")
+    );
     c.ok(&["sync"]);
     assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A, edited}}\n"));
     std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
@@ -719,6 +753,8 @@ fn syncing_through_a_server() {
     let (_, feed) = api("GET", "/api/activity");
     let entry = |what: &str| feed.as_array().unwrap().iter().find(|e| e["what"] == what).unwrap().clone();
     let (asked, synced) = (entry("asked to delete"), entry("synced"));
+    let added = feed.as_array().unwrap().iter().find(|e| e["who"] == "anonymous").unwrap();
+    assert!(added["client"].as_str().unwrap().starts_with("tester@"), "who said they sent it: {added}");
     assert_eq!((asked["who"].as_str(), asked["status"].as_str()), (Some("server"), Some("pending")));
     assert_eq!(api("POST", &format!("/api/activity/{}/accept", asked["id"].as_str().unwrap())).0, 200);
     assert!(server_file("b2021/b2021.bib").is_none() && c.tmp.path("srv/lib/.carrel/archive").exists());

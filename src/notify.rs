@@ -273,7 +273,7 @@ fn date(secs: u64) -> String {
     format!("{weekday}, {day} {month} {year} {h:02}:{m:02}:{s:02} +0000")
 }
 
-fn hostname() -> String {
+pub fn hostname() -> String {
     let mut buf = [0u8; 256];
     // SAFETY: the buffer is valid for its length; gethostname writes at most that and NUL-terminates
     // unless truncated, which the length cap below handles.

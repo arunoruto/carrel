@@ -28,6 +28,9 @@ pub struct Entry {
     /// Seconds since 1970.
     pub at: u64,
     pub who: String,
+    /// The machine or person the client said it was, unchecked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     pub what: String,
     /// The paper's id, when it was about one.
     pub paper: Option<String>,
@@ -59,6 +62,7 @@ impl Entry {
 /// The files under some folders of the library as they were before a change: the scope to compare with after.
 pub struct Before {
     who: String,
+    client: Option<String>,
     what: String,
     paper: Option<String>,
     folders: Vec<String>,
@@ -99,7 +103,14 @@ impl History {
     }
 
     /// Notes the files under `folders` (top-level folders of the library, such as a paper's) before a change.
-    pub fn before(&self, who: &str, what: &str, paper: Option<&str>, folders: &[&str]) -> Result<Before> {
+    pub fn before(
+        &self,
+        who: &str,
+        client: Option<&str>,
+        what: &str,
+        paper: Option<&str>,
+        folders: &[&str],
+    ) -> Result<Before> {
         let copies = self.dir().join(format!(".new-{}", crate::auth::random(8)));
         let mut files = BTreeMap::new();
         for folder in folders {
@@ -113,6 +124,7 @@ impl History {
         }
         Ok(Before {
             who: who.into(),
+            client: client.map(String::from),
             what: what.into(),
             paper: paper.map(String::from),
             folders: folders.iter().map(|f| f.to_string()).collect(),
@@ -160,6 +172,7 @@ impl History {
             !e.is_deletion()
                 && e.decided.is_none()
                 && e.who == before.who
+                && e.client == before.client
                 && e.what == before.what
                 && e.paper == paper
                 && at - e.at < MERGE
@@ -172,6 +185,7 @@ impl History {
                     id,
                     at,
                     who: before.who.clone(),
+                    client: before.client.clone(),
                     what: before.what.clone(),
                     paper,
                     files: vec![],
@@ -304,6 +318,7 @@ impl History {
                     id: format!("{at}-{}", crate::auth::random(3)),
                     at,
                     who: who.into(),
+                    client: None,
                     what: "asked to delete".into(),
                     paper: paper.map(String::from),
                     files: vec![],
@@ -411,15 +426,15 @@ mod tests {
     #[test]
     fn changes_and_reverts() {
         let (root, history) = library();
-        let before = history.before("alice", "edited the notes", Some("a2020"), &["a2020"]).unwrap();
+        let before = history.before("alice", None, "edited the notes", Some("a2020"), &["a2020"]).unwrap();
         fs::write(root.join("a2020/a2020.bib"), "new").unwrap();
         fs::write(root.join("a2020/notes.md"), "hi").unwrap();
         history.after(before).unwrap();
         // More of the same within minutes joins it; nothing changed makes no entry.
-        let before = history.before("alice", "edited the notes", Some("a2020"), &["a2020"]).unwrap();
+        let before = history.before("alice", None, "edited the notes", Some("a2020"), &["a2020"]).unwrap();
         fs::write(root.join("a2020/notes.md"), "hello").unwrap();
         history.after(before).unwrap();
-        history.after(history.before("bob", "looked", None, &["a2020"]).unwrap()).unwrap();
+        history.after(history.before("bob", None, "looked", None, &["a2020"]).unwrap()).unwrap();
         let entries = history.entries(10);
         assert_eq!(entries.len(), 1, "{entries:?}");
         let changes: Vec<_> = entries[0].files.iter().map(|f| (f.path.as_str(), f.change.as_str())).collect();
@@ -436,17 +451,17 @@ mod tests {
         assert!(history.revert(&entries[0].id, "admin").is_err());
 
         // One file alone, as a sync uploads it.
-        let before = history.before("bob", "synced", Some("a2020"), &["a2020/a2020.bib"]).unwrap();
+        let before = history.before("bob", None, "synced", Some("a2020"), &["a2020/a2020.bib"]).unwrap();
         fs::write(root.join("a2020/a2020.bib"), "synced").unwrap();
         history.after(before).unwrap();
         assert_eq!(history.entries(1)[0].files[0].change, "changed");
-        let before = history.before("bob", "synced", Some("a2020"), &["a2020/new.md"]).unwrap();
+        let before = history.before("bob", None, "synced", Some("a2020"), &["a2020/new.md"]).unwrap();
         fs::write(root.join("a2020/new.md"), "n").unwrap();
         history.after(before).unwrap();
         assert_eq!(history.entries(1)[0].files.len(), 2, "merged, with the new file added");
 
         // A new paper shows up as added, though it wasn't in the scope.
-        let before = history.before("alice", "added a paper", None, &[]).unwrap();
+        let before = history.before("alice", None, "added a paper", None, &[]).unwrap();
         fs::create_dir_all(root.join("b2021")).unwrap();
         fs::write(root.join("b2021/b2021.bib"), "b").unwrap();
         history.after(before).unwrap();

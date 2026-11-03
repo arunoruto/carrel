@@ -55,14 +55,23 @@ A few things carrel refuses:
 
 ## Through a carrel server
 
-A group with a [server](/docs/guide/server.md) can sync through it instead of the bucket: only the server then holds the bucket's keys, and what each member may do follows their login.
+A group with a [server](/docs/guide/server.md) can sync through it instead of the bucket: only the server then holds the bucket's keys, and what each member may do follows their login. One command sets a machine up:
+
+```sh
+carrel connect https://papers.example.org          # --web: the web UI here too
+```
+
+It opens the server's Tokens page and asks for a token, which you can skip: without one, from the server's trusted networks, the machine still downloads the library and adds papers. It then writes `[remote]` (keeping the old config as `config.toml.bak`), keeps the token in `~/.config/carrel/token` where only you can read it, and sets up the [sync service](#sharing-with-your-group). `--token <file>` takes the token from a file instead, `--no-service` only writes the config. By hand, `[remote]` looks like this:
 
 ```toml
 [remote]
 type = "carrel"
 url = "https://papers.example.org"
 token = { file = "~/.config/carrel/token" }   # from the server's web UI, Tokens page
+# name = "Mirza"                              # how the server's activity names you without a token
 ```
+
+The server's [activity](/docs/guide/server.md#activity-changes-reverts-and-deletions) shows who changed what. With a token that is the token's owner; without one, the name the machine gives: `name`, or else your user and machine, `mar@madara`. Only a token proves it, so the activity marks the rest as what the client said. The Tokens page shows when and from where each token was last used, and by what (a sync, an AI); admins see everyone's tokens and can revoke any.
 
 | with | `carrel sync` may |
 |---|---|

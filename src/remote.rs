@@ -37,7 +37,12 @@ pub enum RemoteConfig {
     Folder { path: String },
     /// A `carrel serve` holding the library. Without a token, from its trusted networks, you may read and add;
     /// a member's token (from its web UI) also lets you change, an admin's delete.
-    Carrel { url: String, token: Option<Secret> },
+    Carrel {
+        url: String,
+        token: Option<Secret>,
+        /// Who you are, as the server's activity shows it: `$USER@<hostname>` without it. Only a token proves it.
+        name: Option<String>,
+    },
 }
 
 /// Somewhere files can be stored by their path in the library, `a2020/a2020.pdf`.
@@ -80,9 +85,10 @@ impl RemoteConfig {
         let env = |var: &str| std::env::var(var).ok().filter(|v| !v.trim().is_empty());
         Ok(match self {
             Self::Folder { path } => Box::new(Folder(crate::expand_home(path))),
-            Self::Carrel { url, token } => Box::new(Hub {
+            Self::Carrel { url, token, name } => Box::new(Hub {
                 url: url.trim_end_matches('/').into(),
                 token: token.as_ref().map(Secret::read).transpose()?,
+                client: identity(name.as_deref()),
                 rights: Mutex::new(Rights::default()),
             }),
             Self::S3 { endpoint, region, bucket, prefix, access_key, secret_key } => {
@@ -234,7 +240,18 @@ impl Remote for Folder {
 pub struct Hub {
     url: String,
     token: Option<String>,
+    /// Sent as `X-Carrel-Client`, a claim the server shows but can't check.
+    client: String,
     rights: Mutex<Rights>,
+}
+
+/// Who this machine says it is to a server: `name`, else `$USER@<hostname>`.
+pub fn identity(name: Option<&str>) -> String {
+    if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        return name.into();
+    }
+    let user = ["USER", "LOGNAME", "USERNAME"].iter().find_map(|v| std::env::var(v).ok().filter(|u| !u.is_empty()));
+    format!("{}@{}", user.as_deref().unwrap_or("someone"), crate::notify::hostname())
 }
 
 impl Hub {
@@ -244,7 +261,7 @@ impl Hub {
             None => format!("{}/sync", self.url),
         };
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION"), " sync"))
             .timeout_connect(Some(Duration::from_secs(30)))
             .http_status_as_error(false)
             .build()
@@ -256,7 +273,7 @@ impl Hub {
         if let Some(token) = &self.token {
             request = request.header("Authorization", &format!("Bearer {token}"));
         }
-        request
+        request.header("X-Carrel-Client", &self.client)
     }
 
     fn checked(&self, mut response: ureq::http::Response<ureq::Body>) -> Result<ureq::http::Response<ureq::Body>> {
@@ -299,12 +316,12 @@ impl Remote for Hub {
     fn upload(&self, path: &str, bytes: Vec<u8>, replaces: Option<&str>) -> Result<String> {
         let url = format!("{}/sync/{}", self.url, encode_path(path));
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("carrel/", env!("CARGO_PKG_VERSION"), " sync"))
             .timeout_connect(Some(Duration::from_secs(30)))
             .http_status_as_error(false)
             .build()
             .into();
-        let mut request = agent.put(&url);
+        let mut request = agent.put(&url).header("X-Carrel-Client", &self.client);
         if let Some(token) = &self.token {
             request = request.header("Authorization", &format!("Bearer {token}"));
         }

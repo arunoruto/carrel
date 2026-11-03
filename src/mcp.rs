@@ -453,8 +453,8 @@ pub async fn serve_http(
                         plain(StatusCode::OK, "ok\n")
                     } else if !is_mcp {
                         // The web UI, which decides itself what each visitor may do.
-                        web.handle(request, trusted).await
-                    } else if !trusted && !authorized(&request, token.as_deref()) && !web.member(&request) {
+                        web.handle(request, client, trusted).await
+                    } else if !trusted && !authorized(&request, token.as_deref()) && !web.member(&request, client) {
                         plain(StatusCode::UNAUTHORIZED, "send the server's token: Authorization: Bearer <token>\n")
                     } else {
                         mcp.handle(request).await

@@ -64,6 +64,7 @@
 {#snippet head(e: Activity)}
   <div class="flex flex-wrap items-baseline gap-x-1.5 text-sm">
     <span class="font-medium">{e.who}</span>
+    {#if e.client}<span class="text-faint" title="What the client said it was; only a token proves who it is">· {e.client}</span>{/if}
     <span class="text-muted">{e.what}</span>
     {#if e.paper}<a href={paperHref(e.paper)} class="min-w-0 truncate hover:underline">{title(e.paper)}</a>{/if}
     <span class="text-xs text-faint">· {ago(e.at)}</span>

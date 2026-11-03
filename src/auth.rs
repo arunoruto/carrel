@@ -83,17 +83,20 @@ pub struct Who {
     pub user: Option<String>,
     pub name: Option<String>,
     pub role: Role,
+    /// The machine or person a client says it is (`X-Carrel-Client`), unchecked.
+    #[serde(skip)]
+    pub client: Option<String>,
     #[serde(skip)]
     groups: Vec<String>,
 }
 
 impl Who {
     pub fn role(role: Role) -> Self {
-        Who { user: None, name: None, role, groups: vec![] }
+        Who { user: None, name: None, role, client: None, groups: vec![] }
     }
 
     pub fn named(user: &str, role: Role) -> Self {
-        Who { user: Some(user.into()), name: None, role, groups: vec![] }
+        Who { user: Some(user.into()), name: None, role, client: None, groups: vec![] }
     }
 }
 
@@ -129,6 +132,19 @@ struct Token {
     groups: Vec<String>,
     hash: String,
     created: String,
+    #[serde(default)]
+    last: Option<Used>,
+}
+
+/// A token's last use.
+#[derive(Clone, Serialize, Deserialize)]
+struct Used {
+    at: u64,
+    from: Option<String>,
+    /// The program: `carrel/0.6.0 sync`, `claude-code/2.1`, a browser.
+    agent: Option<String>,
+    /// The machine or person it said it was.
+    client: Option<String>,
 }
 
 pub struct Auth {
@@ -193,21 +209,26 @@ impl Auth {
         self.oidc.is_some()
     }
 
-    /// Who sent a request: by its bearer token, its session cookie, or else the network it came from.
-    pub fn who(&self, headers: &hyper::HeaderMap, trusted: bool) -> Who {
+    /// Who sent a request: by its bearer token, its session cookie, or else the network it came from (`from`).
+    pub fn who(&self, headers: &hyper::HeaderMap, trusted: bool, from: Option<std::net::IpAddr>) -> Who {
+        let header = |name| headers.get(name).and_then(|v| v.to_str().ok()).map(|v| v.chars().take(100).collect());
         let bearer = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
         if let Some(sent) = bearer.map(str::trim) {
             if self.server_token.as_deref().is_some_and(|t| same(t, sent)) {
-                return Who { user: Some("server".into()), name: None, role: Role::Admin, groups: vec![] };
+                return Who::named("server", Role::Admin);
             }
             let hash = sha256(sent);
-            if let Some(t) = self.tokens.lock().unwrap().iter().find(|t| same(&t.hash, &hash)) {
-                return Who {
-                    user: Some(t.user.clone()),
-                    name: None,
-                    role: Role::of(&t.groups),
-                    groups: t.groups.clone(),
-                };
+            let mut tokens = self.tokens.lock().unwrap();
+            if let Some(t) = tokens.iter_mut().find(|t| same(&t.hash, &hash)) {
+                let who = Who { groups: t.groups.clone(), ..Who::named(&t.user, Role::of(&t.groups)) };
+                // Where it was used last, written down at most once a minute.
+                let stale = t.last.as_ref().is_none_or(|l| now().saturating_sub(l.at) >= 60);
+                let from = from.map(|ip| ip.to_string());
+                t.last = Some(Used { at: now(), from, agent: header("user-agent"), client: header("x-carrel-client") });
+                if stale {
+                    let _ = save(&self.dir.join("tokens.json"), &*tokens);
+                }
+                return who;
             }
         }
         let cookies = headers.get_all(hyper::header::COOKIE).iter().filter_map(|c| c.to_str().ok());
@@ -215,12 +236,8 @@ impl Auth {
         if let Some(id) = session {
             let sessions = self.sessions.lock().unwrap();
             if let Some(s) = sessions.get(&sha256(id)).filter(|s| s.expires > now()) {
-                return Who {
-                    user: Some(s.user.clone()),
-                    name: s.name.clone(),
-                    role: Role::of(&s.groups),
-                    groups: s.groups.clone(),
-                };
+                let who = Who::named(&s.user, Role::of(&s.groups));
+                return Who { name: s.name.clone(), groups: s.groups.clone(), ..who };
             }
         }
         Who::role(if trusted { Role::Anonymous } else { Role::None })
@@ -336,11 +353,13 @@ impl Auth {
         format!("{COOKIE}={id}; Path=/; HttpOnly; SameSite=Lax; Max-Age={age}{secure}")
     }
 
-    /// A member's tokens, without their secrets.
-    pub fn tokens(&self, who: &Who) -> Value {
+    /// A member's tokens, or with `all` an admin's view of everyone's, without their secrets.
+    pub fn tokens(&self, who: &Who, all: bool) -> Value {
         let tokens = self.tokens.lock().unwrap();
-        let mine = tokens.iter().filter(|t| Some(&t.user) == who.user.as_ref());
-        Value::Array(mine.map(|t| serde_json::json!({"id": t.id, "name": t.name, "created": t.created})).collect())
+        let all = all && who.role == Role::Admin;
+        let shown = tokens.iter().filter(|t| all || Some(&t.user) == who.user.as_ref());
+        let entry = |t: &Token| serde_json::json!({"id": t.id, "name": t.name, "user": t.user, "created": t.created, "last": t.last});
+        Value::Array(shown.map(entry).collect())
     }
 
     /// A new token for `who`, with their groups as they are now; the secret is in the answer only.
@@ -358,6 +377,7 @@ impl Auth {
             groups: who.groups.clone(),
             hash: sha256(&secret),
             created: date(now()),
+            last: None,
         };
         let answer = serde_json::json!({"id": token.id, "name": token.name, "created": token.created, "token": secret});
         let mut tokens = self.tokens.lock().unwrap();
@@ -369,7 +389,8 @@ impl Auth {
     pub fn revoke_token(&self, who: &Who, id: &str) -> Result<()> {
         let mut tokens = self.tokens.lock().unwrap();
         let before = tokens.len();
-        tokens.retain(|t| !(t.id == id && Some(&t.user) == who.user.as_ref()));
+        // An admin may take back anyone's.
+        tokens.retain(|t| !(t.id == id && (Some(&t.user) == who.user.as_ref() || who.role == Role::Admin)));
         if tokens.len() == before {
             bail!("no such token of yours");
         }

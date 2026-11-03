@@ -89,7 +89,13 @@ folders = ["~/Downloads", "~/Documents/scholar-alerts"]
 carrel integrate claude   # or opencode, codex, gemini, cursor
 ```
 
-To use the library on several machines or with your group, sync it through an S3 bucket or a shared folder ([Sharing a library](/docs/guide/sharing.md)), then let it sync by itself every 10 minutes:
+With a group's [carrel server](/docs/guide/server.md), connect to it; this sets up syncing too:
+
+```sh
+carrel connect https://papers.example.org
+```
+
+Without one, sync through an S3 bucket or a shared folder ([Sharing a library](/docs/guide/sharing.md)), then let it sync by itself every 10 minutes:
 
 ```sh
 carrel service install sync

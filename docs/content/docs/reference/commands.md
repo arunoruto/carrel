@@ -43,6 +43,7 @@ Run `carrel <command> --help` for every option.
 | `doctor [--all] [--online] [--json]` | [check the library](/docs/guide/maintenance.md) |
 | `rm <id>` | delete a paper and its files |
 | `sync [-n] [-v] [--keep local\|remote]` | [share the library](/docs/guide/sharing.md) through the config's remote |
+| `connect <server> [--token file] [--web] [--no-service]` | [sync through a carrel server](/docs/guide/sharing.md#through-a-carrel-server): config, token, sync service |
 | `serve [--listen addr] [--every minutes]` | [run the library on a server](/docs/guide/server.md): MCP over HTTP, syncing and background work |
 | `config` | where the config, library and index are |
 | `mcp` | the [MCP server](/docs/guide/ai.md) on stdin/stdout |

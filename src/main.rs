@@ -250,6 +250,22 @@ enum Cmd {
         #[arg(long, requires = "agent")]
         remove: bool,
     },
+    /// Connect this machine to a carrel server and sync through it every 10 minutes. Without a token, from the
+    /// server's trusted networks, it downloads and adds papers; with one from its web UI's Tokens page it also
+    /// shares changes
+    Connect {
+        /// The server's address, such as https://carrel.example.org
+        url: String,
+        /// Read the token from this file instead of asking for it
+        #[arg(long)]
+        token: Option<PathBuf>,
+        /// Run the web UI on this machine too
+        #[arg(long)]
+        web: bool,
+        /// Only write the config, set up no services
+        #[arg(long)]
+        no_service: bool,
+    },
     /// Run `carrel web` or `carrel consume` in the background (systemd on Linux, launchd on macOS);
     /// without a command, what runs
     Service {
@@ -373,6 +389,7 @@ fn main() -> Result<()> {
     };
     // Setting up the machine needs no library.
     match cmd {
+        Cmd::Connect { url, token, web, no_service } => return connect(&url, token, web, no_service),
         Cmd::Integrate { agent: Some(agent), remove } => {
             println!("{}", install::integrate(agent, remove)?);
             return Ok(());
@@ -789,7 +806,9 @@ fn main() -> Result<()> {
         Cmd::Web { listen, get_url: true, .. } => println!("{}", web::url(listen)?),
         Cmd::Web { listen, no_open, .. } => web::run(lib, listen, !no_open)?,
         Cmd::Mcp => tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(mcp::serve(lib))?,
-        Cmd::Integrate { .. } | Cmd::Service { .. } => unreachable!("handled before the library opens"),
+        Cmd::Integrate { .. } | Cmd::Service { .. } | Cmd::Connect { .. } => {
+            unreachable!("handled before the library opens")
+        }
     }
     Ok(())
 }
@@ -1105,6 +1124,136 @@ pub fn edit(path: &Path) -> Result<()> {
 }
 
 /// Open a file with the desktop's default app.
+/// `carrel connect`: `[remote]` pointing at a server, a token kept beside the config, and the sync service.
+fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) -> Result<()> {
+    use std::fs;
+    use std::io::IsTerminal;
+    let url = url.trim_end_matches('/').to_string();
+    let me = |token: Option<&str>| -> Result<serde_json::Value> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let mut request = agent.get(format!("{url}/api/me")).header("X-Carrel-Client", carrel::remote::identity(None));
+        if let Some(token) = token {
+            request = request.header("Authorization", &format!("Bearer {token}"));
+        }
+        let mut response = request.call().with_context(|| format!("cannot reach {url}"))?;
+        response.body_mut().read_json().with_context(|| format!("{url} doesn't answer like a carrel server"))
+    };
+    let anonymous = me(None)?;
+    if anonymous["server"] != true {
+        bail!("{url} is a carrel web for one machine, not a server");
+    }
+    let token = match token_file {
+        Some(file) => Some(fs::read_to_string(&file).with_context(|| format!("cannot read {}", file.display()))?),
+        None if std::io::stdin().is_terminal() => {
+            let tokens = format!("{url}/#/tokens");
+            println!("A token lets this machine share changes too: make one for it at {tokens} (opening it now).");
+            let _ = open(Path::new(&tokens));
+            Some(read_secret("Paste it here, or press Enter to connect without one: ")?)
+        }
+        None => None,
+    };
+    let token = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let config = Config::path().context("no folder for the config")?;
+    let dir = config.parent().context("no folder for the config")?.to_path_buf();
+    let quoted = |s: &str| toml::Value::from(s).to_string();
+    let table = match &token {
+        Some(token) => {
+            let who = me(Some(token))?;
+            if !matches!(who["role"].as_str(), Some("member" | "admin")) {
+                bail!("{url} doesn't know that token; make one on its Tokens page");
+            }
+            println!("connected as {} ({})", who["user"].as_str().unwrap_or("?"), who["role"].as_str().unwrap_or("?"));
+            let file = dir.join("token");
+            fs::create_dir_all(&dir)?;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut out = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file)?;
+            out.write_all(token.as_bytes())?;
+            format!(
+                "[remote]\ntype = \"carrel\"\nurl = {}\ntoken = {{ file = {} }}\n",
+                quoted(&url),
+                quoted(&file.to_string_lossy())
+            )
+        }
+        None => {
+            if anonymous["role"] != "anonymous" {
+                bail!("{url} lets this machine in only with a token; make one on its Tokens page");
+            }
+            println!(
+                "connected without a token, as {}: you can download and add papers; changes you make stay here",
+                carrel::remote::identity(None)
+            );
+            format!("[remote]\ntype = \"carrel\"\nurl = {}\n", quoted(&url))
+        }
+    };
+    // `[remote]` replaced, its `name` kept; the rest of the config as it was, and the old one beside it.
+    let old = fs::read_to_string(&config).unwrap_or_default();
+    let (mut kept, mut name, mut inside, mut had) = (String::new(), None, false, false);
+    for line in old.lines() {
+        if line.trim_start().starts_with('[') {
+            inside = line.trim() == "[remote]" || line.trim().starts_with("[remote.");
+            had |= inside;
+        }
+        if inside && line.trim_start().starts_with("name") {
+            name = Some(line.to_string());
+        }
+        if !inside {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    let table = match name {
+        Some(name) => format!("{table}{name}\n"),
+        None => table,
+    };
+    let sep = if kept.trim().is_empty() || kept.ends_with("\n\n") { "" } else { "\n" };
+    let new = format!("{}{sep}{table}", kept.trim_start_matches('\n'));
+    if had {
+        fs::write(config.with_extension("toml.bak"), &old)?;
+        println!("replaced [remote] in {}; the old config is in config.toml.bak", config.display());
+    }
+    fs::create_dir_all(&dir)?;
+    fs::write(&config, &new)?;
+    if let Err(e) = Config::load() {
+        fs::write(&config, &old)?;
+        return Err(e.context("the new config doesn't load; left it as it was"));
+    }
+    if no_service {
+        println!("`carrel sync` fetches the library");
+        return Ok(());
+    }
+    let services = [install::Service::Sync].into_iter().chain(web.then_some(install::Service::Web));
+    for service in services {
+        match install::install(service, "127.0.0.1:7700") {
+            Ok(_) => println!("{}", install::status(service)?),
+            Err(e) => println!("cannot set up the background service: {e:#}"),
+        }
+    }
+    println!("the library arrives with the first sync, within a minute; `carrel sync` fetches it now");
+    Ok(())
+}
+
+/// A line from the terminal, not shown as it is typed.
+fn read_secret(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    // SAFETY: termios is plain data, filled by tcgetattr before use; fd 0 is stdin, a terminal here.
+    let mut was: libc::termios = unsafe { std::mem::zeroed() };
+    let hidden = unsafe { libc::tcgetattr(0, &mut was) } == 0;
+    if hidden {
+        let mut quiet = was;
+        quiet.c_lflag &= !libc::ECHO;
+        unsafe { libc::tcsetattr(0, libc::TCSANOW, &quiet) };
+    }
+    let mut line = String::new();
+    let read = std::io::stdin().read_line(&mut line);
+    if hidden {
+        unsafe { libc::tcsetattr(0, libc::TCSANOW, &was) };
+        println!();
+    }
+    read?;
+    Ok(line.trim().to_string())
+}
+
 pub fn open(path: &Path) -> Result<()> {
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     Command::new(opener).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
