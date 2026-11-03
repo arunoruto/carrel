@@ -1215,7 +1215,15 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
     let sep = if kept.trim().is_empty() || kept.ends_with("\n\n") { "" } else { "\n" };
     let new = format!("{}{sep}{table}", kept.trim_start_matches('\n'));
     if had {
-        fs::write(config.with_extension("toml.bak"), &old)?;
+        // As private as the config: it may hold secrets.
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut backup = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(config.with_extension("toml.bak"))?;
+        backup.write_all(old.as_bytes())?;
         println!("replaced [remote] in {}; the old config is in config.toml.bak", config.display());
     }
     fs::create_dir_all(&dir)?;

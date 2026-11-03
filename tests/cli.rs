@@ -691,6 +691,8 @@ fn syncing_through_a_server() {
         c.command(&["connect", &format!("http://{addr}"), "--no-service"]).env("USER", "tester").output().unwrap();
     let said = String::from_utf8_lossy(&connected.stdout);
     assert!(said.contains("connected without a token, as tester@") && said.contains("config.toml.bak"), "{said}");
+    let backup = std::fs::metadata(c.tmp.path("config/carrel/config.toml.bak")).unwrap();
+    assert_eq!(std::os::unix::fs::PermissionsExt::mode(&backup.permissions()) & 0o777, 0o600, "may hold secrets");
     let config = read(c.tmp.path("config/carrel/config.toml"));
     assert!(
         config.starts_with("library = ") && config.contains("type = \"carrel\"") && !config.contains("folder"),
