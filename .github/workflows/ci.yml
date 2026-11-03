@@ -69,10 +69,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
-      # The store, with the dependencies built (crane's cargoArtifacts), kept until a lock file changes.
+      # The store, with the dependencies built (crane's cargoArtifacts), kept until they change.
       - uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'Cargo.lock', 'web/package-lock.json') }}
+          # Whatever decides the dependencies' build: the locks, and how the Nix files build them.
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**', 'Cargo.lock', 'web/package-lock.json') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
           gc-max-store-size: 4G
           purge: true
