@@ -61,21 +61,25 @@
 - **Full-text search** with field filters, and **semantic search** by meaning, with embeddings from [Ollama](https://ollama.com) (bge-m3 or a model you pick).
 - **Picks papers up from Downloads** (`carrel consume`), asking first, or watching the folder with the Home Manager module and telling you what it found, on the desktop, by email or on Telegram.
 - **A web UI** (`carrel web`) with a built-in PDF reader, a **TUI**, citation graphs, and a health check (`carrel doctor`).
-- **Shared by a group**: `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder, and `carrel serve` on a server (Docker image or NixOS module) for MCP over HTTP and background work.
+- **Shared by a group**: `carrel serve` on a server (Docker image or NixOS module) with logins (OpenID Connect), a web UI for everyone, an activity feed with reverts, and `carrel connect` for each machine; or just `carrel sync` through an S3 bucket (Garage, MinIO, ...) or a folder.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Clients and servers
 
-There is one program. `carrel` on your laptop is a **client**, `carrel serve` is a **server**, and both keep a full library of plain files. They never talk to each other directly: they meet at the **remote**, a bucket or folder that `carrel sync` copies files to and from. The search index is a cache on each machine and is never synced.
+There is one program. `carrel` on your laptop is a **client**, `carrel serve` is a **server**, and both keep a full library of plain files. A group shares it through the server: clients sync with it (`carrel connect`), others use its web UI in a browser, and it keeps its library in a **remote**, a bucket or folder. The server holds the logins, tokens and an activity feed where admins revert changes and decide on deletions. Without a server, clients sync with the remote directly. The search index is a cache on each machine and is never synced.
 
 ```text
-   laptop A           laptop B                  server (carrel serve)
-   carrel · TUI · web carrel · TUI · web        rounds every few minutes
-        │                  │                          │
-        │ carrel sync      │ carrel sync              │ sync each round
-        └──────────┬───────┴──────────────────────────┘
-                   │  S3 over HTTPS (or a shared folder)
+   laptop A           laptop B             a browser
+   carrel · TUI · web carrel · TUI · web   nothing installed
+        │                  │                    │
+        │ carrel sync      │ carrel sync        │ web UI, logged in
+        └──────────┬───────┴────────────────────┘
+                   │  HTTPS: /sync, /api, /mcp
+          ┌────────┴─────────┐
+          │  server          │  carrel serve
+          └────────┬─────────┘
+                   │  sync each round
              ┌─────┴─────┐
              │  remote   │  Garage, MinIO, AWS: files only
              └───────────┘
@@ -87,12 +91,12 @@ There is one program. `carrel` on your laptop is a **client**, `carrel serve` is
 
 | | Client | Server |
 |---|---|---|
-| add, edit, approve drafts | you, in the CLI, TUI or web UI | AIs propose drafts over MCP |
+| add, edit, approve drafts | you, in the CLI, TUI or web UI | the group in its web UI; AIs propose drafts over MCP |
 | extract text, look up references, embed | on demand | for every paper still missing them, once for everyone |
 | pick up new PDFs | from your Downloads, and tells you | from a drop folder with `auto = true`, logged only |
 | notify | about your own Downloads | about its own trouble, such as Ollama going away |
 
-A server is optional; without one, sync alone shares the library. See [Clients and servers][architecture-url] for the details.
+A server is optional; without one, syncing with a bucket alone shares the library. See [Clients and servers][architecture-url] for the details.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

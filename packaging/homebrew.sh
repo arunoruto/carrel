@@ -41,6 +41,8 @@ class Carrel < Formula
 
   def caveats
     <<~EOS
+      Join your group's carrel server, if it has one:
+        carrel connect https://<server>
       Run carrel in the background (the web UI, and papers from Downloads):
         carrel service install web
         carrel service install consume

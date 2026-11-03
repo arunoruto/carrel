@@ -4,24 +4,29 @@ weight: 13
 aliases: ["/architecture.html"]
 ---
 
-There is one program. `carrel` on your laptop is a **client**; `carrel serve` on a machine that never sleeps is a **server**. Both keep a full library of their own, as plain files, and neither talks to the other directly: they meet at the **remote**, the bucket (or folder) that `carrel sync` copies files to and from.
+There is one program. `carrel` on your laptop is a **client**; `carrel serve` on a machine that never sleeps is a **server**. Both keep a full library of their own, as plain files. A group shares it through the server: clients sync with it (`carrel connect`), people without carrel use its web UI in a browser, and the server keeps its library in a **remote**, the bucket (or folder) it syncs with every few minutes. The server is where logins, tokens and the [activity](/docs/guide/server.md#activity-changes-reverts-and-deletions) live: who may change or delete what, and the way back.
 
 ```text
-   laptop A                laptop B                       server (carrel serve)
-   carrel · TUI · web      carrel · TUI · web                  rounds every few minutes
-   ~/Documents/carrel      ~/Documents/carrel             /library
-        │                       │                              │
-        │ carrel sync           │ carrel sync                  │ sync each round
-        └───────────────┬───────┴──────────────────────────────┘
-                        │  S3 over HTTPS (or a shared folder)
-                  ┌─────┴─────┐
-                  │  remote   │  Garage, MinIO, AWS: files only, no logic
-                  └───────────┘
+   laptop A               laptop B                  a browser
+   carrel · TUI · web     carrel · TUI · web        nothing installed
+        │                      │                         │
+        │ carrel sync          │ carrel sync             │ web UI, logged in
+        └──────────┬───────────┴─────────────────────────┘
+                   │  HTTPS: /sync, /api, /mcp; logins, tokens, activity
+          ┌────────┴─────────┐
+          │  server          │  carrel serve: extracts, looks up, embeds
+          └────────┬─────────┘
+                   │  sync each round, S3 over HTTPS
+             ┌─────┴─────┐
+             │  remote   │  Garage, MinIO, AWS, or a folder: files only
+             └───────────┘
 
    you     ── carrel web (127.0.0.1) ──▶ the laptop's library
    your AI ── carrel mcp (stdio) ──▶ the laptop's library
    any AI  ── HTTPS /mcp + token ──▶ the server's library
 ```
+
+Without a server, clients sync with the remote directly, as the server does (`type = "s3"` or `"folder"`), and that works as well; the two ways can even be mixed, since the server syncs with the same remote. What a server adds is the group around the library: who may do what, and what was done.
 
 ## What lives where
 

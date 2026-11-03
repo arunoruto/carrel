@@ -783,6 +783,34 @@ fn main() -> Result<()> {
                 },
             };
             println!("embeddings: {embeddings}");
+            let remote = match Config::load()?.remote {
+                None => "none; `carrel connect <server>` shares it through a carrel server".into(),
+                Some(carrel::remote::RemoteConfig::Carrel { url, token, name }) => {
+                    let token = token.as_ref().map(|t| t.read()).transpose()?;
+                    match server_me(url.trim_end_matches('/'), token.as_deref()) {
+                        Ok(me) => match me["role"].as_str() {
+                            Some("member" | "admin") => {
+                                format!(
+                                    "{url}, as {} ({})",
+                                    me["user"].as_str().unwrap_or("?"),
+                                    me["role"].as_str().unwrap_or("?")
+                                )
+                            }
+                            Some("anonymous") => format!(
+                                "{url}, without a token, as {}: downloads and adds papers, keeps changes here",
+                                carrel::remote::identity(name.as_deref())
+                            ),
+                            _ if token.is_some() => {
+                                format!("{url} doesn't take this token; make a new one on its Tokens page")
+                            }
+                            _ => format!("{url} wants a token from here; `carrel connect {url}` asks for one"),
+                        },
+                        Err(e) => format!("{url}: {e:#}"),
+                    }
+                }
+                Some(remote) => remote.open().map_or_else(|e| format!("not working: {e:#}"), |r| r.name()),
+            };
+            println!("remote:  {remote}");
         }
         Cmd::Consume { folders, yes, again, days } => consume(&lib, folders, yes, again, days)?,
         Cmd::Notify { message } => {
@@ -1130,15 +1158,7 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
     use std::fs;
     use std::io::IsTerminal;
     let url = url.trim_end_matches('/').to_string();
-    let me = |token: Option<&str>| -> Result<serde_json::Value> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let mut request = agent.get(format!("{url}/api/me")).header("X-Carrel-Client", carrel::remote::identity(None));
-        if let Some(token) = token {
-            request = request.header("Authorization", &format!("Bearer {token}"));
-        }
-        let mut response = request.call().with_context(|| format!("cannot reach {url}"))?;
-        response.body_mut().read_json().with_context(|| format!("{url} doesn't answer like a carrel server"))
-    };
+    let me = |token: Option<&str>| server_me(&url, token);
     let anonymous = me(None)?;
     if anonymous["server"] != true {
         bail!("{url} is a carrel web for one machine, not a server");
@@ -1245,6 +1265,21 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
     }
     println!("the library arrives with the first sync, within a minute; `carrel sync` fetches it now");
     Ok(())
+}
+
+/// Who a carrel server takes this machine for, with `token` or without.
+fn server_me(url: &str, token: Option<&str>) -> Result<serde_json::Value> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(std::time::Duration::from_secs(20)))
+        .build()
+        .into();
+    let mut request = agent.get(format!("{url}/api/me")).header("X-Carrel-Client", carrel::remote::identity(None));
+    if let Some(token) = token {
+        request = request.header("Authorization", &format!("Bearer {token}"));
+    }
+    let mut response = request.call().with_context(|| format!("cannot reach {url}"))?;
+    response.body_mut().read_json().with_context(|| format!("{url} doesn't answer like a carrel server"))
 }
 
 /// A line from the terminal, not shown as it is typed.
