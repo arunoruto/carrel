@@ -722,9 +722,9 @@ fn syncing_through_a_server() {
     ]);
     assert!(connected.contains("connected as server (admin)"), "{connected}");
     use std::os::unix::fs::PermissionsExt;
-    let kept = std::fs::metadata(c.tmp.path("config/carrel/token")).unwrap();
+    let kept = std::fs::metadata(c.tmp.path("config/carrel/tokens/carrel.txt")).unwrap();
     assert_eq!(
-        (kept.permissions().mode() & 0o777, read(c.tmp.path("config/carrel/token"))),
+        (kept.permissions().mode() & 0o777, read(c.tmp.path("config/carrel/tokens/carrel.txt"))),
         (0o600, "admintok".into())
     );
     assert!(

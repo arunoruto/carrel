@@ -1163,8 +1163,9 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
                 bail!("{url} doesn't know that token; make one on its Tokens page");
             }
             println!("connected as {} ({})", who["user"].as_str().unwrap_or("?"), who["role"].as_str().unwrap_or("?"));
-            let file = dir.join("token");
-            fs::create_dir_all(&dir)?;
+            // Beside the other tokens of `[tokens]`.
+            let file = dir.join("tokens").join("carrel.txt");
+            fs::create_dir_all(file.parent().unwrap())?;
             use std::os::unix::fs::OpenOptionsExt;
             let mut out = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file)?;
             out.write_all(token.as_bytes())?;
