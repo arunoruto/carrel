@@ -2,9 +2,15 @@
   description = "carrel: a research paper library for you and your AI";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # Builds the dependencies apart from carrel itself, so a change to carrel doesn't build them again.
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      crane,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -15,7 +21,7 @@
     in
     {
       packages = eachSystem (pkgs: rec {
-        carrel = pkgs.callPackage ./nix/package.nix { };
+        carrel = pkgs.callPackage ./nix/package.nix { craneLib = crane.mkLib pkgs; };
         default = carrel;
       });
 
@@ -34,7 +40,9 @@
         };
       });
 
-      overlays.default = final: _prev: { carrel = final.callPackage ./nix/package.nix { }; };
+      overlays.default = final: _prev: {
+        carrel = final.callPackage ./nix/package.nix { craneLib = crane.mkLib final; };
+      };
 
       nixosModules.default =
         { lib, pkgs, ... }:

@@ -9,8 +9,18 @@ RUN npm ci
 COPY web ./
 RUN npm run build
 
-FROM docker.io/library/rust:1-slim-trixie AS build
+# cargo-chef: the dependencies are built in a layer of their own, which stays cached until Cargo.lock changes.
+FROM docker.io/lukemathwalker/cargo-chef:latest-rust-1-slim-trixie AS chef
 WORKDIR /src
+
+FROM chef AS plan
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY src src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=plan /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 # The web UI, embedded into the binary by build.rs.
@@ -18,9 +28,7 @@ COPY --from=web /web/dist web/dist
 # The runtime image's Python runs the PyMuPDF extractor, so nothing is downloaded when a PDF comes in.
 # No Docling: it would bring PyTorch, gigabytes of it.
 ENV CARREL_DEFAULT_EXTRACTOR='python -I -c "$CARREL_EXTRACT_PY" "$PDF"'
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked && cp target/release/carrel /carrel
+RUN cargo build --release --locked && cp target/release/carrel /carrel
 
 FROM docker.io/library/python:3.13-slim-trixie
 RUN pip install --no-cache-dir pymupdf4llm==1.28.2 \
