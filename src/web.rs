@@ -266,6 +266,9 @@ impl Web {
         let (history, writes) = (self.history.clone().expect("a server's"), self.writes.clone());
         let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
         let client = who.client.clone();
+        // Where this person's `private/` is kept: `users/<name>/`, for the people the server knows.
+        let own = who.user.clone().filter(|u| role.can(Right::Edit) && carrel::valid_id(u));
+        let own = own.map(|u| format!("{}/{u}/", carrel::projects::USERS));
         let md5 = move |path: &str| -> Result<Option<String>> {
             let file = root.join(path);
             let Ok(meta) = fs::metadata(&file) else { return Ok(None) };
@@ -282,19 +285,36 @@ impl Web {
         let root = self.lib.root.clone();
         let reply = tokio::task::spawn_blocking(move || -> Result<Response<Body>> {
             let refused = |status, why: &str| Ok(json_status(status, json!({"error": why})));
+            let users = format!("{}/", carrel::projects::USERS);
             let Some(path) = path else {
                 let mut files = serde_json::Map::new();
                 for path in carrel::remote::files(&root)? {
+                    let shown = match &own {
+                        _ if !path.starts_with(&users) => path.clone(),
+                        Some(own) if path.starts_with(own.as_str()) => {
+                            format!("{}/{}", carrel::projects::PRIVATE, &path[own.len()..])
+                        }
+                        _ => continue, // someone else's
+                    };
                     if let Some(md5) = md5(&path)? {
-                        files.insert(path, md5.into());
+                        files.insert(shown, md5.into());
                     }
                 }
-                let can = json!({"edit": role.can(Right::Edit), "delete": role.can(Right::Edit)});
+                let can =
+                    json!({"edit": role.can(Right::Edit), "delete": role.can(Right::Edit), "private": own.is_some()});
                 return Ok(json_status(StatusCode::OK, json!({"files": files, "can": can})));
             };
-            if !carrel::remote::plain(&path) {
+            if !carrel::remote::plain(&path) || path.starts_with(&users) {
                 return refused(StatusCode::BAD_REQUEST, "not a path in the library");
             }
+            // A private file: the person's own, kept out of the activity, theirs to change and delete.
+            let private = path.strip_prefix(&format!("{}/", carrel::projects::PRIVATE)).map(String::from);
+            let path = match (&private, &own) {
+                (Some(rest), Some(own)) => format!("{own}{rest}"),
+                (Some(_), None) => return refused(StatusCode::FORBIDDEN, "private files need a member's token"),
+                (None, _) => path,
+            };
+            let private = private.is_some();
             let file = root.join(&path);
             let current = md5(&path)?;
             match method {
@@ -302,7 +322,7 @@ impl Web {
                 Method::GET => refused(StatusCode::NOT_FOUND, "no such file"),
                 Method::PUT => {
                     let right = if current.is_some() { Right::Edit } else { Right::Add };
-                    if !role.can(right) {
+                    if !private && !role.can(right) {
                         return refused(StatusCode::FORBIDDEN, "changing files needs a member's token");
                     }
                     let sent = carrel::remote::md5_hex(&body);
@@ -321,11 +341,15 @@ impl Web {
                     let part = parts.join(format!("upload-{}", crate::auth::random(8)));
                     fs::write(&part, &body)?;
                     let _one_at_a_time = writes.lock().unwrap_or_else(|e| e.into_inner());
-                    let paper = path.split_once('/').map(|(p, _)| p);
-                    let before = history.before(&name, client.as_deref(), "synced", paper, &[&path])?;
                     fs::create_dir_all(file.parent().unwrap())?;
-                    fs::rename(&part, &file)?;
-                    history.after(before)?;
+                    if private {
+                        fs::rename(&part, &file)?;
+                    } else {
+                        let paper = path.split_once('/').map(|(p, _)| p);
+                        let before = history.before(&name, client.as_deref(), "synced", paper, &[&path])?;
+                        fs::rename(&part, &file)?;
+                        history.after(before)?;
+                    }
                     let mut response = json_status(StatusCode::OK, json!({}));
                     response.headers_mut().insert(header::ETAG, format!("\"{sent}\"").parse()?);
                     Ok(response)
@@ -336,6 +360,11 @@ impl Web {
                         return refused(StatusCode::FORBIDDEN, "deleting needs a member's token");
                     }
                     if current.is_none() {
+                        return Ok(json_status(StatusCode::OK, json!({})));
+                    }
+                    if private {
+                        fs::remove_file(&file)?;
+                        carrel::remote::remove_empty_parents(&file, &root);
                         return Ok(json_status(StatusCode::OK, json!({})));
                     }
                     let paper = path.split_once('/').map(|(p, _)| p);
@@ -351,6 +380,47 @@ impl Web {
         match reply {
             Ok(Ok(response)) => response,
             Ok(Err(e)) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": format!("{e:#}")})),
+            Err(e) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()})),
+        }
+    }
+
+    /// Ollama's API, as far as clients embed with it, by the server's Ollama and model: everyone's vectors
+    /// then compare, and nobody needs an Ollama of their own.
+    async fn ollama_call(
+        &self,
+        request: Request<hyper::body::Incoming>,
+        from: Option<std::net::IpAddr>,
+        trusted: bool,
+    ) -> Response<Body> {
+        if self.who(&request, trusted, from).role == crate::auth::Role::None {
+            return json_status(StatusCode::UNAUTHORIZED, json!({"error": "send a token"}));
+        }
+        let Some(config) = self.lib.embeddings.clone() else {
+            let why = "this carrel server doesn't compute embeddings; [embeddings] in its config turns them on";
+            return json_status(StatusCode::NOT_FOUND, json!({"error": why}));
+        };
+        let endpoint = request.uri().path().trim_start_matches("/ollama/api/").to_string();
+        let body = match Limited::new(request.into_body(), MAX_BODY).collect().await {
+            Ok(body) => body.to_bytes(),
+            Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),
+        };
+        let reply = tokio::task::spawn_blocking(move || -> Result<Value> {
+            let ollama = carrel::embed::Ollama::connect(&config)?;
+            let mut sent: Value = if body.is_empty() { Value::Null } else { serde_json::from_slice(&body)? };
+            match endpoint.as_str() {
+                "tags" => Ok(json!({"models": [{"name": ollama.model, "model": ollama.model}]})),
+                "show" => ollama.call("show", Some(sent)),
+                "embed" => {
+                    sent["model"] = json!(ollama.model);
+                    ollama.call("embed", Some(sent))
+                }
+                _ => bail!("carrel passes on only Ollama's tags, show and embed"),
+            }
+        })
+        .await;
+        match reply {
+            Ok(Ok(value)) => json_status(StatusCode::OK, value),
+            Ok(Err(e)) => json_status(StatusCode::BAD_GATEWAY, json!({"error": format!("{e:#}")})),
             Err(e) => json_status(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()})),
         }
     }
@@ -381,6 +451,9 @@ impl Web {
         }
         if !self.local && (path == "/sync" || path.starts_with("/sync/")) {
             return self.sync_call(request, from, trusted).await;
+        }
+        if !self.local && path.starts_with("/ollama/api/") {
+            return self.ollama_call(request, from, trusted).await;
         }
         // The link `carrel web` prints: trade the token for a cookie, and drop it from the address bar.
         if let Some(sent) = query.get("token").filter(|_| self.link_works()) {
@@ -456,7 +529,11 @@ impl Web {
             Ok(body) => body.to_bytes(),
             Err(e) => return json_status(StatusCode::PAYLOAD_TOO_LARGE, json!({"error": e.to_string()})),
         };
-        let lib = self.lib.clone();
+        // On a server, with the private projects of whoever asks.
+        let lib = match self.local {
+            true => self.lib.clone(),
+            false => self.lib.for_user(who.user.as_deref().filter(|_| who.role.can(Right::Edit))),
+        };
         let (history, writes) = (self.history.clone(), self.writes.clone());
         let name = who.user.clone().unwrap_or_else(|| "anonymous".into());
         let client = who.client.clone();
@@ -562,6 +639,15 @@ fn activity_call(
             }
             ok(json!({"asked": true}))
         })(),
+        // Shared projects too; private ones are their owner's to delete.
+        ("DELETE", ["projects", name]) if !lib.is_private(name) => (|| {
+            lib.project(name)?;
+            let file = format!("{}/{name}.txt", carrel::PROJECTS);
+            if history.request_deletion(who, None, &[file])? {
+                bail!("an admin turned down deleting the project {name} lately");
+            }
+            ok(json!({"deleted": false, "asked": true}))
+        })(),
         ("POST", ["activity", id, "revert"]) if admin => history.revert(id, who).and_then(|()| ok(json!({}))),
         ("POST", ["activity", id, action @ ("accept" | "decline")]) if admin => {
             history.decide(id, who, *action == "accept").and_then(|()| ok(json!({})))
@@ -666,11 +752,29 @@ fn api_call(
             ok(Value::Array(drafts.collect()))
         }
         (m, ["projects"]) if *m == get => {
-            let projects = lib.projects().into_iter().map(|name| {
-                let papers = lib.project(&name).unwrap_or_default();
-                json!({"name": name, "papers": papers})
-            });
+            let projects = lib.projects().into_iter().map(|name| project(lib, &name));
             ok(Value::Array(projects.collect()))
+        }
+        (m, ["projects"]) if *m == post => {
+            let name = field("name")?;
+            lib.create_project(&name, form()?["private"].as_bool().unwrap_or(false))?;
+            ok(project(lib, &name))
+        }
+        (m, ["projects", name]) if m.as_str() == "PATCH" => {
+            let change = form()?;
+            let mut name = name.to_string();
+            if let Some(new) = change["name"].as_str().filter(|new| *new != name) {
+                lib.rename_project(&name, new)?;
+                name = new.into();
+            }
+            if let Some(private) = change["private"].as_bool() {
+                lib.set_private(&name, private)?;
+            }
+            ok(project(lib, &name))
+        }
+        (m, ["projects", name]) if m.as_str() == "DELETE" => {
+            lib.delete_project(name)?;
+            ok(json!({"deleted": true, "asked": false}))
         }
         (m, ["suggestions"]) if *m == get => {
             let within = query.get("project").map(|p| lib.project(p)).transpose()?;
@@ -850,7 +954,7 @@ fn paper_call(
             lib.add_to_project(name, &[id.to_string()])?;
             ok(json!({"projects": lib.projects_of(id)}))
         }
-        (m, ["projects", name]) if *m == delete => {
+        (m, ["projects", name]) if m.as_str() == "DELETE" => {
             lib.remove_from_project(name, &[id.to_string()])?;
             ok(json!({"projects": lib.projects_of(id)}))
         }
@@ -918,6 +1022,10 @@ fn details(lib: &Library, p: &Paper) -> Value {
 
 /// The library as a network: papers, the citations between them, the authors they share and, from the
 /// embeddings, which are most alike.
+fn project(lib: &Library, name: &str) -> Value {
+    json!({"name": name, "papers": lib.project(name).unwrap_or_default(), "private": lib.is_private(name)})
+}
+
 fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
     let papers = match project {
         Some(name) => lib.project_papers(name)?.0,

@@ -29,7 +29,7 @@ mod ilibrarian;
 mod index;
 mod jabref;
 pub mod notify;
-mod projects;
+pub mod projects;
 /// The folder of the library that holds the projects.
 pub const PROJECTS: &str = projects::DIR;
 pub mod recommended;
@@ -326,6 +326,9 @@ pub struct Library {
     pub formulas: bool,
     /// Where to compute embeddings for semantic search; none without `[embeddings]` in the config.
     pub embeddings: Option<embed::Config>,
+    /// The folder of the private projects: `private/projects`, synced only to a carrel server, which keeps
+    /// each person's in `users/<name>/projects`. None for someone a server doesn't know.
+    pub private: Option<PathBuf>,
 }
 
 impl Library {
@@ -352,6 +355,14 @@ impl Library {
         lib.docling = std::env::var("CARREL_DOCLING").ok().filter(|d| !d.is_empty()).or(config.docling);
         lib.formulas = config.formulas.unwrap_or(false);
         lib.embeddings = config.embeddings;
+        // Connected to a carrel server: its Ollama and model, unless `[embeddings]` says otherwise here.
+        if lib.embeddings.is_none()
+            && let Some(remote::RemoteConfig::Carrel { url, token, .. }) = &config.remote
+        {
+            let token = token.as_ref().and_then(|t| t.read().ok());
+            let ollama = Some(format!("{}/ollama", url.trim_end_matches('/')));
+            lib.embeddings = Some(embed::Config { ollama, model: None, server: Some(token) });
+        }
         Ok(lib)
     }
 
@@ -364,6 +375,7 @@ impl Library {
         root.hash(&mut hash);
         let index = cache.join(format!("index-{:016x}.sqlite", hash.finish()));
         Ok(Self {
+            private: Some(root.join(projects::PRIVATE).join(projects::DIR)),
             root,
             index,
             key: DEFAULT_KEY.into(),
@@ -410,7 +422,7 @@ impl Library {
     fn folders(&self) -> Vec<String> {
         let entries = fs::read_dir(&self.root).into_iter().flatten().flatten().filter(|e| e.path().is_dir());
         let names = entries.map(|e| e.file_name().to_string_lossy().into_owned());
-        let reserved = [projects::DIR, authors::DIR, recommended::DIR];
+        let reserved = [projects::DIR, projects::PRIVATE, projects::USERS, authors::DIR, recommended::DIR];
         let mut names: Vec<String> =
             names.filter(|name| !name.starts_with('.') && !reserved.contains(&name.as_str())).collect();
         names.sort();
@@ -1002,7 +1014,7 @@ pub fn chunk(text: &str, offset: usize, length: usize) -> String {
     format!("[characters {start}-{end} of {total}; {next}]\n\n{piece}")
 }
 
-fn valid_id(id: &str) -> bool {
+pub fn valid_id(id: &str) -> bool {
     let chars = id.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:".contains(c));
     chars
         && !id.is_empty()

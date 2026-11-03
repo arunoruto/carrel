@@ -72,7 +72,10 @@ pub fn needed(method: &str, path: &[&str]) -> Right {
         ("GET", ["tokens" | "activity", ..]) => Right::Edit,
         ("GET", _) => Right::Read,
         ("POST", ["activity", ..]) => Right::Admin,
-        ("POST", ["add" | "upload"] | ["recommended", _, "add"] | ["papers", _, "pdf" | "supplementary"]) => Right::Add,
+        (
+            "POST",
+            ["add" | "upload" | "projects"] | ["recommended", _, "add"] | ["papers", _, "pdf" | "supplementary"],
+        ) => Right::Add,
         // On a server deleting is only asked for; an admin decides.
         _ => Right::Edit,
     }

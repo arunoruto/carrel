@@ -360,7 +360,19 @@ enum ProjectCmd {
     /// Show a project's papers
     Show { name: String },
     /// Add papers to a project, creating it if needed
-    Add { name: String, ids: Vec<String> },
+    Add {
+        name: String,
+        ids: Vec<String>,
+        /// Create it private: synced only to a carrel server, which shows it to you alone
+        #[arg(long)]
+        private: bool,
+    },
+    /// Rename a project
+    Rename { name: String, new: String },
+    /// Make a project private: synced only to a carrel server, which shows it to you alone
+    Private { name: String },
+    /// Share a private project with everyone again
+    Share { name: String },
     /// Take papers out of a project; they stay in the library
     Remove {
         name: String,
@@ -745,11 +757,20 @@ fn main() -> Result<()> {
             ProjectCmd::List => {
                 for name in lib.projects() {
                     let n = lib.project(&name)?.len();
-                    println!("{name:<30} {n} paper{}", if n == 1 { "" } else { "s" });
+                    let private = if lib.is_private(&name) { ", private" } else { "" };
+                    println!("{name:<30} {n} paper{}{private}", if n == 1 { "" } else { "s" });
                 }
             }
             ProjectCmd::Show { name } => project_papers(&lib, &name)?.iter().for_each(print_line),
-            ProjectCmd::Add { name, ids } => lib.add_to_project(&name, &ids)?,
+            ProjectCmd::Add { name, ids, private } => {
+                if private && !lib.projects().contains(&name) {
+                    lib.create_project(&name, true)?;
+                }
+                lib.add_to_project(&name, &ids)?;
+            }
+            ProjectCmd::Rename { name, new } => lib.rename_project(&name, &new)?,
+            ProjectCmd::Private { name } => lib.set_private(&name, true)?,
+            ProjectCmd::Share { name } => lib.set_private(&name, false)?,
             ProjectCmd::Remove { name, ids } => lib.remove_from_project(&name, &ids)?,
             ProjectCmd::Delete { name } => lib.delete_project(&name)?,
             ProjectCmd::Sync { name, files } => {
@@ -783,6 +804,7 @@ fn main() -> Result<()> {
             let embeddings = match &lib.embeddings {
                 None => "off; add [embeddings] for semantic search".into(),
                 Some(config) => match carrel::embed::Ollama::connect(config) {
+                    Ok(o) if config.server.is_some() => format!("{} on {}, the server's", o.model, o.url),
                     Ok(o) => format!("{} on {}", o.model, o.url),
                     Err(e) => format!("not working: {e:#}"),
                 },

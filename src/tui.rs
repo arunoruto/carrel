@@ -51,6 +51,8 @@ enum Mode {
     Add,
     /// Typing the project to put the selected paper in.
     Assign,
+    /// Typing a new project's name, or a new name for the selected one.
+    NameProject(Option<String>),
     Confirm,
     Info,
     Results,
@@ -62,6 +64,7 @@ enum Mode {
 /// Something that needs a `y` first.
 enum Ask {
     Delete(String),
+    DeleteProject(String),
     OutOfProject(String, String),
     Reject(Draft),
     People { same: bool, spellings: Vec<String> },
@@ -440,7 +443,7 @@ impl App {
             match self.mode {
                 Mode::Normal if key.code == KeyCode::Char('q') => return Ok(()),
                 Mode::Normal => self.on_key(key, term),
-                Mode::Filter | Mode::Add | Mode::Assign => self.on_input(key.code),
+                Mode::Filter | Mode::Add | Mode::Assign | Mode::NameProject(_) => self.on_input(key.code),
                 Mode::Confirm => self.on_confirm(key.code),
                 Mode::Info => self.mode = Mode::Normal,
                 Mode::Results => self.on_results(key.code),
@@ -648,6 +651,31 @@ impl App {
     fn on_library(&mut self, code: KeyCode, term: &mut DefaultTerminal) {
         let selected = self.selected().cloned();
         match code {
+            // On the shelves: the projects themselves.
+            KeyCode::Char('+') if self.focus == 0 => {
+                self.input.clear();
+                self.mode = Mode::NameProject(None);
+            }
+            KeyCode::Char('r' | 'x' | 'D') if self.focus == 0 => {
+                let Shelf::Project(name) = self.shelf() else {
+                    return self.status =
+                        "pick a project: + makes one, r renames, x makes it private or shared, D deletes".into();
+                };
+                match code {
+                    KeyCode::Char('r') => {
+                        self.input = name.clone();
+                        self.mode = Mode::NameProject(Some(name));
+                    }
+                    KeyCode::Char('x') => {
+                        let private = !self.lib.is_private(&name);
+                        let result = self.lib.set_private(&name, private);
+                        let done = if private { "only you see it now" } else { "everyone sees it now" };
+                        self.report(result, format!("{name}: {done}"));
+                        self.reload();
+                    }
+                    _ => self.confirm(format!("Delete the project {name}? Its papers stay"), Ask::DeleteProject(name)),
+                }
+            }
             KeyCode::Char('a') => {
                 self.input.clear();
                 self.mode = Mode::Add;
@@ -867,6 +895,7 @@ impl App {
         }
         let (result, done) = match ask {
             Ask::Delete(id) => (self.lib.remove(&id), format!("deleted {id}")),
+            Ask::DeleteProject(name) => (self.lib.delete_project(&name), format!("deleted the project {name}")),
             Ask::OutOfProject(name, id) => {
                 (self.lib.remove_from_project(&name, std::slice::from_ref(&id)), format!("took {id} out of {name}"))
             }
@@ -914,6 +943,7 @@ impl App {
                 match self.mode {
                     Mode::Add => self.submit(),
                     Mode::Assign => self.assign(),
+                    Mode::NameProject(_) => self.name_project(),
                     _ => {}
                 }
                 if self.mode != Mode::Results {
@@ -934,6 +964,22 @@ impl App {
                 }
             }
         }
+    }
+
+    fn name_project(&mut self) {
+        let Mode::NameProject(old) = &self.mode else { return };
+        let name = self.input.trim().to_string();
+        let result = match old {
+            _ if name.is_empty() => return,
+            Some(old) if *old == name => return,
+            Some(old) => self.lib.rename_project(old, &name).map(|()| format!("renamed {old} to {name}")),
+            None => self.lib.create_project(&name, false).map(|()| format!("made {name}; x makes it private")),
+        };
+        match result {
+            Ok(done) => self.status = done,
+            Err(e) => self.status = format!("{e:#}"),
+        }
+        self.reload();
     }
 
     fn assign(&mut self) {
@@ -1072,7 +1118,7 @@ impl App {
         match self.mode {
             Mode::Info => self.draw_info(f),
             Mode::Confirm => self.draw_confirm(f),
-            Mode::Add | Mode::Assign => self.draw_prompt(f),
+            Mode::Add | Mode::Assign | Mode::NameProject(_) => self.draw_prompt(f),
             Mode::Results => self.draw_results(f),
             Mode::Pick => self.draw_pick(f),
             Mode::Setup => self.draw_setup(f),
@@ -1194,6 +1240,7 @@ impl App {
             .map(|(shelf, n)| {
                 let (mark, name, colour) = match shelf {
                     Shelf::All => ("", "All papers".to_string(), th.text),
+                    Shelf::Project(name) if self.lib.is_private(name) => ("🔒", name.clone(), th.text),
                     Shelf::Project(name) => ("▪ ", name.clone(), th.text),
                     Shelf::Keyword(k) => ("# ", k.clone(), th.text),
                 };
@@ -1569,12 +1616,26 @@ impl App {
         let keys: &[(&str, &str)] = match (&self.mode, self.tab) {
             (Mode::Info, _) => &[("any key", "close")],
             (Mode::Confirm, _) => &[("y", "yes"), ("any other key", "no")],
-            (Mode::Filter | Mode::Add | Mode::Assign, _) => &[("Enter", "done"), ("Esc", "cancel")],
+            (Mode::Filter | Mode::Add | Mode::Assign | Mode::NameProject(_), _) => {
+                &[("Enter", "done"), ("Esc", "cancel")]
+            }
             (Mode::Setup, _) => &[("Enter", "next"), ("Esc", "cancel, changing nothing")],
             (Mode::Results, _) => &[("hjkl", "move"), ("Enter", "add"), ("Esc", "close")],
             (Mode::Pick, _) => {
                 &[("jk", "move"), ("Enter/l", "open or choose"), ("h", "up"), ("~", "home"), ("Esc", "cancel")]
             }
+            (_, Tab::Library) if self.focus == 0 => &[
+                ("Tab/[]", "tabs"),
+                ("hjkl", "move"),
+                ("/", "filter"),
+                ("+", "new project"),
+                ("r", "rename"),
+                ("x", "private/shared"),
+                ("D", "delete project"),
+                ("S", "sync"),
+                (",", "setup"),
+                ("q", "quit"),
+            ],
             (_, Tab::Library) => &[
                 ("Tab/[]", "tabs"),
                 ("hjkl", "move"),
@@ -1679,7 +1740,9 @@ impl App {
     }
 
     fn draw_prompt(&self, f: &mut Frame) {
-        let title = match self.mode {
+        let title = match &self.mode {
+            Mode::NameProject(None) => "New project: its name (letters, digits, -, _ and .)".to_string(),
+            Mode::NameProject(Some(old)) => format!("Rename the project {old}"),
             Mode::Assign => {
                 let known = self.lib.projects();
                 format!(

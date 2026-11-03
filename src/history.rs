@@ -397,12 +397,13 @@ fn under(root: &Path, folder: &str) -> Result<Vec<String>> {
     Ok(files.into_iter().filter(|p| !p.starts_with("figures/")).map(|p| format!("{folder}/{p}")).collect())
 }
 
+/// The top-level folders, but for everyone's private files, which stay out of the activity.
 fn tops(root: &Path) -> Vec<String> {
     let entries = fs::read_dir(root).into_iter().flatten().flatten();
     entries
         .filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| !n.starts_with('.'))
+        .filter(|n| !n.starts_with('.') && n != carrel::projects::USERS)
         .collect()
 }
 

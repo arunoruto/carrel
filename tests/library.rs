@@ -291,6 +291,23 @@ fn projects() {
     assert_eq!((added, missing, uncited), (vec!["alpha".to_string()], vec![], vec![]));
     lib.add_to_project("old", &["a".into()]).unwrap();
     assert_eq!(lib.project("old").unwrap(), ["alpha"], "listed by its current key");
+
+    // Private projects: beside the shared ones, one name for one project, moved either way.
+    lib.create_project("mine", true).unwrap();
+    assert!(lib.is_private("mine") && tmp.path("lib/private/projects/mine.txt").exists());
+    lib.add_to_project("mine", &["alpha".into()]).unwrap();
+    assert_eq!(lib.projects(), ["doc", "mine", "old", "thesis"]);
+    assert_eq!(lib.projects_of("alpha"), ["doc", "mine", "old", "thesis"]);
+    assert!(lib.create_project("thesis", true).unwrap_err().to_string().contains("already"));
+    assert!(lib.rename_project("mine", "thesis").is_err());
+    lib.rename_project("mine", "ours").unwrap();
+    lib.set_private("ours", false).unwrap();
+    assert!(!lib.is_private("ours") && read(tmp.path("lib/projects/ours.txt")) == "alpha\n");
+    lib.set_private("ours", true).unwrap();
+    assert_eq!(lib.project("ours").unwrap(), ["alpha"]);
+    assert!(lib.for_user(None).create_project("x", true).unwrap_err().to_string().contains("need a login"));
+    assert!(!lib.for_user(None).projects().contains(&"ours".into()), "someone else doesn't see it");
+    assert_eq!(lib.papers().0.len(), 1, "the private folder is not a paper");
 }
 
 #[test]
@@ -670,9 +687,11 @@ fn sharing_through_a_remote() {
     let dry = a.sync(&remote, None, true, |_, _| {}).unwrap().done;
     assert!(dry.iter().all(|(_, action)| *action == Action::Upload) && !dry.is_empty());
     assert!(fs::read_dir(&remote.0).unwrap().next().is_none(), "a dry run changes nothing");
+    a.create_project("mine", true).unwrap();
     let uploaded = sync(&a, None);
     assert_eq!(uploaded.len(), dry.len());
     assert!(!remote.0.join(".tmp").exists() && !remote.0.join(".carrel").exists());
+    assert!(!remote.0.join("private").exists(), "private projects go to a carrel server only");
     assert!(sync(&a, None).is_empty(), "nothing changed since");
 
     // The colleague gets the paper, and their notes come back.
@@ -800,7 +819,11 @@ fn semantic_search() {
     use carrel::embed::{Config, Ollama};
     let tmp = Tmp::new("semantic");
     let lib = library(&tmp);
-    let config = |url: &str, model: Option<&str>| Config { ollama: Some(url.into()), model: model.map(String::from) };
+    let config = |url: &str, model: Option<&str>| Config {
+        ollama: Some(url.into()),
+        model: model.map(String::from),
+        ..Default::default()
+    };
     let connect = |url: &str, model| Ollama::connect(&config(url, model)).map(|o| o.model);
     let error = |url: &str, model| format!("{:#}", Ollama::connect(&config(url, model)).err().unwrap());
 

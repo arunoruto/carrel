@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    ArrowLeft, BookOpen, Check, Copy, Download, ExternalLink, FileText, FileUp, Folder, FolderPlus, Image,
+    ArrowLeft, BookOpen, Check, Copy, Download, ExternalLink, FileText, FileUp, Folder, FolderLock, FolderPlus, Image,
     Link, Network, NotebookPen, Paperclip, Quote, RefreshCw, ScanText, Trash2, X,
   } from '@lucide/svelte';
   import { api, type FieldName, type Paper } from '../lib/api';
@@ -368,15 +368,16 @@
                 <div class="flex flex-wrap items-center gap-1.5">
                   {#each p.projects as name}
                     <span class="group inline-flex items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent">
-                      <Folder class="size-3" /><a href="#/?project={encodeURIComponent(name)}" class="hover:underline">{name}</a>
+                      {#if app.projects.find((x) => x.name === name)?.private}<FolderLock class="size-3" />{:else}<Folder class="size-3" />{/if}<a href="#/?project={encodeURIComponent(name)}" class="hover:underline">{name}</a>
                       <button class="hidden cursor-pointer hover:text-failed {locked ? '' : 'group-hover:block'}" onclick={() => act('project', () => api.toProject(id, name, false))} aria-label="Take out of {name}"><X class="size-3" /></button>
                     </span>
                   {/each}
                   <form onsubmit={addProject} class="flex items-center" class:hidden={locked}>
                     <FolderPlus class="mr-1 size-3.5 text-faint" />
                     <input bind:value={projectInput} list="projects" placeholder="add to project" class="h-6 w-32 rounded-md border border-dashed bg-transparent px-2 text-xs outline-none placeholder:text-faint focus:border-accent" />
-                    <datalist id="projects">{#each app.projects.filter((x) => !p.projects.includes(x.name)) as x}<option value={x.name}></option>{/each}</datalist>
+                    <datalist id="projects">{#each app.projects.filter((x) => !p.projects.includes(x.name)) as x}<option value={x.name}>{x.private ? 'private' : ''}</option>{/each}</datalist>
                   </form>
+                  {#if locked && !p.projects.length}<span class="text-xs text-faint">None. {why} to put it in one.</span>{/if}
                 </div>
               </section>
 

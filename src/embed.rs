@@ -29,6 +29,10 @@ pub struct Config {
     pub ollama: Option<String>,
     /// The embedding model. By default bge-m3 when Ollama has it, else the first embedding model it has.
     pub model: Option<String>,
+    /// The carrel server's token, when it is the server's Ollama (`<server>/ollama`) without `[embeddings]`
+    /// here; `OLLAMA_HOST` doesn't apply then.
+    #[serde(skip)]
+    pub server: Option<Option<String>>,
 }
 
 /// An embedding model on an Ollama server, found to be there and working.
@@ -36,12 +40,14 @@ pub struct Ollama {
     pub url: String,
     pub model: String,
     agent: ureq::Agent,
+    token: Option<String>,
 }
 
 impl Ollama {
     /// Reach Ollama and pick the model. The errors say what to fix: the address, or which model to pull.
     pub fn connect(config: &Config) -> Result<Self> {
-        let host = std::env::var("OLLAMA_HOST").ok().filter(|h| !h.trim().is_empty()).or(config.ollama.clone());
+        let env = std::env::var("OLLAMA_HOST").ok().filter(|h| !h.trim().is_empty() && config.server.is_none());
+        let host = env.or(config.ollama.clone());
         let host = host.unwrap_or_else(|| "http://localhost:11434".into());
         let url = if host.contains("://") { host } else { format!("http://{host}") };
         let url = url.trim_end_matches('/').to_string();
@@ -54,7 +60,8 @@ impl Ollama {
             .max_idle_connections(0)
             .build()
             .into();
-        let ollama = Self { url, model: String::new(), agent };
+        let token = config.server.clone().flatten();
+        let ollama = Self { url, model: String::new(), agent, token };
         let tags = ollama.call("tags", None).with_context(|| format!("cannot reach Ollama at {}", ollama.url))?;
         let installed: Vec<String> = tags["models"]
             .as_array()
@@ -103,11 +110,25 @@ impl Ollama {
         Ok(vectors)
     }
 
-    fn call(&self, endpoint: &str, body: Option<Value>) -> Result<Value> {
+    /// One call of Ollama's API, such as `embed`; a carrel server passes its clients' on with this.
+    pub fn call(&self, endpoint: &str, body: Option<Value>) -> Result<Value> {
         let url = format!("{}/api/{endpoint}", self.url);
+        let bearer = self.token.as_ref().map(|t| format!("Bearer {t}"));
         let response = match body {
-            Some(body) => self.agent.post(&url).send_json(body),
-            None => self.agent.get(&url).call(),
+            Some(body) => {
+                let request = self.agent.post(&url);
+                match &bearer {
+                    Some(bearer) => request.header("Authorization", bearer).send_json(body),
+                    None => request.send_json(body),
+                }
+            }
+            None => {
+                let request = self.agent.get(&url);
+                match &bearer {
+                    Some(bearer) => request.header("Authorization", bearer).call(),
+                    None => request.call(),
+                }
+            }
         };
         let mut response = response?;
         let status = response.status();

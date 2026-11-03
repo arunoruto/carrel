@@ -119,11 +119,22 @@ Someone in neither group can't log in. A login lasts 30 days. Members make **tok
 
 Sessions and tokens are kept in `.carrel/` in the library, only as hashes. carrel asks the provider who logged in, over HTTPS from the server, rather than reading it from the browser.
 
+### Embeddings for everyone
+
+With `[embeddings]` in the server's config, the server embeds each paper once its text is extracted, and passes its clients' queries on to its Ollama at `/ollama`: clients without `[embeddings]` of their own use it by themselves, so nobody else needs an Ollama, and everyone's vectors come from one model ([Semantic search](/docs/guide/semantic-search.md#setting-it-up)).
+
+```toml
+[embeddings]
+ollama = "http://gpu-box:11434"
+```
+
 ### Activity: changes, reverts and deletions
 
 Every change on the server through the web UI, its API or [sync](/docs/guide/sharing.md#through-a-carrel-server) takes effect at once and shows on the web UI's **Activity** page: who, what, which paper, when, and for text files the lines that changed. Changes by one person to the same thing within ten minutes make one entry. An admin can **revert** any of them for 30 days; a file changed again since has to have that later change reverted first.
 
 Deleting goes the other way round: it is only **asked for**, by a member in the web UI or by a sync after `carrel rm`, and an admin other than the one asking accepts or declines it. Accepted, the files move to the archive and disappear for everyone; for 30 days an admin can still restore them. Declined, they stay, and a sync that asked downloads them again.
+
+[Private projects](/docs/guide/projects.md#shared-and-private-projects) are the exception: the server keeps them in `users/<name>/projects/`, for their owner alone, and out of the activity.
 
 All of it is kept in `.carrel/history` and `.carrel/archive` in the library and forgotten after 30 days. Changes that reach the server some other way aren't in it: members syncing with the bucket directly, the server's own extraction, and AIs over MCP, whose summaries and keywords arrive as drafts that someone approves in the web UI, which is.
 

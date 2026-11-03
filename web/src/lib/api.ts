@@ -91,6 +91,8 @@ export interface Draft {
 export interface Project {
   name: string;
   papers: string[];
+  /** Only its owner sees it. */
+  private: boolean;
 }
 
 export interface InboxFile {
@@ -278,6 +280,13 @@ export const api = {
     call<{ projects: string[] }>(add ? 'PUT' : 'DELETE', `${paper(id)}/projects/${encodeURIComponent(project)}`),
   drafts: () => call<Draft[]>('GET', 'drafts'),
   projects: () => call<Project[]>('GET', 'projects'),
+  createProject: (name: string, isPrivate = false) =>
+    call<Project>('POST', 'projects', JSON.stringify({ name, private: isPrivate })),
+  /** Rename it, or make it private or public. */
+  changeProject: (name: string, change: { name?: string; private?: boolean }) =>
+    call<Project>('PATCH', `projects/${encodeURIComponent(name)}`, JSON.stringify(change)),
+  /** On a server a public project's deletion is only asked for: `asked` is then true and an admin decides. */
+  deleteProject: (name: string) => call<{ deleted: boolean; asked: boolean }>('DELETE', `projects/${encodeURIComponent(name)}`),
   suggestions: (project?: string) => call<Reference[]>('GET', `suggestions${q({ project })}`),
   recommended: () => call<Recommendation[]>('GET', 'recommended'),
   addRecommended: (key: string) => call<Added>('POST', `recommended/${encodeURIComponent(key)}/add`),

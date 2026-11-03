@@ -38,7 +38,7 @@ Run `carrel <command> --help` for every option.
 | `drafts` | AI proposals waiting for review |
 | `approve <id> <summary\|keywords\|notes\|references>` | accept a draft |
 | `reject <id> <summary\|keywords\|notes\|references>` | discard a draft |
-| `project [list\|show\|add\|remove\|delete\|sync]` | [projects](/docs/guide/projects.md) |
+| `project [list\|show\|add [--private]\|remove\|rename\|private\|share\|delete\|sync]` | [projects](/docs/guide/projects.md), [shared or private](/docs/guide/projects.md#shared-and-private-projects) |
 | `bib [ids…] [-p project] [--jabref]` | BibTeX for papers, a project, or the library; `--jabref` adds [file links and projects as groups](/docs/guide/projects.md#jabref) |
 | `doctor [--all] [--online] [--json]` | [check the library](/docs/guide/maintenance.md) |
 | `rm <id>` | delete a paper and its files |

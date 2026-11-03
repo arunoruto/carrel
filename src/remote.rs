@@ -58,7 +58,7 @@ pub trait Remote: Sync {
     fn delete(&self, path: &str) -> Result<Deleted>;
     /// What this remote lets you do, known after [`Remote::list`].
     fn rights(&self) -> Rights {
-        Rights { edit: true, delete: true }
+        Rights { edit: true, delete: true, private: false }
     }
 }
 
@@ -78,6 +78,8 @@ pub struct Rights {
     /// Change files that are there.
     pub edit: bool,
     pub delete: bool,
+    /// Keep `private/` to you: a carrel server that knows who you are. Others never get those files.
+    pub private: bool,
 }
 
 impl RemoteConfig {
@@ -302,6 +304,7 @@ impl Remote for Hub {
         *self.rights.lock().unwrap() = Rights {
             edit: listing["can"]["edit"].as_bool().unwrap_or(false),
             delete: listing["can"]["delete"].as_bool().unwrap_or(false),
+            private: listing["can"]["private"].as_bool().unwrap_or(false),
         };
         serde_json::from_value(listing["files"].clone()).context("not a carrel server's listing")
     }
@@ -590,6 +593,13 @@ impl Library {
             // Hidden files stay local on both sides, `.carrel/` above all.
             !path.split('/').any(|c| c.starts_with('.'))
         });
+        // Private files go only where they stay yours; elsewhere they are neither sent nor missed.
+        if !remote.rights().private {
+            let private = |path: &String| path.starts_with(&format!("{}/", crate::projects::PRIVATE));
+            local.retain(|path, _| !private(path));
+            remote_files.retain(|path, _| !private(path));
+            state.files.retain(|path, _| !private(path));
+        }
         // An empty remote would trash every file synced before: more likely a wrong bucket or prefix,
         // or a wiped remote, than everyone deleting everything.
         let synced_here = state.files.keys().filter(|p| local.contains_key(*p)).count();

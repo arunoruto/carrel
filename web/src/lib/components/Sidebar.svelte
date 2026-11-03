@@ -1,6 +1,9 @@
 <script lang="ts">
   import Badge from './Badge.svelte';
-  import { CircleUser, Compass, FilePen, Folder, HeartPulse, History, Inbox, KeyRound, Library, LogIn, LogOut, Moon, Network, RefreshCw, Sparkles, Sun, Users } from '@lucide/svelte';
+  import Button from './Button.svelte';
+  import Dialog from './Dialog.svelte';
+  import { CircleUser, Compass, FilePen, Folder, FolderLock, FolderPlus, HeartPulse, History, Inbox, KeyRound, Library, Lock, LockOpen, LogIn, LogOut, Moon, Network, Pencil, RefreshCw, Sparkles, Sun, Trash2, Users } from '@lucide/svelte';
+  import type { Project } from '../api';
   import { api } from '../api';
   import { href, router } from '../router.svelte';
   import { app } from '../state.svelte';
@@ -31,6 +34,63 @@
     }
     syncing = false;
   }
+
+  // Projects: a new one, renaming one, and the one waiting for its deletion to be confirmed.
+  let creating = $state(false);
+  let newName = $state('');
+  let newPrivate = $state(false);
+  let renaming = $state<string | null>(null);
+  let renamed = $state('');
+  let deleting = $state<Project | null>(null);
+  let confirming = $state(false);
+
+  async function projectCall(work: () => Promise<unknown>, done?: string) {
+    try {
+      await work();
+      if (done) toasts.show('success', done);
+      app.changed();
+      return true;
+    } catch (e) {
+      toasts.error(e);
+      return false;
+    }
+  }
+
+  async function create(e: SubmitEvent) {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    if (await projectCall(() => api.createProject(name, newPrivate))) {
+      newName = '';
+      newPrivate = false;
+      creating = false;
+    }
+  }
+
+  async function rename(e: SubmitEvent, p: Project) {
+    e.preventDefault();
+    const name = renamed.trim();
+    if (name && name !== p.name && !(await projectCall(() => api.changeProject(p.name, { name })))) return;
+    renaming = null;
+  }
+
+  async function removeProject() {
+    const p = deleting;
+    confirming = false;
+    if (!p) return;
+    try {
+      const { asked } = await api.deleteProject(p.name);
+      toasts.show('success', asked ? 'Asked to delete; an admin decides' : `Deleted ${p.name}`);
+      app.changed();
+    } catch (e) {
+      toasts.error(e);
+    }
+  }
+
+  // A private project is its owner's alone; public ones are changed by members, and on a server only asked to delete.
+  const mayChange = (p: Project) => (p.private ? !!app.me?.user : app.can.edit);
+  const asks = (p: Project) => !p.private && !!app.me?.server;
+  const mayDelete = (p: Project) => (p.private ? !!app.me?.user : asks(p) ? app.can.edit : app.can.admin);
 
   async function logout() {
     await api.logout();
@@ -76,22 +136,92 @@
     {/each}
   </nav>
 
-  <div class="mt-6 px-5 pb-1.5 text-xs font-medium tracking-wide text-faint uppercase">Projects</div>
+  <div class="mt-6 flex items-center px-5 pb-1.5">
+    <span class="flex-1 text-xs font-medium tracking-wide text-faint uppercase">Projects</span>
+    {#if app.can.add}
+      <button class="cursor-pointer rounded-md p-1 text-faint hover:bg-hover hover:text-foreground" onclick={() => (creating = !creating)} aria-label="New project" title="New project">
+        <FolderPlus class="size-3.5" />
+      </button>
+    {/if}
+  </div>
   <div class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3">
-    {#each app.projects as p}
-      <a
-        href={href('/', { project: p.name })}
-        onclick={onnavigate}
-        class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition {project === p.name ? 'bg-hover font-medium text-foreground' : 'text-muted hover:bg-hover/60 hover:text-foreground'}"
-      >
-        <Folder class="size-4" />
-        <span class="flex-1 truncate">{p.name}</span>
-        <span class="text-xs text-faint">{p.papers.length}</span>
-      </a>
+    {#if creating}
+      <form onsubmit={create} class="space-y-1.5 px-2.5 pb-2">
+        <!-- svelte-ignore a11y_autofocus -->
+        <input bind:value={newName} autofocus placeholder="New project" onkeydown={(e) => e.key === 'Escape' && (creating = false)} class="h-7 w-full rounded-md border bg-transparent px-2 text-sm outline-none placeholder:text-faint focus:border-accent" />
+        <div class="flex items-center gap-2">
+          {#if app.me?.user}
+            <label class="flex flex-1 cursor-pointer items-center gap-1.5 text-xs text-muted" title="Only you see it, on all your machines">
+              <input type="checkbox" bind:checked={newPrivate} class="accent-accent" />Private
+            </label>
+          {:else}
+            <span class="flex-1"></span>
+          {/if}
+          <Button size="sm" variant="ghost" type="button" onclick={() => (creating = false)}>Cancel</Button>
+          <Button size="sm" variant="primary" type="submit" disabled={!newName.trim()}>Create</Button>
+        </div>
+      </form>
+    {/if}
+    {#each app.projects as p (p.name)}
+      {#if renaming === p.name}
+        <form onsubmit={(e) => rename(e, p)} class="px-2.5 py-0.5">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input bind:value={renamed} autofocus onkeydown={(e) => e.key === 'Escape' && (renaming = null)} onblur={() => (renaming = null)} aria-label="New name for {p.name}" class="h-7 w-full rounded-md border bg-transparent px-2 text-sm outline-none focus:border-accent" />
+        </form>
+      {:else}
+        <div class="group relative">
+          <a
+            href={href('/', { project: p.name })}
+            onclick={onnavigate}
+            class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition {project === p.name ? 'bg-hover font-medium text-foreground' : 'text-muted hover:bg-hover/60 hover:text-foreground'}"
+            title={p.private ? 'Private: only you see it' : undefined}
+          >
+            {#if p.private}<FolderLock class="size-4" />{:else}<Folder class="size-4" />{/if}
+            <span class="flex-1 truncate">{p.name}</span>
+            <span class="text-xs text-faint {mayChange(p) || mayDelete(p) ? 'group-focus-within:invisible group-hover:invisible' : ''}">{p.papers.length}</span>
+          </a>
+          {#if mayChange(p) || mayDelete(p)}
+            <div class="absolute inset-y-0 right-1 hidden items-center gap-0.5 group-focus-within:flex group-hover:flex">
+              {#if mayChange(p)}
+                <button class="cursor-pointer rounded p-1 text-faint hover:bg-hover hover:text-foreground" onclick={() => ((renamed = p.name), (renaming = p.name))} aria-label="Rename {p.name}" title="Rename">
+                  <Pencil class="size-3" />
+                </button>
+                {#if app.me?.user}
+                  <button
+                    class="cursor-pointer rounded p-1 text-faint hover:bg-hover hover:text-foreground"
+                    onclick={() => projectCall(() => api.changeProject(p.name, { private: !p.private }), p.private ? `${p.name} is public now` : `${p.name} is private now`)}
+                    aria-label={p.private ? `Make ${p.name} public` : `Make ${p.name} private`}
+                    title={p.private ? 'Make it public' : 'Make it private'}
+                  >
+                    {#if p.private}<LockOpen class="size-3" />{:else}<Lock class="size-3" />{/if}
+                  </button>
+                {/if}
+              {/if}
+              {#if mayDelete(p)}
+                <button class="cursor-pointer rounded p-1 text-faint hover:bg-hover hover:text-failed" onclick={() => ((deleting = p), (confirming = true))} aria-label="{asks(p) ? 'Ask to delete' : 'Delete'} {p.name}" title={asks(p) ? 'Ask to delete' : 'Delete'}>
+                  <Trash2 class="size-3" />
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
     {:else}
-      <p class="px-2.5 text-xs text-faint">None yet. Put a paper in one from its page.</p>
+      {#if !creating}<p class="px-2.5 text-xs text-faint">None yet. Start one with + above, or put a paper in one from its page.</p>{/if}
     {/each}
   </div>
+
+  <Dialog bind:open={confirming} title="{deleting && asks(deleting) ? 'Ask to delete' : 'Delete'} {deleting?.name}?">
+    {#if deleting && asks(deleting)}
+      <p class="text-sm text-muted">An admin other than you decides. Until then the project stays. Its papers stay in the library either way.</p>
+    {:else}
+      <p class="text-sm text-muted">This deletes the project; its papers stay in the library.</p>
+    {/if}
+    {#snippet footer()}
+      <Button variant="ghost" onclick={() => (confirming = false)}>Cancel</Button>
+      <Button variant="danger" onclick={removeProject}><Trash2 class="size-4" />{deleting && asks(deleting) ? 'Ask to delete' : 'Delete'}</Button>
+    {/snippet}
+  </Dialog>
 
   <div class="space-y-2 border-t px-3 py-3">
     {#if me?.user}

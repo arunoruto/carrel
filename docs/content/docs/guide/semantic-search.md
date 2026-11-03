@@ -15,7 +15,9 @@ Each result shows how close it is (cosine similarity, up to 1) and the passage t
 
 ## Setting it up
 
-Semantic search needs an embedding model on [Ollama](https://ollama.com), on your machine or another one:
+**Connected to a carrel server** that computes embeddings (with `[embeddings]` in its config), there is nothing to set up: the server embeds every paper after extracting its text, the embeddings arrive with sync, and searches by meaning have the server embed the query with the same model. `carrel config` then says `bge-m3 on https://<server>/ollama, the server's`. One model for everyone keeps everyone's vectors comparable. `[embeddings]` on your machine takes over from the server's, for your own Ollama.
+
+Otherwise semantic search needs an embedding model on [Ollama](https://ollama.com), on your machine or another one:
 
 ```toml
 [embeddings]

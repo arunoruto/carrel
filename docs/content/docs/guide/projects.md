@@ -12,9 +12,22 @@ carrel project                                     # list projects
 carrel project show thesis
 carrel project remove thesis ho2020denoising       # the paper stays in the library
 carrel project delete thesis                       # the papers stay in the library
+carrel project rename thesis dissertation
 ```
 
-In the TUI, `P` chooses which project to show and `+`/`-` put the selected paper into a project or take it out.
+In the TUI, the shelves on the left list the projects. There `+` makes a new one, `r` renames the selected one, `x` makes it private or shared, and `D` deletes it; on a paper, `+`/`-` put it into a project or take it out. In the [web UI](/docs/guide/web.md), the *+* beside *Projects* in the sidebar makes one, and each project's buttons rename, share or delete it.
+
+## Shared and private projects
+
+Projects are shared: with a [group's library](/docs/guide/sharing.md), everyone sees them, and through a [carrel server](/docs/guide/server.md) changes to them show in its activity like any other. A **private** project is yours alone: it lives in `private/projects/` instead, and a carrel server keeps it for your login, on all your machines, without showing it to anyone or in the activity. It needs a token (or a login, in the web UI); an S3 bucket or a shared folder never gets private projects, so without a server they stay on the one machine.
+
+```sh
+carrel project add reviewing smith2024 --private   # a new private project
+carrel project private thesis                      # make one private
+carrel project share thesis                        # share it again
+```
+
+`carrel project` marks the private ones. Both kinds share one set of names: a private `thesis` and a shared `thesis` can't both exist. Through a server, deleting a shared project is [asked for](/docs/guide/server.md#activity-changes-reverts-and-deletions), as deleting a paper is; deleting a private one isn't.
 
 ## Bibliographies
 

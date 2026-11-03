@@ -24,11 +24,8 @@ pub fn questions() -> Result<Vec<Question>> {
         _ => (String::new(), None),
     };
     let yes = |b: bool| if b { "y" } else { "n" }.to_string();
-    let local_ollama = || which("ollama").then(|| "http://localhost:11434".to_string());
-    let ollama = match &config.embeddings {
-        Some(e) => e.ollama.clone().unwrap_or("http://localhost:11434".into()),
-        None => local_ollama().unwrap_or_default(),
-    };
+    // Without `[embeddings]` here, a carrel server's is used.
+    let ollama = config.embeddings.and_then(|e| e.ollama).unwrap_or_default();
     // Unchanged where it is set; on with a new Docling, since that is mostly a server with a GPU.
     let formulas = config.formulas.unwrap_or(config.docling.is_none());
     let service = |s| install::installed(s).ok().flatten().map(yes).unwrap_or("elsewhere".into());
@@ -112,6 +109,9 @@ pub fn prompt(qs: &[Question], i: usize) -> String {
         }
         "sync" => "Sync with it every 10 minutes in the background?".into(),
         "formulas" => "Formulas as LaTeX? About a minute each without a GPU".into(),
+        "ollama" if server(qs).is_some() => {
+            "Your own Ollama for semantic search, like http://localhost:11434 (- for the server's)".into()
+        }
         "ollama" => "Ollama for semantic search, like http://localhost:11434 (- for none)".into(),
         "web" => "Run the web UI in the background?".into(),
         "consume" => "Add the PDFs you download as they arrive?".into(),
@@ -376,10 +376,6 @@ fn save(path: &Path, old: &str, new: &str) -> Result<Vec<String>> {
         return Err(e.context("the new config doesn't load; left it as it was"));
     }
     Ok(said)
-}
-
-fn which(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
 /// Who a carrel server takes this machine for, with `token` or without.

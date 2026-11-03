@@ -61,6 +61,8 @@ More in [the extractor](/docs/reference/configuration.md#the-extractor).
 
 ## 3. Semantic search
 
+With a group's [carrel server](/docs/guide/server.md#embeddings-for-everyone) that computes embeddings, skip this step: searches use the server's.
+
 [Semantic search](/docs/guide/semantic-search.md) finds papers by meaning, and also ranks [recommendations](/docs/guide/recommendations.md). It needs [Ollama](https://ollama.com) with an embedding model, on your machine or one nearby:
 
 ```sh

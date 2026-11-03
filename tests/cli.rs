@@ -569,6 +569,48 @@ fn consuming_downloads() {
     assert!(c.fails(&["notify"]).contains("no notifiers"));
 }
 
+#[test]
+fn embeddings_through_a_server() {
+    use std::io::{BufRead, BufReader};
+    let c = Carrel::new("cli-hub-embeddings");
+    let (ollama, embedded) = fake_ollama(&[("bge-m3", true)]);
+    let config = format!("[serve]\ntrusted = [\"127.0.0.1\"]\n\n[embeddings]\nollama = \"{ollama}\"\n");
+    c.tmp.write("srv/config/carrel/config.toml", config);
+    let mut command = c.command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"]);
+    command.env("CARREL_HOME", c.tmp.path("srv/lib")).env("XDG_CONFIG_HOME", c.tmp.path("srv/config"));
+    let mut server = command.env("CARREL_SERVE_TOKEN", "admintok").stdout(Stdio::piped()).spawn().unwrap();
+    let mut log = BufReader::new(server.stdout.take().unwrap()).lines();
+    let serving = log.find_map(|l| l.ok().filter(|l| l.contains("serving"))).unwrap();
+    let addr =
+        serving.split_whitespace().last().unwrap().trim_start_matches("http://").trim_end_matches("/mcp").to_string();
+
+    // A client without [embeddings] of its own uses the server's Ollama and model.
+    c.tmp.write("config/carrel/config.toml", format!("[remote]\ntype = \"carrel\"\nurl = \"http://{addr}\"\n"));
+    let said = c.ok(&["config"]);
+    assert!(said.contains(&format!("embeddings: bge-m3 on http://{addr}/ollama, the server's")), "{said}");
+    c.tmp.write("lib/a2020/a2020.bib", "@misc{a2020, title = {A}}\n");
+    let before = embedded.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(c.ok(&["embed", "--all"]).contains("a2020: done"));
+    assert!(embedded.load(std::sync::atomic::Ordering::SeqCst) > before, "by the server's Ollama");
+    assert_eq!(http(&addr, "POST", "/ollama/api/pull", &[], b"{}").0, 502, "only what embedding needs");
+    let _ = server.kill();
+    let _ = server.wait();
+
+    // A server without embeddings says so.
+    c.tmp.write("srv/config/carrel/config.toml", "[serve]\ntrusted = [\"127.0.0.1\"]\n");
+    let mut command = c.command(&["serve", "--listen", "127.0.0.1:0", "--every", "60"]);
+    command.env("CARREL_HOME", c.tmp.path("srv/lib")).env("XDG_CONFIG_HOME", c.tmp.path("srv/config"));
+    let mut server = command.env("CARREL_SERVE_TOKEN", "admintok").stdout(Stdio::piped()).spawn().unwrap();
+    let mut log = BufReader::new(server.stdout.take().unwrap()).lines();
+    let serving = log.find_map(|l| l.ok().filter(|l| l.contains("serving"))).unwrap();
+    let addr =
+        serving.split_whitespace().last().unwrap().trim_start_matches("http://").trim_end_matches("/mcp").to_string();
+    c.tmp.write("config/carrel/config.toml", format!("[remote]\ntype = \"carrel\"\nurl = \"http://{addr}\"\n"));
+    assert!(c.ok(&["config"]).contains("doesn't compute embeddings"));
+    let _ = server.kill();
+    let _ = server.wait();
+}
+
 /// One HTTP/1.1 request on a fresh connection, written out by hand so the Host header can lie.
 fn http(addr: &str, method: &str, path: &str, headers: &[&str], body: &[u8]) -> (u16, String, Vec<u8>) {
     use std::io::{Read, Write};
@@ -782,6 +824,18 @@ fn syncing_through_a_server() {
     assert!(server_file("b2021/b2021.bib").is_some());
     assert!(c.ok(&["sync"]).contains("1 deletions asked for"), "asked again, quietly the same request");
     assert!(!c.tmp.path("lib/b2021/b2021.bib").exists(), "it stays deleted here meanwhile");
+    // A private project goes to the server for its owner alone, out of the activity, and goes right away.
+    c.tmp.write("lib/private/projects/mine.txt", "a2020\n");
+    c.ok(&["sync"]);
+    assert_eq!(server_file("users/server/projects/mine.txt").as_deref(), Some("a2020\n"));
+    let (_, _, listing) = http(&addr, "GET", "/sync", &[], b"");
+    let listing = String::from_utf8_lossy(&listing);
+    assert!(listing.contains("a2020/a2020.bib") && !listing.contains("mine.txt"), "someone else's: {listing}");
+    assert_eq!(http(&addr, "GET", "/sync/private/projects/mine.txt", &[], b"").0, 403);
+    assert_eq!(http(&addr, "GET", "/sync/users/server/projects/mine.txt", &[], b"").0, 400);
+    std::fs::remove_file(c.tmp.path("lib/private/projects/mine.txt")).unwrap();
+    assert!(c.ok(&["sync"]).contains("1 deletions asked for"), "only b2021's, still");
+    assert!(server_file("users/server/projects/mine.txt").is_none());
 
     // Another admin (the server's link) sees it all, accepts the deletion and reverts the edit.
     let link = log.find_map(|l| l.ok().and_then(|l| l.split_once("?token=").map(|(_, t)| t.to_string()))).unwrap();
@@ -820,6 +874,29 @@ fn syncing_through_a_server() {
     assert_eq!(http(&addr, "GET", "/sync/..%2Fsecret", &[admin], b"").0, 400);
     assert_eq!(http(&addr, "GET", "/sync/.carrel/web-token", &[admin], b"").0, 400);
     assert_eq!(http(&addr, "DELETE", "/sync/a2020/a2020.bib", &[], b"").0, 403, "trusted, but no admin");
+
+    // Projects from the web UI: shared ones for all, private ones kept for their owner and out of the
+    // activity; deleting a shared one is asked for.
+    let send = |method: &str, path: &str, body: &str| {
+        let (status, _, reply) = http(&addr, method, path, &[&cookie], body.as_bytes());
+        (status, serde_json::from_slice::<serde_json::Value>(&reply).unwrap_or_default())
+    };
+    assert_eq!(send("POST", "/api/projects", r#"{"name": "group"}"#).0, 200);
+    assert_eq!(send("POST", "/api/projects", r#"{"name": "secret", "private": true}"#).1["private"], true);
+    assert!(server_file("projects/group.txt").is_some() && server_file("users/link/projects/secret.txt").is_some());
+    assert_eq!(send("PATCH", "/api/projects/secret", r#"{"name": "hidden"}"#).1["name"], "hidden");
+    let (_, projects) = api("GET", "/api/projects");
+    assert!(projects.as_array().unwrap().iter().any(|p| p["name"] == "hidden" && p["private"] == true), "{projects}");
+    let anonymous = String::from_utf8(http(&addr, "GET", "/api/projects", &[], b"").2).unwrap();
+    assert!(anonymous.contains("group") && !anonymous.contains("hidden"), "{anonymous}");
+    let made = http(&addr, "POST", "/api/projects", &[], br#"{"name": "x", "private": true}"#);
+    assert_eq!(made.0, 400, "no private projects for the unknown: {}", String::from_utf8_lossy(&made.2));
+    assert_eq!(send("DELETE", "/api/projects/group", "").1["asked"], true);
+    assert!(server_file("projects/group.txt").is_some(), "until an admin accepts");
+    assert_eq!(send("DELETE", "/api/projects/hidden", "").1["deleted"], true);
+    assert!(server_file("users/link/projects/hidden.txt").is_none());
+    let feed = api("GET", "/api/activity").1.to_string();
+    assert!(feed.contains("group") && !feed.contains("hidden") && !feed.contains("secret"), "{feed}");
     server.kill().unwrap();
     server.wait().unwrap();
 }

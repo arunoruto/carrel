@@ -1,6 +1,7 @@
 //! Projects: named lists of papers, such as everything a thesis chapter cites. Each one is a text file
 //! `<library>/projects/<name>.txt` with a paper id per line (`#` starts a comment), so it can be
-//! edited by hand and turned into a bibliography with `carrel bib --project <name>`.
+//! edited by hand and turned into a bibliography with `carrel bib --project <name>`. Private ones are in
+//! `<library>/private/projects/`, which only a carrel server gets, and keeps to their owner.
 
 use crate::{Library, Paper, valid_id};
 use anyhow::{Context, Result, bail};
@@ -10,24 +11,96 @@ use std::path::{Path, PathBuf};
 
 /// The folder holding the project files, inside the library.
 pub const DIR: &str = "projects";
+/// The folder of what is yours alone, `private/projects/...`; synced only with a carrel server.
+pub const PRIVATE: &str = "private";
+/// A carrel server's folder of everyone's private files, `users/<name>/projects/...`.
+pub const USERS: &str = "users";
 
 impl Library {
-    fn project_path(&self, name: &str) -> Result<PathBuf> {
-        if !valid_id(name) {
-            bail!("invalid project name {name:?}");
-        }
-        Ok(self.root.join(DIR).join(format!("{name}.txt")))
+    /// A server's library as `user` sees it: with their private projects, or none for someone unknown.
+    pub fn for_user(&self, user: Option<&str>) -> Library {
+        let private = user.filter(|u| valid_id(u)).map(|u| self.root.join(USERS).join(u).join(DIR));
+        Library { private, ..self.clone() }
     }
 
-    /// Project names, sorted.
+    /// The file of project `name`: the private one, if there is one.
+    fn project_path(&self, name: &str) -> Result<PathBuf> {
+        let private = self.private_path(name)?;
+        match private.filter(|p| p.exists()) {
+            Some(private) => Ok(private),
+            None => Ok(self.root.join(DIR).join(format!("{name}.txt"))),
+        }
+    }
+
+    fn private_path(&self, name: &str) -> Result<Option<PathBuf>> {
+        if !valid_id(name) {
+            bail!("invalid project name {name:?}: letters, digits, -, _ and . only");
+        }
+        Ok(self.private.as_ref().map(|dir| dir.join(format!("{name}.txt"))))
+    }
+
+    /// Project names, sorted; private and shared ones together.
     pub fn projects(&self) -> Vec<String> {
-        let files = fs::read_dir(self.root.join(DIR)).into_iter().flatten().flatten().map(|e| e.path());
+        let dirs = [Some(self.root.join(DIR)), self.private.clone()].into_iter().flatten();
+        let files = dirs.flat_map(|dir| fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()));
         let mut names: Vec<String> = files
             .filter(|p| p.extension().is_some_and(|e| e == "txt"))
             .filter_map(|p| Some(p.file_stem()?.to_string_lossy().into_owned()))
             .collect();
         names.sort();
+        names.dedup();
         names
+    }
+
+    pub fn is_private(&self, name: &str) -> bool {
+        self.private_path(name).ok().flatten().is_some_and(|p| p.exists())
+    }
+
+    /// A new, empty project; private ones only you see.
+    pub fn create_project(&self, name: &str, private: bool) -> Result<()> {
+        let path = match private {
+            true => self.private_path(name)?.context("private projects need a login")?,
+            false => self.root.join(DIR).join(format!("{name}.txt")),
+        };
+        if self.project_path(name)?.exists() {
+            bail!("there is a project {name:?} already");
+        }
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, "")?;
+        Ok(())
+    }
+
+    /// Makes a project private, or shares it.
+    pub fn set_private(&self, name: &str, private: bool) -> Result<()> {
+        let from = self.project_path(name)?;
+        if !from.exists() {
+            bail!("no project {name:?}");
+        }
+        let shared = self.root.join(DIR).join(format!("{name}.txt"));
+        let to = match private {
+            true => self.private_path(name)?.context("private projects need a login")?,
+            false => shared,
+        };
+        if from != to {
+            if to.exists() {
+                bail!("there is a {} project {name:?} already", if private { "private" } else { "shared" });
+            }
+            fs::create_dir_all(to.parent().unwrap())?;
+            fs::rename(from, to)?;
+        }
+        Ok(())
+    }
+
+    pub fn rename_project(&self, name: &str, new: &str) -> Result<()> {
+        let from = self.project_path(name)?;
+        if !from.exists() {
+            bail!("no project {name:?}");
+        }
+        if self.project_path(new)?.exists() {
+            bail!("there is a project {new:?} already");
+        }
+        fs::rename(&from, from.with_file_name(format!("{new}.txt")))?;
+        Ok(())
     }
 
     /// The paper ids in a project, in file order.
@@ -64,7 +137,7 @@ impl Library {
             }
             text += &format!("{id}\n");
         }
-        fs::create_dir_all(self.root.join(DIR))?;
+        fs::create_dir_all(path.parent().unwrap())?;
         fs::write(path, text)?;
         Ok(())
     }
