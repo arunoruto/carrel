@@ -604,7 +604,8 @@ fn logging_in() {
     assert_eq!(refused.0, 403);
     assert!(refused.2.contains("log in to change"), "{}", refused.2);
     assert_eq!(call("GET", "/api/tokens", &[], b"").0, 403);
-    assert_eq!(call("GET", "/?token=whatever", &[], b"").0, 200, "no link to log in by");
+    let (status, head, _) = call("GET", "/?token=whatever", &[], b"");
+    assert!(status != 303 && !head.contains("set-cookie"), "no link to log in by: {head}");
 
     // Logging in: to the provider with PKCE, back with a code, and a session that remembers where to go.
     let (status, head, _) = call("GET", "/auth/login?next=/%23/tokens", &[], b"");
