@@ -1047,7 +1047,27 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
     };
     let shown: std::collections::HashSet<&str> = papers.iter().map(|p| p.id.as_str()).collect();
     let graph = lib.graph()?;
+    // From OpenAlex: each author's h-index under the spellings the papers use, as the author hubs are named.
+    let mut people: BTreeMap<String, u32> = BTreeMap::new();
+    let metrics: HashMap<&str, carrel::metrics::Metrics> =
+        papers.iter().filter_map(|p| Some((p.id.as_str(), carrel::metrics::read(&p.dir)?))).collect();
+    for p in &papers {
+        let Some(m) = metrics.get(p.id.as_str()) else { continue };
+        for spelled in p.bib.authors() {
+            if let Some(a) = m.authors.iter().find(|a| carrel::authors::same_person(&spelled, &a.name)) {
+                let h = people.entry(spelled).or_default();
+                *h = (*h).max(a.h_index);
+            }
+        }
+    }
+    let written = |p: &Paper, file: &str| fs::metadata(p.dir.join(file)).is_ok_and(|m| m.len() > 0);
     let nodes = papers.iter().map(|p| {
+        let m = metrics.get(p.id.as_str());
+        let read = match () {
+            _ if written(p, "notes.md") => "notes",
+            _ if written(p, "summary.md") => "summary",
+            _ => "",
+        };
         json!({
             "id": p.id,
             "title": p.bib.title(),
@@ -1057,6 +1077,9 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
             "keywords": p.bib.keywords(),
             "projects": lib.projects_of(&p.id),
             "type": kind(p),
+            "cited_by": m.map(|m| m.cited_by),
+            "h_index": m.and_then(|m| m.authors.iter().map(|a| a.h_index).max()),
+            "read": read,
         })
     });
     let cites = graph.citations().into_iter().filter(|(a, b)| shown.contains(a) && shown.contains(b));
@@ -1098,6 +1121,7 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
         "authors": authors,
         "institutions": institutions.collect::<Vec<_>>(),
         "similar": similar.into_iter().map(|(a, b, s)| json!([a, b, s])).collect::<Vec<_>>(),
+        "people": people,
     }))
 }
 

@@ -142,6 +142,11 @@ export interface MapNode {
   projects: string[];
   /** journal, conference, preprint, book, thesis or other */
   type: string;
+  /** From OpenAlex, once looked up: how many works cite it, and the highest h-index among its authors. */
+  cited_by?: number | null;
+  h_index?: number | null;
+  /** What you wrote about it: `notes`, else `summary`, else nothing. */
+  read?: string;
 }
 
 export interface LibraryMap {
@@ -151,6 +156,8 @@ export interface LibraryMap {
   /** Institutions two or more of the papers share: each paper with its authors who were there. */
   institutions: { name: string; country: string | null; ror: string | null; papers: Record<string, string[]> }[];
   similar: [string, string, number][];
+  /** Authors' h-index from OpenAlex, by the spellings the author hubs use. */
+  people?: Record<string, number>;
 }
 
 export interface Issue {

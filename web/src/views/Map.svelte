@@ -46,8 +46,33 @@
   });
   let alike = $state(0.75);
   // What the colours say, remembered too.
-  const COLORS = { group: 'Group', type: 'Type', year: 'Year', cited: 'Cited here' } as const;
+  const COLORS = {
+    group: 'Group',
+    central: 'Central here',
+    bridges: 'Bridges between groups',
+    type: 'Type',
+    year: 'Year',
+    citations: 'Citations',
+    momentum: 'Citations a year',
+    cited: 'Cited here',
+    hindex: "Authors' h-index",
+    read: 'Your notes',
+  } as const;
   type ColorBy = keyof typeof COLORS;
+  const MENU: [string, ColorBy[]][] = [
+    ['The network', ['group', 'central', 'bridges']],
+    ['The paper', ['type', 'year', 'citations', 'momentum', 'cited']],
+    ['People and you', ['hindex', 'read']],
+  ];
+  // What each continuous colour means at its two ends, and where its numbers come from.
+  const ENDS: Partial<Record<ColorBy, [string, string, string?]>> = {
+    central: ['on the edge', 'central', 'PageRank over the citations between the papers shown'],
+    bridges: ['inside a group', 'between groups', 'how many shortest paths between papers run through it'],
+    citations: ['few', 'many', 'from OpenAlex'],
+    momentum: ['few', 'many', 'citations per year since it came out, from OpenAlex'],
+    cited: ['once', 'often', 'by the papers shown'],
+    hindex: ['lower', 'higher', "its best-known author's; authors' diamonds by their own"],
+  };
   let colorBy = $state<ColorBy>(remembered());
   function remembered(): ColorBy {
     try {
@@ -67,6 +92,8 @@
   });
   // Groups of papers the links shown tie together, each named by its most common keyword.
   let groups = $state.raw<{ name: string; size: number }[]>([]);
+  // How many shortest paths between the nodes shown run through each one.
+  let between = $state.raw(new Map<string, number>());
   let hideLonely = $state(true);
   let selected = $state.raw<Node | null>(null);
   let tip = $state<{ x: number; y: number; html: string } | null>(null);
@@ -130,6 +157,7 @@
     nodes = lonely ? all.filter((n) => n.degree > 0) : all;
     edges = list;
     groups = grouped(nodes, edges);
+    between = betweenness(nodes, edges);
     untrack(() => selected && !nodes.includes(selected) && (selected = null));
     const warm = !!sim;
     sim?.stop();
@@ -162,6 +190,38 @@
   });
 
   $effect(() => () => sim?.stop());
+
+  // Brandes' algorithm, links unweighted: a breadth-first search from each node, counting shortest paths back.
+  function betweenness(ns: Node[], es: Edge[]): Map<string, number> {
+    const near = new Map<Node, Node[]>(ns.map((n) => [n, []]));
+    es.forEach((e) => (near.get(e.source)?.push(e.target), near.get(e.target)?.push(e.source)));
+    const score = new Map<Node, number>(ns.map((n) => [n, 0]));
+    for (const s of ns) {
+      const order: Node[] = [];
+      const before = new Map<Node, Node[]>();
+      const paths = new Map<Node, number>([[s, 1]]);
+      const depth = new Map<Node, number>([[s, 0]]);
+      for (let queue = [s], i = 0; i < queue.length; i++) {
+        const v = queue[i];
+        order.push(v);
+        for (const w of near.get(v)!) {
+          if (!depth.has(w)) (depth.set(w, depth.get(v)! + 1), queue.push(w));
+          if (depth.get(w) === depth.get(v)! + 1) {
+            paths.set(w, (paths.get(w) ?? 0) + paths.get(v)!);
+            before.set(w, [...(before.get(w) ?? []), v]);
+          }
+        }
+      }
+      const share = new Map<Node, number>();
+      for (const w of order.reverse()) {
+        for (const v of before.get(w) ?? []) {
+          share.set(v, (share.get(v) ?? 0) + (paths.get(v)! / paths.get(w)!) * (1 + (share.get(w) ?? 0)));
+        }
+        if (w !== s) score.set(w, score.get(w)! + (share.get(w) ?? 0));
+      }
+    }
+    return new Map([...score].filter(([n]) => !hub(n)).map(([n, v]) => [n.id, v]));
+  }
 
   // Label propagation: each node takes the label most of its neighbours have, until none changes. Authors and
   // institutions shown as hubs tie their papers together too. Sets each paper's `group`, biggest group first.
@@ -205,36 +265,87 @@
     book: ['Book', '#4fb06d'],
     thesis: ['Thesis', '#a974e8'],
   };
-  // How often the papers shown cite each one; the colours run to the 95th percentile, so a few classics don't
-  // leave everything else alike.
+  // How often the papers shown cite each one.
   const cited = $derived.by(() => {
     const counts = new Map<string, number>();
     (data?.cites ?? []).forEach(([, b]) => counts.set(b, (counts.get(b) ?? 0) + 1));
-    const sorted = [...counts.values()].sort((a, b) => a - b);
-    return { counts, top: Math.max(1, sorted[Math.round(0.95 * (sorted.length - 1))] ?? 1) };
+    return counts;
   });
-  const years = $derived.by(() => {
-    // The middle 90%, so one classic from 1865 doesn't turn everything else the same colour.
-    const ys = (data?.nodes ?? []).map((n) => n.year).filter((y): y is number => !!y).sort((a, b) => a - b);
-    const at = (q: number) => ys[Math.round(q * (ys.length - 1))];
-    return ys.length ? [at(0.05), at(0.95)] : [2000, 2025];
+  // PageRank over the citations: cited by papers that are themselves much cited counts most.
+  const rank = $derived.by(() => {
+    const ids = (data?.nodes ?? []).map((n) => n.id);
+    const out = new Map<string, string[]>(ids.map((id) => [id, []]));
+    (data?.cites ?? []).forEach(([a, b]) => out.get(a)?.push(b));
+    let r = new Map(ids.map((id) => [id, 1 / ids.length]));
+    for (let round = 0; round < 40; round++) {
+      const next = new Map(ids.map((id) => [id, 0.15 / ids.length]));
+      let lost = 0;
+      out.forEach((to, id) => (to.length ? to.forEach((b) => next.set(b, next.get(b)! + (0.85 * r.get(id)!) / to.length)) : (lost += r.get(id)!)));
+      // Papers citing none of the others pass theirs to all.
+      ids.forEach((id) => next.set(id, next.get(id)! + (0.85 * lost) / ids.length));
+      r = next;
+    }
+    return r;
   });
+  const thisYear = new Date().getFullYear();
+  // The number a continuous colour shows for a node; null leaves it grey. Counts that span orders of magnitude
+  // are compared by their logarithm.
+  function measure(n: Node, by: ColorBy): number | null {
+    if (n.person) return by === 'hindex' ? (data?.people?.[n.person] ?? null) : null;
+    if (hub(n)) return null;
+    switch (by) {
+      case 'year':
+        return n.year;
+      case 'citations':
+        return n.cited_by == null ? null : Math.log1p(n.cited_by);
+      case 'momentum':
+        return n.cited_by == null || !n.year ? null : Math.log1p(n.cited_by / Math.max(1, thisYear - n.year + 1));
+      case 'cited':
+        return cited.get(n.id) || null;
+      case 'hindex':
+        return n.h_index ?? null;
+      case 'central':
+        return rank.get(n.id) ?? null;
+      case 'bridges':
+        return between.get(n.id) || null;
+      default:
+        return null;
+    }
+  }
+  // The colours run over the middle 90% of the values, so a few outliers don't leave everything else alike.
+  const range = $derived.by(() => {
+    void [between, rank, cited];
+    const by = colorBy;
+    const values = (data?.nodes ?? []).map((n) => measure(n as Node, by)).filter((v): v is number => v != null);
+    const extra = by === 'hindex' ? Object.values(data?.people ?? {}) : [];
+    const sorted = [...values, ...extra].sort((a, b) => a - b);
+    const at = (q: number) => sorted[Math.round(q * (sorted.length - 1))];
+    return sorted.length ? { lo: at(0.05), hi: at(0.95), known: values.length } : { lo: 0, hi: 1, known: 0 };
+  });
+  // The ends of the scale as numbers, for the legend.
+  const shown = (v: number) => {
+    const by = colorBy;
+    const n = by === 'citations' || by === 'momentum' ? Math.expm1(v) : v;
+    return by === 'central' || by === 'bridges' ? '' : n >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`;
+  };
 
   // Blue for little or early, through green, to orange for much or late.
   const scale = (t: number) => `hsl(${220 - Math.min(1, Math.max(0, t)) * 200} 70% 58%)`;
 
+  const READ: Record<string, [string, string]> = { notes: ['your notes', '#4fb06d'], summary: ['a summary only', '#b5d98a'] };
+
   function color(n: Node): string {
     switch (colorBy) {
-      case 'year':
-        return n.year ? scale((n.year - years[0]) / Math.max(1, years[1] - years[0])) : css('--faint');
+      case 'group':
+        return n.group === undefined ? css('--faint') : palette[n.group];
       case 'type':
         return TYPES[n.type]?.[1] ?? css('--faint');
-      case 'cited': {
-        const count = cited.counts.get(n.id) ?? 0;
-        return count ? scale(Math.sqrt(count / cited.top)) : css('--faint');
+      case 'read':
+        return READ[n.read ?? '']?.[1] ?? css('--faint');
+      default: {
+        const v = measure(n, colorBy);
+        return v == null ? css('--faint') : scale((v - range.lo) / Math.max(1e-9, range.hi - range.lo));
       }
-      default:
-        return n.group === undefined ? css('--faint') : palette[n.group];
     }
   }
 
@@ -300,7 +411,8 @@
         ctx.lineTo(n.x! - d, n.y!);
         ctx.closePath();
       } else ctx.arc(n.x!, n.y!, r, 0, Math.PI * 2);
-      ctx.fillStyle = hub(n) ? css('--card') : color(n);
+      // Hubs stay hollow, but for authors coloured by their h-index.
+      ctx.fillStyle = hub(n) && measure(n, colorBy) == null ? css('--card') : color(n);
       ctx.fill();
       if (hub(n)) {
         ctx.lineWidth = 2 / view.k;
@@ -392,7 +504,8 @@
     }
     if ('degree' in h) {
       const p = app.papers[h.id];
-      return `<b>${esc(h.title)}</b><br><span>${esc([h.authors, h.venue, h.year].filter(Boolean).join(' · '))}</span>${p?.keywords.length ? `<br><span class="k">${esc(p.keywords.slice(0, 5).join(', '))}</span>` : ''}`;
+      const counts = [h.cited_by != null && `cited ${h.cited_by.toLocaleString()} times`, h.h_index != null && `authors' h-index up to ${h.h_index}`].filter(Boolean).join(' · ');
+      return `<b>${esc(h.title)}</b><br><span>${esc([h.authors, h.venue, h.year].filter(Boolean).join(' · '))}</span>${counts ? `<br><span>${esc(counts)}</span>` : ''}${p?.keywords.length ? `<br><span class="k">${esc(p.keywords.slice(0, 5).join(', '))}</span>` : ''}`;
     }
     const [a, b] = [label(h.source), label(h.target)];
     if (h.kind === 'cites') {
@@ -480,7 +593,7 @@
 
   // Redraw when the colours or the theme change.
   $effect(() => {
-    void [colorBy, groups];
+    void [colorBy, groups, range];
     draw();
   });
   const themes = new MutationObserver(draw);
@@ -513,7 +626,7 @@
     <label class="ml-auto flex shrink-0 items-center gap-2 text-muted">
       Colour by
       <select bind:value={colorBy} class="h-8 cursor-pointer rounded-lg border bg-card px-2 text-sm text-foreground outline-none">
-        {#each Object.entries(COLORS) as [value, name]}<option {value}>{name}</option>{/each}
+        {#each MENU as [label, values]}<optgroup {label}>{#each values as value}<option {value}>{COLORS[value]}</option>{/each}</optgroup>{/each}
       </select>
     </label>
   </div>
@@ -582,14 +695,22 @@
         {#each Object.values(TYPES) as [name, c]}<div class="flex items-center gap-2"><span class="size-2.5 rounded-full" style="background: {c}"></span>{name}</div>{/each}
         <div class="flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>other</div>
       </div>
+    {:else if colorBy === 'read'}
+      <div class="pointer-events-none absolute top-3 right-3 space-y-1 rounded-lg border bg-card/90 px-3 py-2 text-xs">
+        {#each Object.values(READ) as [name, c]}<div class="flex items-center gap-2"><span class="size-2.5 rounded-full" style="background: {c}"></span>{name}</div>{/each}
+        <div class="flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>nothing yet</div>
+      </div>
     {:else}
-      <div class="pointer-events-none absolute top-3 right-3 rounded-lg border bg-card/90 px-3 py-2 text-xs">
-        <div class="h-2 w-40 rounded" style="background: linear-gradient(to right, hsl(220 70% 58%), hsl(120 70% 58%), hsl(20 70% 58%))"></div>
-        {#if colorBy === 'year'}
-          <div class="mt-1 flex justify-between text-faint"><span>≤ {years[0]}</span><span>≥ {years[1]}</span></div>
-        {:else}
-          <div class="mt-1 flex justify-between text-faint"><span>cited once</span><span>{cited.top}+ times</span></div>
-          <div class="mt-1 flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>by none shown</div>
+      {@const [low, high, how] = ENDS[colorBy] ?? ['', '']}
+      <div class="pointer-events-none absolute top-3 right-3 w-52 rounded-lg border bg-card/90 px-3 py-2 text-xs">
+        <div class="h-2 rounded" style="background: linear-gradient(to right, hsl(220 70% 58%), hsl(120 70% 58%), hsl(20 70% 58%))"></div>
+        <div class="mt-1 flex justify-between text-faint">
+          <span>{colorBy === 'year' ? `≤ ${range.lo}` : `${low} ${shown(range.lo)}`}</span>
+          <span>{colorBy === 'year' ? `≥ ${range.hi}` : `${shown(range.hi)} ${high}`}</span>
+        </div>
+        {#if how}<div class="mt-1 text-faint">{how}</div>{/if}
+        {#if (colorBy === 'citations' || colorBy === 'momentum' || colorBy === 'hindex') && range.known < (data?.nodes.length ?? 0)}
+          <div class="mt-1 flex items-center gap-2 text-faint"><span class="size-2.5 shrink-0 rounded-full bg-faint"></span>not looked up yet: the server does, or <code>carrel refs --all</code></div>
         {/if}
       </div>
     {/if}

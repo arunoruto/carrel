@@ -24,6 +24,14 @@ pub struct Confirmed {
     pub spellings: Vec<String>,
 }
 
+/// Whether two spellings may be one person (`Vaswani, A.` and `Ashish Vaswani`), by family name and initials.
+pub fn same_person(a: &str, b: &str) -> bool {
+    match (Name::parse(a), Name::parse(b)) {
+        (Some(a), Some(b)) => a.family == b.family && a.compatible(&b),
+        _ => false,
+    }
+}
+
 /// A name split into what the comparison needs, ASCII-folded and lowercased.
 #[derive(Debug, Clone)]
 struct Name {

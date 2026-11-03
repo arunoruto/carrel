@@ -85,7 +85,8 @@ enum Cmd {
         /// Look its references up again
         #[arg(long)]
         refresh: bool,
-        /// Look up the references (and authors' institutions) of every paper that has none yet
+        /// Look up the references (and authors' institutions) of every paper that has none yet, and how cited
+        /// papers and authors are (again after a month)
         #[arg(long, conflicts_with_all = ["id", "cited_by", "refresh"])]
         all: bool,
     },
@@ -516,6 +517,15 @@ fn main() -> Result<()> {
                 match lib.look_up_affiliations(&p) {
                     Ok(n) => println!("{}: {n} institutions", p.id),
                     Err(e) => println!("{}: institutions: {e:#}", p.id),
+                }
+            }
+            // How cited the papers and their authors are, for the map; again after a month.
+            let stale = |p: &carrel::Paper| carrel::metrics::read(&p.dir).is_none_or(|m| m.stale());
+            for p in
+                lib.papers().0.into_iter().filter(|p| (p.bib.doi().is_some() || p.bib.arxiv().is_some()) && stale(p))
+            {
+                if let Err(e) = lib.look_up_metrics(&p) {
+                    println!("{}: citation counts: {e:#}", p.id);
                 }
             }
             let papers = lib.papers().0.into_iter().filter(|p| !p.dir.join(carrel::graph::FILE).exists());

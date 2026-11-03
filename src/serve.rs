@@ -163,6 +163,18 @@ fn round(lib: &Library, jobs: &Jobs, state: &mut State) -> Result<()> {
         {
             changed = true;
             log(&format!("{}: {n} institutions", p.id));
+        } else if (p.bib.doi().is_some() || p.bib.arxiv().is_some())
+            && carrel::metrics::read(&p.dir).is_none_or(|m| m.stale())
+            && !tried.contains(&("metrics", p.id.clone()))
+        {
+            // Again after a month, so only a failure waits for the next start.
+            match lib.look_up_metrics(&p) {
+                Ok(m) => {
+                    changed = true;
+                    log(&format!("{}: cited {} times", p.id, m.cited_by));
+                }
+                Err(_) => drop(tried.insert(("metrics", p.id.clone()))),
+            }
         }
     }
     if let Some(config) = &lib.embeddings {

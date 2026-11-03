@@ -9,6 +9,7 @@
 //!   summary.md  notes.md
 //!   references.json            what it cites, each with its source (graph.rs)
 //!   affiliations.json          where its authors worked, from OpenAlex (affiliations.rs)
+//!   metrics.json               how cited it and its authors are, from OpenAlex (metrics.rs)
 //!   drafts/                    AI proposals waiting for review
 //! ```
 //!
@@ -28,6 +29,7 @@ pub mod graph;
 mod ilibrarian;
 mod index;
 mod jabref;
+pub mod metrics;
 pub mod notify;
 pub mod projects;
 /// The folder of the library that holds the projects.
@@ -624,6 +626,9 @@ impl Library {
             }
             if let Ok(authors) = affiliations::look_up(&known) {
                 affiliations::write(&tmp.0, &authors)?;
+            }
+            if let Ok(metrics) = metrics::look_up(&known) {
+                fs::write(tmp.0.join(metrics::FILE), serde_json::to_string_pretty(&metrics)? + "\n")?;
             }
         }
         let id = self.unique_id(&citekey(&self.key, &bib)?);

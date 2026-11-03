@@ -487,7 +487,8 @@ pub fn generated(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     let parts: Vec<&str> = path.split('/').collect();
     matches!(parts[..], [_, "figures", _, ..])
-        || ["fulltext.md", crate::embed::FILE, crate::graph::FILE, crate::affiliations::FILE].contains(&name)
+        || ["fulltext.md", crate::embed::FILE, crate::graph::FILE, crate::affiliations::FILE, crate::metrics::FILE]
+            .contains(&name)
 }
 
 /// The outcome of a sync, file by file.
