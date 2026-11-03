@@ -23,7 +23,7 @@ A paper's status:
 
 ## Keys
 
-Everywhere: `Tab`/`[`/`]` or `1`–`5` switch tabs, `h`/`j`/`k`/`l` or the arrows move, `Ctrl-D`/`Ctrl-U` move by ten, `g`/`G` jump to the top or bottom, `J`/`K` scroll the text on the right, `S` [syncs](/docs/guide/sharing.md) with the remote in the background, `q` quits. The line at the bottom always shows the keys that work right now.
+Everywhere: `Tab`/`[`/`]` or `1`–`5` switch tabs, `h`/`j`/`k`/`l` or the arrows move, `Ctrl-D`/`Ctrl-U` move by ten, `g`/`G` jump to the top or bottom, `J`/`K` scroll the text on the right, `S` [syncs](/docs/guide/sharing.md) with the remote in the background, `,` asks the [setup](/docs/setup.md) questions (the first start on a machine begins with them), `q` quits. The line at the bottom always shows the keys that work right now.
 
 | Tab | Key | Action |
 |---|---|---|

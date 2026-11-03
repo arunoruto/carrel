@@ -68,7 +68,7 @@ fn quiet(program: &str, args: &[&str]) -> bool {
 // --- Services ---
 
 impl Service {
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Service::Web => "web",
             Service::Consume => "consume",
@@ -282,6 +282,19 @@ pub fn remove(service: Service) -> Result<bool> {
     files.iter().try_for_each(fs::remove_file)?;
     run("systemctl", &["--user", "daemon-reload"])?;
     Ok(true)
+}
+
+/// Whether `carrel service install` set the service up; None when something else did (Home Manager).
+pub fn installed(service: Service) -> Result<Option<bool>> {
+    if cfg!(target_os = "macos") {
+        return Ok(Some(plist(service)?.exists()));
+    }
+    let dir = systemd_dir()?;
+    let units = systemd_started(service);
+    if units.iter().any(|unit| dir.join(unit).is_symlink()) {
+        return Ok(None);
+    }
+    Ok(Some(units.iter().any(|unit| dir.join(unit).exists())))
 }
 
 /// A line about the service: whether it is installed and running.

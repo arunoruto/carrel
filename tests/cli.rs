@@ -190,6 +190,39 @@ fn config_file() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("elsewhere"), "the config's library");
 }
 
+/// `carrel setup` with its answers piped in, a line each.
+fn setup(c: &Carrel, answers: &str) -> String {
+    let mut command = c.command(&["setup"]);
+    command.env("USER", "tester");
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), answers.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "carrel setup failed: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn setting_up() {
+    let c = Carrel::new("cli-setup");
+    let config = || read(c.tmp.path("config/carrel/config.toml"));
+    // A new machine: library, server, Docling, formulas, Ollama, web UI, downloads.
+    let said = setup(&c, "~/papers\n-\nhttp://gpu:5001\n\nhttp://ollama:11434\nn\nn\n");
+    assert!(said.contains("Library folder [~/") && said.contains("the library is in ~/papers"), "{said}");
+    assert!(!said.contains("Your name"), "no server, no name: {said}");
+    assert_eq!(
+        config(),
+        "library = \"~/papers\"\ndocling = \"http://gpu:5001\"\nformulas = true\n\n[embeddings]\nollama = \"http://ollama:11434\"\n"
+    );
+    // Again: Enter keeps each answer, comments and other settings stay, - leaves a setting out.
+    c.tmp.write("config/carrel/config.toml", format!("# mine\nkey = \"{{{{ word }}}}\"\n{}", config()));
+    let said = setup(&c, "\n\n-\n-\nn\nn\n");
+    assert!(said.contains("[http://gpu:5001]") && said.contains("config.toml.bak"), "{said}");
+    assert_eq!(config(), "# mine\nkey = \"{{ word }}\"\nlibrary = \"~/papers\"\nformulas = true\n");
+    let out = c.run(&["setup"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("nothing was changed"), "{out:?}");
+    assert!(config().starts_with("# mine"));
+}
+
 /// PATH without the folders holding uv or docling, with `first` in front.
 fn path_without_extractors(first: &std::path::Path) -> std::ffi::OsString {
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -696,7 +729,7 @@ fn syncing_through_a_server() {
     assert_eq!(std::os::unix::fs::PermissionsExt::mode(&backup.permissions()) & 0o777, 0o600, "may hold secrets");
     let config = read(c.tmp.path("config/carrel/config.toml"));
     assert!(
-        config.starts_with("library = ") && config.contains("type = \"carrel\"") && !config.contains("folder"),
+        config.starts_with("library = \"~/elsewhere\"\n\n[remote]\ntype = \"carrel\"\n") && !config.contains("folder"),
         "{config}"
     );
     remote("");
@@ -736,6 +769,12 @@ fn syncing_through_a_server() {
     );
     let again = c.ok(&["connect", &format!("http://{addr}"), "--no-service"]);
     assert!(again.contains("connected as server (admin)"), "the kept token, without asking: {again}");
+    // `carrel setup` keeps the token too, and the name given.
+    // Library, server, name, token (the kept one), no sync service, Docling, Ollama, web UI, downloads.
+    let said = setup(&c, &format!("\nhttp://{addr}\nalice\n\nn\n\n-\nn\nn\n"));
+    assert!(said.contains("connected as server (admin)") && said.contains("[tester@"), "{said}");
+    let config = read(c.tmp.path("config/carrel/config.toml"));
+    assert!(config.contains("name = \"alice\"") && config.contains("tokens/carrel.txt"), "{config}");
     c.ok(&["sync"]);
     assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A, edited}}\n"));
     std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();

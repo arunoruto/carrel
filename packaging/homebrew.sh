@@ -41,11 +41,8 @@ class Carrel < Formula
 
   def caveats
     <<~EOS
-      Join your group's carrel server, if it has one:
-        carrel connect https://<server>
-      Run carrel in the background (the web UI, and papers from Downloads):
-        carrel service install web
-        carrel service install consume
+      Set it up (library folder, your group's server, Docling, Ollama, what runs in the background):
+        carrel setup
       The full setup (search, Docling, recommendations): https://arunoruto.github.io/carrel/docs/setup/
     EOS
   end

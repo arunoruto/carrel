@@ -55,6 +55,8 @@ enum Mode {
     Info,
     Results,
     Pick,
+    /// Answering `carrel setup`'s questions, one at a time in `input`.
+    Setup,
 }
 
 /// Something that needs a `y` first.
@@ -81,6 +83,8 @@ enum Done {
     Found(Result<Vec<Candidate>>, String),
     /// A sync with the remote finished.
     Synced(Result<carrel::remote::Report>),
+    /// The setup was written, with what it did.
+    Setup(Result<Vec<String>>),
 }
 
 /// A left-hand shelf of the Library: everything, a project or a keyword.
@@ -120,6 +124,10 @@ struct App {
     mode: Mode,
     ask: Option<(String, Ask)>,
     info: Vec<(&'static str, String)>,
+    info_title: &'static str,
+    /// The setup's questions, and which one is asked.
+    setup: Vec<crate::setup::Question>,
+    setup_at: usize,
     /// Which pane of the tab has the focus, left to right.
     focus: usize,
 
@@ -171,6 +179,9 @@ pub fn run(lib: Library) -> Result<()> {
         mode: Mode::Normal,
         ask: None,
         info: vec![],
+        info_title: "Paper",
+        setup: vec![],
+        setup_at: 0,
         focus: 1,
         all: vec![],
         titles: HashMap::new(),
@@ -206,6 +217,10 @@ pub fn run(lib: Library) -> Result<()> {
         ticks: 0,
     };
     app.reload();
+    // The first start on this machine begins with the setup.
+    if Config::path().is_some_and(|p| !p.exists()) {
+        app.start_setup();
+    }
     let mut term = ratatui::init();
     let result = app.run(&mut term);
     ratatui::restore();
@@ -430,6 +445,7 @@ impl App {
                 Mode::Info => self.mode = Mode::Normal,
                 Mode::Results => self.on_results(key.code),
                 Mode::Pick => self.on_pick(key.code),
+                Mode::Setup => self.on_setup(key.code),
             }
         }
     }
@@ -481,7 +497,15 @@ impl App {
                     (n, _) => format!("{n} files failed to sync, e.g. {}: {}", report.failed[0].0, report.failed[0].1),
                 };
             }
-            Done::Paper(Err(e)) | Done::Found(Err(e), _) | Done::Synced(Err(e)) => self.status = format!("{e:#}"),
+            Done::Setup(Ok(said)) => {
+                self.info = said.into_iter().map(|line| ("", line)).collect();
+                self.info.push(("", "`carrel config` shows what carrel found".into()));
+                self.info_title = "Setup";
+                self.mode = Mode::Info;
+            }
+            Done::Paper(Err(e)) | Done::Found(Err(e), _) | Done::Synced(Err(e)) | Done::Setup(Err(e)) => {
+                self.status = format!("{e:#}")
+            }
         }
     }
 
@@ -519,6 +543,7 @@ impl App {
             KeyCode::PageUp | KeyCode::Char('K') => return self.scroll = self.scroll.saturating_sub(5),
             KeyCode::Char('/') if matches!(self.tab, Tab::Library | Tab::People) => return self.mode = Mode::Filter,
             KeyCode::Char('S') => return self.sync(),
+            KeyCode::Char(',') => return self.start_setup(),
             KeyCode::Esc => {
                 match self.tab {
                     Tab::People => self.people_query.clear(),
@@ -547,6 +572,46 @@ impl App {
         self.spawn("syncing", move |lib| {
             Done::Synced(remote.open().and_then(|remote| lib.sync(&*remote, None, false, |_, _| {})))
         });
+    }
+
+    fn start_setup(&mut self) {
+        match crate::setup::questions() {
+            Ok(questions) => {
+                self.setup = questions;
+                self.setup_at = crate::setup::next(&self.setup, None).unwrap_or(0);
+                self.input.clear();
+                self.mode = Mode::Setup;
+            }
+            Err(e) => self.status = format!("{e:#}"),
+        }
+    }
+
+    fn on_setup(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Char(c) => self.input.push(c),
+            KeyCode::Backspace => drop(self.input.pop()),
+            KeyCode::Esc => {
+                self.input.clear();
+                self.mode = Mode::Normal;
+                self.status = "setup left as it was".into();
+            }
+            KeyCode::Enter => {
+                if let Err(e) = crate::setup::take(&mut self.setup, self.setup_at, &self.input) {
+                    return self.status = format!("{e:#}");
+                }
+                self.input.clear();
+                self.status.clear();
+                match crate::setup::next(&self.setup, Some(self.setup_at)) {
+                    Some(at) => self.setup_at = at,
+                    None => {
+                        self.mode = Mode::Normal;
+                        let questions = std::mem::take(&mut self.setup);
+                        self.spawn("setting up", move |_| Done::Setup(crate::setup::apply(&questions)));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn move_by(&mut self, by: isize) {
@@ -591,6 +656,7 @@ impl App {
             KeyCode::Char('i') => {
                 if let Some(p) = &selected {
                     self.info = info(p, &self.lib.projects_of(&p.id));
+                    self.info_title = "Paper";
                     self.mode = Mode::Info;
                 }
             }
@@ -675,6 +741,7 @@ impl App {
                 let nodes = if self.focus == 0 { &g.cites } else { &g.cited_by };
                 if let Some(p) = node(&self.graph_lists[self.focus], nodes).and_then(|id| self.lib.get(&id).ok()) {
                     self.info = info(&p, &self.lib.projects_of(&p.id));
+                    self.info_title = "Paper";
                     self.mode = Mode::Info;
                 }
             }
@@ -703,6 +770,7 @@ impl App {
                         ("cited by", s.cited_by.join(", ")),
                     ];
                     self.info.retain(|(_, v)| !v.is_empty());
+                    self.info_title = "Paper";
                     self.mode = Mode::Info;
                 }
             }
@@ -1007,6 +1075,7 @@ impl App {
             Mode::Add | Mode::Assign => self.draw_prompt(f),
             Mode::Results => self.draw_results(f),
             Mode::Pick => self.draw_pick(f),
+            Mode::Setup => self.draw_setup(f),
             _ => {}
         }
     }
@@ -1501,6 +1570,7 @@ impl App {
             (Mode::Info, _) => &[("any key", "close")],
             (Mode::Confirm, _) => &[("y", "yes"), ("any other key", "no")],
             (Mode::Filter | Mode::Add | Mode::Assign, _) => &[("Enter", "done"), ("Esc", "cancel")],
+            (Mode::Setup, _) => &[("Enter", "next"), ("Esc", "cancel, changing nothing")],
             (Mode::Results, _) => &[("hjkl", "move"), ("Enter", "add"), ("Esc", "close")],
             (Mode::Pick, _) => {
                 &[("jk", "move"), ("Enter/l", "open or choose"), ("h", "up"), ("~", "home"), ("Esc", "cancel")]
@@ -1522,6 +1592,7 @@ impl App {
                 ("+/-", "project"),
                 ("D", "delete"),
                 ("S", "sync"),
+                (",", "setup"),
                 ("q", "quit"),
             ],
             (_, Tab::Graph) => &[
@@ -1596,7 +1667,7 @@ impl App {
             .collect();
         let rect = Self::popup(f, f.area().width * 4 / 5, self.info.len() as u16 + 4);
         let view = Paragraph::new(lines).wrap(Wrap { trim: false });
-        f.render_widget(view.block(self.pane("Paper".into(), true)), rect);
+        f.render_widget(view.block(self.pane(self.info_title.into(), true)), rect);
     }
 
     fn draw_confirm(&self, f: &mut Frame) {
@@ -1622,6 +1693,27 @@ impl App {
         let line =
             Line::from(vec![Span::raw(self.input.clone()), Span::styled("▏", Style::new().fg(self.theme.accent))]);
         f.render_widget(Paragraph::new(line).block(self.pane(title, true)), rect);
+    }
+
+    fn draw_setup(&self, f: &mut Frame) {
+        let (qs, at, th) = (&self.setup, self.setup_at, &self.theme);
+        let Some(q) = qs.get(at) else { return };
+        let asked: Vec<usize> =
+            std::iter::successors(crate::setup::next(qs, None), |&i| crate::setup::next(qs, Some(i))).collect();
+        let n = asked.iter().position(|&i| i == at).map_or(0, |n| n + 1);
+        let typed = if crate::setup::secret(q) { "•".repeat(self.input.chars().count()) } else { self.input.clone() };
+        let mut answer = vec![Span::raw(typed), Span::styled("▏", Style::new().fg(th.accent))];
+        if self.input.is_empty() && !q.answer.is_empty() {
+            let keeps = match crate::setup::yes_no(q) {
+                true => format!("{} (y/n) · Enter keeps it", q.answer),
+                false => format!("{} · Enter keeps it, - leaves it out", q.answer),
+            };
+            answer.push(Span::styled(keeps, Style::new().fg(th.muted)));
+        }
+        let lines = vec![Line::styled(crate::setup::prompt(qs, at), Style::new().fg(th.title)), Line::from(answer)];
+        let rect = Self::popup(f, f.area().width * 4 / 5, 5);
+        let view = Paragraph::new(lines).wrap(Wrap { trim: false });
+        f.render_widget(view.block(self.pane(format!("Setup {n}/{}", asked.len()), true)), rect);
     }
 
     fn draw_results(&mut self, f: &mut Frame) {

@@ -5,6 +5,8 @@ weight: 3
 
 [Installing carrel](/docs/installation.md) gets you a working library. This page adds everything around it, in order, on Linux or macOS without Nix: text and figures from PDFs, semantic search, papers picked up as you download them, recommendations from Google Scholar, and sharing. Every step after the first is optional, and `carrel config` at the end shows what carrel found.
 
+**The short way**: once carrel is installed (step 1) and the services you want to use are running, `carrel setup` asks for the settings below one at a time: the library folder, your group's server, your name and token there, syncing, Docling, formulas, Ollama, the web UI and papers from Downloads. Each question shows what is set now, or a default such as `you@your-machine` for your name, and Enter keeps it; `-` leaves a setting out. Comments and everything else in the config stay as they are, and the old config is kept in `config.toml.bak`. The TUI asks the same questions on its first start on a machine, and again with `,`.
+
 ## 1. carrel
 
 With [Homebrew](https://brew.sh), on macOS (Apple silicon) or Linux:

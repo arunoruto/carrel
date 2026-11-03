@@ -77,7 +77,7 @@ library = "~/Documents/carrel"    # ask; the default is fine for most people
 
 Ask about the field: astronomers want an ADS token (https://ui.adsabs.harvard.edu/user/settings/token). Config details: https://arunoruto.github.io/carrel/docs/reference/configuration/.
 
-**A library on a group's carrel server**: ask the human for the server's address, then have them run `carrel connect https://<server>` in their own terminal. It opens the server's Tokens page and asks for a token there, unseen; never ask the human to paste a token into the chat. Without a token, from the server's own network, it can still download the library and add papers. `carrel config` then says who the server takes the machine for.
+**A library on a group's carrel server**: ask the human for the server's address, then have them run `carrel connect https://<server>` (or `carrel setup`, which asks for everything on this page that matters most) in their own terminal. It opens the server's Tokens page and asks for a token there, unseen; never ask the human to paste a token into the chat. Without a token, from the server's own network, it can still download the library and add papers. `carrel config` then says who the server takes the machine for.
 
 **A library shared another way** (a bucket, a folder) uses `[remote]` and `carrel sync` (https://arunoruto.github.io/carrel/docs/guide/sharing/). Ask the human for the remote's details instead of making up a new one.
 

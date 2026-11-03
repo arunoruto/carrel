@@ -52,7 +52,7 @@ fi
 cat <<EOF
 
 next:
-  carrel connect <server>          # join your group's carrel server, if it has one
+  carrel setup                     # library folder, your group's server, Docling, Ollama, background services
   carrel add 1706.03762            # a first paper
   carrel integrate                 # connect your AI agents (claude, opencode, codex, gemini, cursor)
   carrel service install web       # the web UI in the background, at every login
