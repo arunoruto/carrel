@@ -61,7 +61,7 @@ A group with a [server](/docs/guide/server.md) can sync through it instead of th
 carrel connect https://papers.example.org          # --web: the web UI here too
 ```
 
-It opens the server's Tokens page and asks for a token, which you can skip: without one, from the server's trusted networks, the machine still downloads the library and adds papers. It then writes `[remote]` (keeping the old config as `config.toml.bak`), keeps the token in `~/.config/carrel/tokens/carrel.txt` where only you can read it, and sets up the [sync service](#sharing-with-your-group). `--token <file>` takes the token from a file instead, `--no-service` only writes the config. By hand, `[remote]` looks like this:
+It opens the server's Tokens page and asks for a token, which you can skip: without one, from the server's trusted networks, the machine still downloads the library and adds papers. It then writes `[remote]` (keeping the old config as `config.toml.bak`), keeps the token in `~/.config/carrel/tokens/carrel.txt` where only you can read it, and sets up the [sync service](#sharing-with-your-group). Connecting again reuses that token without asking; `--token <file>` takes one from a file instead, `--no-service` only writes the config. By hand, `[remote]` looks like this:
 
 ```toml
 [remote]

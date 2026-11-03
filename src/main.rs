@@ -256,7 +256,8 @@ enum Cmd {
     Connect {
         /// The server's address, such as https://carrel.example.org
         url: String,
-        /// Read the token from this file instead of asking for it
+        /// Read the token from this file; without it, the one kept from before
+        /// (`~/.config/carrel/tokens/carrel.txt`), or else it asks
         #[arg(long)]
         token: Option<PathBuf>,
         /// Run the web UI on this machine too
@@ -1142,19 +1143,24 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
     if anonymous["server"] != true {
         bail!("{url} is a carrel web for one machine, not a server");
     }
-    let token = match token_file {
-        Some(file) => Some(fs::read_to_string(&file).with_context(|| format!("cannot read {}", file.display()))?),
-        None if std::io::stdin().is_terminal() => {
+    let config = Config::path().context("no folder for the config")?;
+    let dir = config.parent().context("no folder for the config")?.to_path_buf();
+    // Where it keeps the token, so connecting again needs no new one.
+    let kept = dir.join("tokens").join("carrel.txt");
+    let saved = fs::read_to_string(&kept).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let saved = saved.filter(|t| me(Some(t)).is_ok_and(|who| matches!(who["role"].as_str(), Some("member" | "admin"))));
+    let token = match (token_file, saved) {
+        (Some(file), _) => Some(fs::read_to_string(&file).with_context(|| format!("cannot read {}", file.display()))?),
+        (None, Some(saved)) => Some(saved),
+        (None, None) if std::io::stdin().is_terminal() => {
             let tokens = format!("{url}/#/tokens");
             println!("A token lets this machine share changes too: make one for it at {tokens} (opening it now).");
             let _ = open(Path::new(&tokens));
             Some(read_secret("Paste it here, or press Enter to connect without one: ")?)
         }
-        None => None,
+        (None, None) => None,
     };
     let token = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-    let config = Config::path().context("no folder for the config")?;
-    let dir = config.parent().context("no folder for the config")?.to_path_buf();
     let quoted = |s: &str| toml::Value::from(s).to_string();
     let table = match &token {
         Some(token) => {
@@ -1164,7 +1170,7 @@ fn connect(url: &str, token_file: Option<PathBuf>, web: bool, no_service: bool) 
             }
             println!("connected as {} ({})", who["user"].as_str().unwrap_or("?"), who["role"].as_str().unwrap_or("?"));
             // Beside the other tokens of `[tokens]`.
-            let file = dir.join("tokens").join("carrel.txt");
+            let file = kept.clone();
             fs::create_dir_all(file.parent().unwrap())?;
             use std::os::unix::fs::OpenOptionsExt;
             let mut out = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&file)?;

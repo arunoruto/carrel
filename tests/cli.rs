@@ -731,6 +731,8 @@ fn syncing_through_a_server() {
         c.fails(&["connect", &format!("http://{addr}"), "--token", "/dev/null/x", "--no-service"])
             .contains("cannot read")
     );
+    let again = c.ok(&["connect", &format!("http://{addr}"), "--no-service"]);
+    assert!(again.contains("connected as server (admin)"), "the kept token, without asking: {again}");
     c.ok(&["sync"]);
     assert_eq!(server_file("a2020/a2020.bib").as_deref(), Some("@misc{a2020, title = {A, edited}}\n"));
     std::fs::remove_file(c.tmp.path("lib/b2021/b2021.bib")).unwrap();
