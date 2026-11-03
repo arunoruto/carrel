@@ -154,6 +154,45 @@ impl Extractor for Docling {
 /// straight to the second: a textbook takes Docling hours and gigabytes of memory.
 pub struct Fallback(pub Box<dyn Extractor>, pub Box<dyn Extractor>);
 
+/// Drops the images in `out/figures` that are no figures: slivers under 50 pixels on a side, or more than ten
+/// times as long as they are wide. PyMuPDF writes the lines of a scanned book and the rules of a layout as
+/// images, tens of thousands for one book; with them go their `![](figures/...)` in `fulltext.md`.
+pub fn drop_slivers(out: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(out.join("figures")) else { return Ok(()) };
+    let mut dropped = vec![];
+    for entry in entries.flatten() {
+        let Some((w, h)) = png_size(&entry.path()) else { continue };
+        let (short, long) = (w.min(h), w.max(h));
+        if short < 50 || long > 10 * short {
+            fs::remove_file(entry.path())?;
+            dropped.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    let md = out.join("fulltext.md");
+    if dropped.is_empty() || !md.exists() {
+        return Ok(());
+    }
+    let text = fs::read_to_string(&md)?;
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            !(line.starts_with("![") && dropped.iter().any(|name| line.ends_with(&format!("](figures/{name})"))))
+        })
+        .collect();
+    fs::write(md, kept.join("\n") + "\n")?;
+    Ok(())
+}
+
+/// A PNG's width and height, from its header.
+fn png_size(path: &Path) -> Option<(u32, u32)> {
+    let mut head = [0u8; 24];
+    std::io::Read::read_exact(&mut fs::File::open(path).ok()?, &mut head).ok()?;
+    (head[..8] == *b"\x89PNG\r\n\x1a\n").then(|| {
+        (u32::from_be_bytes(head[16..20].try_into().unwrap()), u32::from_be_bytes(head[20..24].try_into().unwrap()))
+    })
+}
+
 /// Pages beyond which a PDF is a book rather than a paper, for [`Fallback`].
 pub const LONG: usize = 150;
 
@@ -307,6 +346,33 @@ mod tests {
     fn picked(setting: &str, docling: bool, pymupdf: bool) -> Option<String> {
         let docling = docling.then(|| Box::new(Docling("/opt/docling".into(), false)) as _);
         pick(setting, docling, pymupdf).unwrap().map(|x| x.name())
+    }
+
+    #[test]
+    fn slivers() {
+        let out = std::env::temp_dir().join(format!("carrel-slivers-{}", std::process::id()));
+        fs::create_dir_all(out.join("figures")).unwrap();
+        let png = |name: &str, w: u32, h: u32| {
+            let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+            bytes.extend(w.to_be_bytes());
+            bytes.extend(h.to_be_bytes());
+            fs::write(out.join("figures").join(name), bytes).unwrap();
+        };
+        png("line.png", 1081, 24);
+        png("rule.png", 1200, 110);
+        png("plot.png", 800, 600);
+        png("panels.png", 1500, 180);
+        fs::write(
+            out.join("fulltext.md"),
+            "Text.\n\n![](figures/line.png)\n![Fig. 1](figures/plot.png)\n![](figures/rule.png)\n",
+        )
+        .unwrap();
+        drop_slivers(&out).unwrap();
+        let mut left: Vec<_> = fs::read_dir(out.join("figures")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        left.sort();
+        assert_eq!(left, ["panels.png", "plot.png"], "a strip of panels stays");
+        assert_eq!(fs::read_to_string(out.join("fulltext.md")).unwrap(), "Text.\n\n![Fig. 1](figures/plot.png)\n");
+        fs::remove_dir_all(out).unwrap();
     }
 
     #[test]

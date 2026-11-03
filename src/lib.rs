@@ -1029,6 +1029,7 @@ fn copy_pdf(from: &Path, to: &Path) -> Result<()> {
 
 /// Move a staged PDF and its extraction output into a paper's folder.
 fn move_outputs(from: &Path, to: &Path, id: &str) -> Result<()> {
+    extract::drop_slivers(from)?;
     let names =
         [("paper.pdf", format!("{id}.pdf")), ("fulltext.md", "fulltext.md".into()), ("figures", "figures".into())];
     for (src, dst) in names {
