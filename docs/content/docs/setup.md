@@ -22,6 +22,13 @@ curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | 
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+Or paste this to your AI agent, which then goes through this page with you:
+
+```text
+Install carrel and set it up for me, following
+https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md
+```
+
 ## 2. Text, figures and formulas
 
 carrel turns each PDF into Markdown and figures, which search, the readers and your AI use. Pick by your machine:

@@ -31,6 +31,13 @@ carrel add 1706.03762      # metadata, PDF, text and figures
 carrel integrate claude    # or opencode, codex, gemini, cursor
 ```
 
+Or paste this to your AI agent:
+
+```text
+Install carrel and set it up for me, following
+https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md
+```
+
 <div class="hx:mt-12"></div>
 
 {{< hextra/feature-grid >}}

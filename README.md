@@ -132,7 +132,12 @@ Binaries for Linux (x86_64, arm64) and macOS (Apple silicon) are on the [release
   ```sh
   curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | sh
   ```
-* Your AI agent: ask it to *"install carrel and set it up for me, following https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md"*
+
+  Or let your AI agent (Claude Code, Codex, ...) do it all, setup included; paste this to it:
+  ```text
+  Install carrel and set it up for me, following
+  https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md
+  ```
 * Nix
   ```sh
   nix run github:arunoruto/carrel

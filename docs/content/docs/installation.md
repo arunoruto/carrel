@@ -27,7 +27,14 @@ curl -fsSL https://raw.githubusercontent.com/arunoruto/carrel/main/install.sh | 
 
 It downloads the latest release for your platform, checks its checksum and puts `carrel` in `~/.local/bin`. `CARREL_INSTALL_DIR=/somewhere` picks another folder and `CARREL_VERSION=v0.2.0` another release. Run it again to update. The script is short, so you can [read it](https://github.com/arunoruto/carrel/blob/main/install.sh) first.
 
-**AI agents**: tell yours *"Install carrel and set it up for me, following https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md"*. That guide walks it through installing carrel, the config, importing your papers and connecting itself.
+**Or let your AI agent do it** (Claude Code, Codex, opencode, ...). Paste this to it:
+
+```text
+Install carrel and set it up for me, following
+https://raw.githubusercontent.com/arunoruto/carrel/main/install-ai.md
+```
+
+That guide walks it through installing carrel, the config, importing your papers and connecting itself; for a token, it has you run the command yourself.
 
 ## Prebuilt binaries
 
