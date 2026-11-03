@@ -140,6 +140,8 @@ export interface MapNode {
   venue: string | null;
   keywords: string[];
   projects: string[];
+  /** journal, conference, preprint, book, thesis or other */
+  type: string;
 }
 
 export interface LibraryMap {

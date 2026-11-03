@@ -1026,6 +1026,20 @@ fn project(lib: &Library, name: &str) -> Value {
     json!({"name": name, "papers": lib.project(name).unwrap_or_default(), "private": lib.is_private(name)})
 }
 
+/// What sort of publication a paper is, for the map's colours.
+fn kind(p: &Paper) -> &'static str {
+    let venue = p.bib.venue().unwrap_or_default().to_lowercase();
+    match p.bib.kind.to_lowercase().as_str() {
+        "article" if venue.is_empty() || venue.contains("arxiv") => "preprint",
+        "article" => "journal",
+        "inproceedings" | "conference" | "proceedings" => "conference",
+        "book" | "inbook" | "incollection" | "booklet" => "book",
+        "phdthesis" | "mastersthesis" | "thesis" => "thesis",
+        _ if p.bib.arxiv().is_some() && p.bib.doi().is_none() => "preprint",
+        _ => "other",
+    }
+}
+
 fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
     let papers = match project {
         Some(name) => lib.project_papers(name)?.0,
@@ -1042,6 +1056,7 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
             "venue": p.bib.venue(),
             "keywords": p.bib.keywords(),
             "projects": lib.projects_of(&p.id),
+            "type": kind(p),
         })
     });
     let cites = graph.citations().into_iter().filter(|(a, b)| shown.contains(a) && shown.contains(b));

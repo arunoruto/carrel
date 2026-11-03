@@ -24,7 +24,7 @@ It is for this machine only, like the [TUI](/docs/guide/tui.md): it works on you
 - **Inbox**: the new PDFs in your [Downloads](/docs/guide/adding-papers.md#from-your-downloads), as `carrel consume` would offer them, to add or skip.
 - **Drafts**: what an AI proposed, next to what it would change, to approve or reject.
 - **Discover**: papers [recommended](/docs/guide/recommendations.md) by alert emails such as Google Scholar's, to add or dismiss, and the papers your library, or a project, cites most but doesn't have.
-- **Map**: the library as a network. Papers are dots, coloured by their project or by year and bigger the more links they have. Choose which links to draw; the choice is remembered, and only citations are on at first:
+- **Map**: the library as a network. Papers are dots, bigger the more links they have, and coloured by what *Colour by* picks: the **group** the links shown tie them into (named by its most common keyword, so turning on *Alike* or *Authors* regroups them), their **type** (journal, conference, preprint, book, thesis), their **year**, or how often the papers shown **cite** them. The project menu shows one project's papers alone. Choose which links to draw; the choice is remembered, and only citations are on at first:
   - **citations**, blue arrows from the citing paper to the cited one;
   - **authors**, orange, thicker the more authors two papers share;
   - **institutions**, lavender squares for the institutions two or more papers come from, linked to their papers ([from OpenAlex](/docs/guide/citations.md#institutions));

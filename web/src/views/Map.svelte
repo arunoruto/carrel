@@ -14,7 +14,8 @@
   // institutions they come from (square hubs), and by how alike they are. Drawn on a canvas; d3-force lays it out.
   type Place = LibraryMap['institutions'][number];
   // A hub stands for an institution (`place`) or an author (`person`), linked to their papers.
-  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place; person?: string };
+  // `group`: which of `groups` the links put it in.
+  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place; person?: string; group?: number };
   type Kind = 'cites' | 'authors' | 'institutions' | 'similar';
   // `bend`: how far a link curves off the straight line, so two papers linked several ways show each link.
   // `self`: for a citation, the authors the two papers share.
@@ -44,7 +45,28 @@
     }
   });
   let alike = $state(0.75);
-  let colorBy = $state<'project' | 'year'>('project');
+  // What the colours say, remembered too.
+  const COLORS = { group: 'Group', type: 'Type', year: 'Year', cited: 'Cited here' } as const;
+  type ColorBy = keyof typeof COLORS;
+  let colorBy = $state<ColorBy>(remembered());
+  function remembered(): ColorBy {
+    try {
+      const value = localStorage.getItem('carrel-map-color') ?? '';
+      return value in COLORS ? (value as ColorBy) : 'group';
+    } catch {
+      return 'group';
+    }
+  }
+  $effect(() => {
+    const value = colorBy;
+    try {
+      localStorage.setItem('carrel-map-color', value);
+    } catch {
+      // Not remembered, then.
+    }
+  });
+  // Groups of papers the links shown tie together, each named by its most common keyword.
+  let groups = $state.raw<{ name: string; size: number }[]>([]);
   let hideLonely = $state(true);
   let selected = $state.raw<Node | null>(null);
   let tip = $state<{ x: number; y: number; html: string } | null>(null);
@@ -73,12 +95,12 @@
     const before = new Map(byId);
     const place = (p: Place): MapNode & { place: Place } => {
       const id = `institution:${p.ror ?? p.name}`;
-      return { id, title: p.name, authors: '', year: null, venue: p.country, keywords: [], projects: [], place: p };
+      return { id, title: p.name, authors: '', year: null, venue: p.country, keywords: [], projects: [], type: '', place: p };
     };
     // Each author two or more shown papers share, with those papers.
     const people = new Map<string, Set<string>>();
     d.authors.forEach(([a, b, names]) => names.forEach((name) => people.set(name, new Set([...(people.get(name) ?? []), a, b]))));
-    const person = (name: string): MapNode & { person: string } => ({ id: `author:${name}`, title: name, authors: '', year: null, venue: null, keywords: [], projects: [], person: name });
+    const person = (name: string): MapNode & { person: string } => ({ id: `author:${name}`, title: name, authors: '', year: null, venue: null, keywords: [], projects: [], type: '', person: name });
     const hubs = [...(s.institutions ? d.institutions.map(place) : []), ...(s.authors ? [...people.keys()].map(person) : [])];
     const all = [...d.nodes, ...hubs].map((n) => {
       const old = before.get(n.id);
@@ -107,6 +129,7 @@
     list.forEach((e) => (e.source.degree++, e.target.degree++));
     nodes = lonely ? all.filter((n) => n.degree > 0) : all;
     edges = list;
+    groups = grouped(nodes, edges);
     untrack(() => selected && !nodes.includes(selected) && (selected = null));
     const warm = !!sim;
     sim?.stop();
@@ -140,10 +163,56 @@
 
   $effect(() => () => sim?.stop());
 
+  // Label propagation: each node takes the label most of its neighbours have, until none changes. Authors and
+  // institutions shown as hubs tie their papers together too. Sets each paper's `group`, biggest group first.
+  function grouped(ns: Node[], es: Edge[]): { name: string; size: number }[] {
+    const near = new Map<Node, Node[]>(ns.map((n) => [n, []]));
+    es.forEach((e) => (near.get(e.source)?.push(e.target), near.get(e.target)?.push(e.source)));
+    const label = new Map<Node, number>(ns.map((n, i) => [n, i]));
+    const order = [...ns].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (let round = 0, changed = true; changed && round < 30; round++) {
+      changed = false;
+      for (const n of order) {
+        const votes = new Map<number, number>();
+        near.get(n)!.forEach((m) => votes.set(label.get(m)!, (votes.get(label.get(m)!) ?? 0) + 1));
+        let [best, most] = [label.get(n)!, votes.get(label.get(n)!) ?? 0];
+        votes.forEach((count, l) => count > most && ([best, most] = [l, count]));
+        if (best !== label.get(n)) (label.set(n, best), (changed = true));
+      }
+    }
+    const members = new Map<number, Node[]>();
+    ns.filter((n) => !hub(n)).forEach((n) => members.set(label.get(n)!, [...(members.get(label.get(n)!) ?? []), n]));
+    // Groups of two or more get a colour, as many as the palette has; the rest stay grey.
+    const big = [...members.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length).slice(0, palette.length);
+    ns.forEach((n) => (n.group = undefined));
+    const used = new Set<string>();
+    return big.map((g, i) => {
+      g.forEach((n) => (n.group = i));
+      const counts = new Map<string, number>();
+      g.forEach((n) => n.keywords.forEach((k) => counts.set(k.toLowerCase(), (counts.get(k.toLowerCase()) ?? 0) + 1)));
+      const name = [...counts].filter(([k, c]) => c > 1 && !used.has(k)).sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (name) used.add(name);
+      return { name: name ?? `group ${i + 1}`, size: g.length };
+    });
+  }
+
   const radius = (n: Node) => (hub(n) ? 5 + Math.sqrt(n.degree) * 2 : 4 + Math.sqrt(n.degree) * 1.8);
   const palette = ['#e8586e', '#f2a33a', '#4fb06d', '#4c7ef0', '#a974e8', '#2fb5c4', '#e077b8', '#b5b83a', '#d9773a', '#7c8bd9', '#3fa38f', '#c46b4f'];
-  const projects = $derived(app.projects.map((p) => p.name));
-  const sizes = $derived(Object.fromEntries(app.projects.map((p) => [p.name, p.papers.length])));
+  const TYPES: Record<string, [string, string]> = {
+    journal: ['Journal', '#4c7ef0'],
+    conference: ['Conference', '#f2a33a'],
+    preprint: ['Preprint', '#e8586e'],
+    book: ['Book', '#4fb06d'],
+    thesis: ['Thesis', '#a974e8'],
+  };
+  // How often the papers shown cite each one; the colours run to the 95th percentile, so a few classics don't
+  // leave everything else alike.
+  const cited = $derived.by(() => {
+    const counts = new Map<string, number>();
+    (data?.cites ?? []).forEach(([, b]) => counts.set(b, (counts.get(b) ?? 0) + 1));
+    const sorted = [...counts.values()].sort((a, b) => a - b);
+    return { counts, top: Math.max(1, sorted[Math.round(0.95 * (sorted.length - 1))] ?? 1) };
+  });
   const years = $derived.by(() => {
     // The middle 90%, so one classic from 1865 doesn't turn everything else the same colour.
     const ys = (data?.nodes ?? []).map((n) => n.year).filter((y): y is number => !!y).sort((a, b) => a - b);
@@ -151,15 +220,22 @@
     return ys.length ? [at(0.05), at(0.95)] : [2000, 2025];
   });
 
+  // Blue for little or early, through green, to orange for much or late.
+  const scale = (t: number) => `hsl(${220 - Math.min(1, Math.max(0, t)) * 200} 70% 58%)`;
+
   function color(n: Node): string {
-    if (colorBy === 'year') {
-      if (!n.year) return css('--faint');
-      const t = Math.min(1, Math.max(0, (n.year - years[0]) / Math.max(1, years[1] - years[0])));
-      return `hsl(${220 - t * 200} 70% 58%)`;
+    switch (colorBy) {
+      case 'year':
+        return n.year ? scale((n.year - years[0]) / Math.max(1, years[1] - years[0])) : css('--faint');
+      case 'type':
+        return TYPES[n.type]?.[1] ?? css('--faint');
+      case 'cited': {
+        const count = cited.counts.get(n.id) ?? 0;
+        return count ? scale(Math.sqrt(count / cited.top)) : css('--faint');
+      }
+      default:
+        return n.group === undefined ? css('--faint') : palette[n.group];
     }
-    // The paper's smallest project says most about it; big catch-all projects would colour everything alike.
-    const own = [...n.projects].sort((a, b) => (sizes[a] ?? 0) - (sizes[b] ?? 0))[0];
-    return own ? palette[projects.indexOf(own) % palette.length] : css('--faint');
   }
 
   let styles: CSSStyleDeclaration;
@@ -404,7 +480,7 @@
 
   // Redraw when the colours or the theme change.
   $effect(() => {
-    void [colorBy, projects];
+    void [colorBy, groups];
     draw();
   });
   const themes = new MutationObserver(draw);
@@ -434,10 +510,12 @@
       {#if show.similar}<input type="range" min="0.5" max="0.95" step="0.01" bind:value={alike} class="w-20 accent-[var(--ready)]" /><span class="w-8 text-xs text-faint tabular-nums">≥{alike.toFixed(2)}</span>{/if}
     </label>
     <label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={hideLonely} class="accent-[var(--accent)]" />Linked only</label>
-    <div class="ml-auto flex rounded-lg border bg-card p-0.5 text-xs">
-      <button class="cursor-pointer rounded-md px-2.5 py-1 {colorBy === 'project' ? 'bg-hover font-medium' : 'text-muted'}" onclick={() => (colorBy = 'project')}>Project</button>
-      <button class="cursor-pointer rounded-md px-2.5 py-1 {colorBy === 'year' ? 'bg-hover font-medium' : 'text-muted'}" onclick={() => (colorBy = 'year')}>Year</button>
-    </div>
+    <label class="ml-auto flex shrink-0 items-center gap-2 text-muted">
+      Colour by
+      <select bind:value={colorBy} class="h-8 cursor-pointer rounded-lg border bg-card px-2 text-sm text-foreground outline-none">
+        {#each Object.entries(COLORS) as [value, name]}<option {value}>{name}</option>{/each}
+      </select>
+    </label>
   </div>
 
   <div bind:this={box} class="relative min-h-0 flex-1 overflow-hidden">
@@ -494,15 +572,25 @@
       </div>
     {/if}
 
-    {#if colorBy === 'project' && projects.length}
-      <div class="pointer-events-none absolute top-3 right-3 max-h-[60%] space-y-1 overflow-hidden rounded-lg border bg-card/90 px-3 py-2 text-xs">
-        {#each projects as name, i}<div class="flex items-center gap-2"><span class="size-2.5 rounded-full" style="background: {palette[i % palette.length]}"></span>{name}</div>{/each}
-        <div class="flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>no project</div>
+    {#if colorBy === 'group'}
+      <div class="pointer-events-none absolute top-3 right-3 max-h-[60%] space-y-1 overflow-hidden rounded-lg border bg-card/90 px-3 py-2 text-xs" title="Papers the links shown tie together">
+        {#each groups as g, i}<div class="flex items-center gap-2"><span class="size-2.5 rounded-full" style="background: {palette[i]}"></span>{g.name}<span class="text-faint">{g.size}</span></div>{/each}
+        <div class="flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>{groups.length ? 'smaller groups, alone' : 'no groups: show some links'}</div>
       </div>
-    {:else if colorBy === 'year'}
+    {:else if colorBy === 'type'}
+      <div class="pointer-events-none absolute top-3 right-3 space-y-1 rounded-lg border bg-card/90 px-3 py-2 text-xs">
+        {#each Object.values(TYPES) as [name, c]}<div class="flex items-center gap-2"><span class="size-2.5 rounded-full" style="background: {c}"></span>{name}</div>{/each}
+        <div class="flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>other</div>
+      </div>
+    {:else}
       <div class="pointer-events-none absolute top-3 right-3 rounded-lg border bg-card/90 px-3 py-2 text-xs">
         <div class="h-2 w-40 rounded" style="background: linear-gradient(to right, hsl(220 70% 58%), hsl(120 70% 58%), hsl(20 70% 58%))"></div>
-        <div class="mt-1 flex justify-between text-faint"><span>≤ {years[0]}</span><span>≥ {years[1]}</span></div>
+        {#if colorBy === 'year'}
+          <div class="mt-1 flex justify-between text-faint"><span>≤ {years[0]}</span><span>≥ {years[1]}</span></div>
+        {:else}
+          <div class="mt-1 flex justify-between text-faint"><span>cited once</span><span>{cited.top}+ times</span></div>
+          <div class="mt-1 flex items-center gap-2 text-faint"><span class="size-2.5 rounded-full bg-faint"></span>by none shown</div>
+        {/if}
       </div>
     {/if}
 
