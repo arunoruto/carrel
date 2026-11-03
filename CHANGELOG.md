@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.0](https://github.com/arunoruto/carrel/compare/v0.5.0...v0.6.0) (2026-11-03)
+
+
+### Features
+
+* activity on carrel serve: revert any change, deletions as requests ([9a9d041](https://github.com/arunoruto/carrel/commit/9a9d041e56e8e8e22cff023270592c72c62b1054))
+* carrel config shows the remote and who it takes you for ([1b5b80e](https://github.com/arunoruto/carrel/commit/1b5b80e57e74ef9543633b699df5d1e369d38b7f))
+* carrel connect reuses the token it kept ([bd64c33](https://github.com/arunoruto/carrel/commit/bd64c330de09064512ed80b4a56e00a39f08bc04))
+* carrel connect, client names, and when and where each token was used ([b039f07](https://github.com/arunoruto/carrel/commit/b039f07c6b2434acf98db7254cc487c7558b6a64))
+* carrel serve serves the web UI, behind a token of its own ([9ed9cf7](https://github.com/arunoruto/carrel/commit/9ed9cf798b5f37012a4bfcf39aae4390032a81c9))
+* carrel setup asks for the settings that matter, also in the TUI ([2722c90](https://github.com/arunoruto/carrel/commit/2722c903e74a6a6d8c7f57857bad7d11136a4510))
+* log in to carrel serve with OpenID Connect, with roles and personal tokens ([eff1917](https://github.com/arunoruto/carrel/commit/eff1917132fed2757c74d2a1bf0350246499433f))
+* sync through a carrel server, with rights from its logins ([481307d](https://github.com/arunoruto/carrel/commit/481307d4ad772a7dfd107db64be47df16f90a61c))
+* **web:** show whether the logged-in user is a member or an admin ([6304cf8](https://github.com/arunoruto/carrel/commit/6304cf8a434507840b2ece2c72c86272be04a2e1))
+
+
+### Bug Fixes
+
+* carrel connect keeps the old config as private as it was ([40129b4](https://github.com/arunoruto/carrel/commit/40129b4f92b00291c6ff332113c5e2d844acc8d0))
+* carrel connect keeps the token in tokens/carrel.txt ([5a862bd](https://github.com/arunoruto/carrel/commit/5a862bdb5c260910cabce7bc7c81ee00937a8bd5))
+* drop the slivers PyMuPDF writes as figures ([d049fd1](https://github.com/arunoruto/carrel/commit/d049fd14be93e84e64d357f751d8dbfa67b567cb))
+
 ## [0.5.0](https://github.com/arunoruto/carrel/compare/v0.4.0...v0.5.0) (2026-11-02)
 
 
