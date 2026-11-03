@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/arunoruto/carrel/compare/v0.6.0...v0.7.0) (2026-11-03)
+
+
+### Features
+
+* private projects, projects managed in the web UI and TUI, embeddings through the server ([412dbc9](https://github.com/arunoruto/carrel/commit/412dbc903997897c4540b7f9e95aebed521648b1))
+
+
+### Bug Fixes
+
+* carrel setup doesn't promise a sync it wasn't asked to run ([361fbe8](https://github.com/arunoruto/carrel/commit/361fbe85c59fd91a5e3fbb044309af515c8a8bee))
+
 ## [0.6.0](https://github.com/arunoruto/carrel/compare/v0.5.0...v0.6.0) (2026-11-03)
 
 
