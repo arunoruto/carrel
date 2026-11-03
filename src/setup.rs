@@ -202,7 +202,10 @@ pub fn apply(qs: &[Question]) -> Result<Vec<String>> {
         said.push(result.unwrap_or_else(|e| format!("carrel {}: {e:#}", service.name())));
     }
     if server.is_some() {
-        said.push("the library arrives with the first sync, within a minute; `carrel sync` fetches it now".into());
+        said.push(match answer(qs, "sync") {
+            "n" => "`carrel sync` fetches the library".into(),
+            _ => "the library arrives with the first sync, within a minute; `carrel sync` fetches it now".into(),
+        });
     }
     Ok(said)
 }
