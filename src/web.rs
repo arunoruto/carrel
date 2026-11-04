@@ -1080,9 +1080,15 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
             "cited_by": m.map(|m| m.cited_by),
             "h_index": m.and_then(|m| m.authors.iter().map(|a| a.h_index).max()),
             "read": read,
+            // Why a paper may have no citation links: its references not looked up, or nothing to look them up by.
+            "refs": graph.references_known(&p.id),
+            "ids": p.bib.doi().is_some() || p.bib.arxiv().is_some(),
         })
     });
     let cites = graph.citations().into_iter().filter(|(a, b)| shown.contains(a) && shown.contains(b));
+    // Papers the library lacks that two or more of these cite: they may tie together papers nothing else does.
+    let ids: Vec<String> = papers.iter().map(|p| p.id.clone()).collect();
+    let missing = graph.suggestions(project.map(|_| ids.as_slice())).into_iter().filter(|s| s.cited_by.len() > 1);
     let mut authors = vec![];
     for p in &papers {
         for (other, names) in graph.authors.shared(&p.id) {
@@ -1122,6 +1128,7 @@ fn map(lib: &Library, project: Option<&String>) -> Result<Value> {
         "institutions": institutions.collect::<Vec<_>>(),
         "similar": similar.into_iter().map(|(a, b, s)| json!([a, b, s])).collect::<Vec<_>>(),
         "people": people,
+        "missing": missing.collect::<Vec<_>>(),
     }))
 }
 

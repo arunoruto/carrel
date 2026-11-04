@@ -1026,7 +1026,12 @@ fn web_ui() {
             "@article{{{other},\n  title = {{More Regolith}},\n  author = {{Hapke, Bruce and Nelson, Robert}},\n}}\n"
         ),
     );
-    c.tmp.write(&format!("lib/{other}/references.json"), r#"[{"title": "Regolith Optics", "source": "openalex"}]"#);
+    let missing = r#"{"title": "Light Scattering by Particles", "doi": "10.1/lsp", "source": "openalex"}"#;
+    c.tmp.write(
+        &format!("lib/{other}/references.json"),
+        format!(r#"[{{"title": "Regolith Optics", "source": "openalex"}}, {missing}]"#),
+    );
+    c.tmp.write(&format!("lib/{id}/references.json"), format!("[{missing}]"));
     let (status, map) = api("GET", "/api/map", b"");
     assert_eq!(status, 200, "{map}");
     let map = json(&map);
@@ -1034,6 +1039,12 @@ fn web_ui() {
     assert_eq!(map["cites"], serde_json::json!([[other, id]]), "the reference matched by its title");
     assert_eq!(map["authors"][0][2], serde_json::json!(["Hapke, Bruce"]));
     assert_eq!(map["similar"], serde_json::json!([]), "no embeddings, no likeness");
+    assert_eq!(map["missing"][0]["doi"], "10.1/lsp", "both cite it, the library lacks it: {map}");
+    assert_eq!(map["missing"][0]["cited_by"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        (&map["nodes"][0]["refs"], &map["nodes"][0]["ids"]),
+        (&serde_json::json!(true), &serde_json::json!(false))
+    );
     let tree = json(&api("GET", &format!("/api/papers/{other}/tree"), b"").1);
     assert_eq!(tree, serde_json::json!([{"level": 1, "id": id, "again": false}]));
     let up = json(&api("GET", &format!("/api/papers/{id}/tree?cited_by"), b"").1);

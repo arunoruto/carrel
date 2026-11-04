@@ -27,13 +27,16 @@ It is for this machine only, like the [TUI](/docs/guide/tui.md): it works on you
 - **Map**: the library as a network. Papers are dots, bigger the more links they have, and coloured by what *Colour by* picks:
   - The network: the **group** the links shown tie them into (named by its most common keyword, so turning on *Alike* or *Authors* regroups them); how **central** they are (PageRank over the citations between them); or how much they are **bridges between groups** (how many shortest paths run through them).
   - The paper: its **type** (journal, conference, preprint, book, thesis), **year**, **citations** worldwide, **citations a year** since it came out (rising papers stand out from old classics), or how often the papers shown **cite** it.
-  - People and you: its **authors' h-index** (the best-known author's; with *Authors* on, each author's diamond has its own), or what **you wrote** about it: notes, or a summary only.
+  - People and you: the **authors' h-index**, on the author diamonds (turn on *Authors*), or what **you wrote** about a paper: notes, or a summary only.
 
   Citations and h-indexes come from OpenAlex, kept with each paper as `metrics.json` and looked up again after a month, by the [server](/docs/guide/server.md) or `carrel refs --all`. The project menu shows one project's papers alone. Choose which links to draw; the choice is remembered, and only citations are on at first:
   - **citations**, blue arrows from the citing paper to the cited one;
   - **authors**, orange, thicker the more authors two papers share;
   - **institutions**, lavender squares for the institutions two or more papers come from, linked to their papers ([from OpenAlex](/docs/guide/citations.md#institutions));
-  - **alike**, green and dashed, the papers most alike by their embeddings, above a threshold you set.
+  - **alike**, green and dashed, the papers most alike by their embeddings, above a threshold you set;
+  - **missing**, grey rings for papers the library lacks but several of those shown cite (by four or more at first; the slider sets how many), with grey dashed arrows from the papers citing them. They can tie together papers nothing else links; select one to add it.
+
+  *Linked only* hides the papers no link shown reaches and counts them; hover the count to see why they are alone. Turn it off and they form a ring around the network; hover one for its reason: its references aren't looked up yet, it has no DOI or arXiv id to look them up by, or it cites none of the others and none cite it (and whether it shares references the library lacks with them).
 
   Two papers linked several ways get their links side by side, so a citation between papers by the same people shows next to their author link, and hovering it says it is a self-citation. Hover a line to see who the shared authors are or who worked where; click a paper to light up its neighbours; double-click to open it. Scroll zooms, dragging moves.
 - **People**: everyone who wrote a library paper, most papers first: their spellings, papers and co-authors, and anyone who might be the same person, to confirm as one person or as different people ([who is who](/docs/guide/citations.md#who-is-who)). Proposals about people from an AI wait in *Drafts*.

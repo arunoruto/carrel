@@ -1,22 +1,25 @@
 <script lang="ts">
-  import { ArrowUpRight, X } from '@lucide/svelte';
+  import { ArrowUpRight, Plus, X } from '@lucide/svelte';
   import {
-    forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY,
+    forceCollide, forceLink, forceManyBody, forceRadial, forceSimulation, forceX, forceY,
     type Simulation, type SimulationNodeDatum,
   } from 'd3-force';
   import { untrack } from 'svelte';
+  import { addSource } from '../lib/actions';
   import { api, type LibraryMap, type MapNode } from '../lib/api';
   import Spinner from '../lib/components/Spinner.svelte';
   import { go, paperHref, router } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
 
   // The library as a network: papers linked by citations, through the authors they share (diamond hubs) and the
-  // institutions they come from (square hubs), and by how alike they are. Drawn on a canvas; d3-force lays it out.
+  // institutions they come from (square hubs), and by how alike they are. Papers the library lacks but several of
+  // its papers cite can join in as grey rings. Drawn on a canvas; d3-force lays it out.
   type Place = LibraryMap['institutions'][number];
+  type Missing = NonNullable<LibraryMap['missing']>[number];
   // A hub stands for an institution (`place`) or an author (`person`), linked to their papers.
-  // `group`: which of `groups` the links put it in.
-  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place; person?: string; group?: number };
-  type Kind = 'cites' | 'authors' | 'institutions' | 'similar';
+  // `ghost`: a paper missing from the library. `group`: which of `groups` the links put it in.
+  type Node = MapNode & SimulationNodeDatum & { degree: number; place?: Place; person?: string; ghost?: Missing; group?: number };
+  type Kind = 'cites' | 'missing' | 'authors' | 'institutions' | 'similar';
   // `bend`: how far a link curves off the straight line, so two papers linked several ways show each link.
   // `self`: for a citation, the authors the two papers share.
   type Edge = { source: Node; target: Node; kind: Kind; names?: string[]; score?: number; bend: number; self?: string[] };
@@ -28,7 +31,7 @@
   let project = $state(router.params.get('project') ?? '');
   // Which links to draw, remembered in this browser; citations alone to begin with, all of them at once is a lot.
   const LINKS = 'carrel-map-links';
-  let show = $state<Record<Kind, boolean>>({ cites: true, authors: false, institutions: false, similar: false, ...stored() });
+  let show = $state<Record<Kind, boolean>>({ cites: true, missing: false, authors: false, institutions: false, similar: false, ...stored() });
   function stored(): Partial<Record<Kind, boolean>> {
     try {
       return JSON.parse(localStorage.getItem(LINKS) ?? '{}');
@@ -45,6 +48,8 @@
     }
   });
   let alike = $state(0.75);
+  // Missing papers shown when at least this many of the papers shown cite them.
+  let often = $state(4);
   // What the colours say, remembered too.
   const COLORS = {
     group: 'Group',
@@ -71,7 +76,7 @@
     citations: ['few', 'many', 'from OpenAlex'],
     momentum: ['few', 'many', 'citations per year since it came out, from OpenAlex'],
     cited: ['once', 'often', 'by the papers shown'],
-    hindex: ['lower', 'higher', "its best-known author's; authors' diamonds by their own"],
+    hindex: ['lower', 'higher', 'the authors shared by two or more papers, from OpenAlex'],
   };
   let colorBy = $state<ColorBy>(remembered());
   function remembered(): ColorBy {
@@ -95,6 +100,11 @@
   // How many shortest paths between the nodes shown run through each one.
   let between = $state.raw(new Map<string, number>());
   let hideLonely = $state(true);
+  // The papers no link shown reaches, by why.
+  let alone = $state.raw<Node[]>([]);
+  // Bumped to load the map again, after adding a missing paper.
+  let loads = $state(0);
+  let adding = $state(false);
   let selected = $state.raw<Node | null>(null);
   let tip = $state<{ x: number; y: number; html: string } | null>(null);
 
@@ -108,9 +118,13 @@
   let hovered: Node | Edge | null = null;
   const byId = new Map<string, Node>();
 
+  let loaded = '';
   $effect(() => {
     const p = project;
-    data = null;
+    void loads;
+    // Another project starts afresh; the same one again keeps the map until the new one comes.
+    if (p !== loaded) data = null;
+    loaded = p;
     api.map(p || undefined).then((m) => ((data = m), (error = ''))).catch((e) => (error = e.message));
   });
 
@@ -118,7 +132,7 @@
   $effect(() => {
     if (!data) return;
     const d = data;
-    const [s, threshold, lonely] = [{ ...show }, alike, hideLonely];
+    const [s, threshold, lonely, times] = [{ ...show }, alike, hideLonely, often];
     const before = new Map(byId);
     const place = (p: Place): MapNode & { place: Place } => {
       const id = `institution:${p.ror ?? p.name}`;
@@ -128,7 +142,13 @@
     const people = new Map<string, Set<string>>();
     d.authors.forEach(([a, b, names]) => names.forEach((name) => people.set(name, new Set([...(people.get(name) ?? []), a, b]))));
     const person = (name: string): MapNode & { person: string } => ({ id: `author:${name}`, title: name, authors: '', year: null, venue: null, keywords: [], projects: [], type: '', person: name });
-    const hubs = [...(s.institutions ? d.institutions.map(place) : []), ...(s.authors ? [...people.keys()].map(person) : [])];
+    const short = (names: string[] = []) => {
+      const family = (n: string) => (n.includes(',') ? n.split(',')[0] : n.split(' ').at(-1)!).trim();
+      return names.length > 2 ? `${family(names[0])} et al.` : names.map(family).join(' & ');
+    };
+    const ghost = (m: Missing): MapNode & { ghost: Missing } => ({ id: `missing:${m.doi ?? m.arxiv ?? m.title}`, title: m.title, authors: short(m.authors), year: m.year ?? null, venue: m.venue || null, keywords: [], projects: [], type: '', ghost: m });
+    const missing = s.missing ? (d.missing ?? []).filter((m) => (m.cited_by?.length ?? 0) >= times).map(ghost) : [];
+    const hubs = [...(s.institutions ? d.institutions.map(place) : []), ...(s.authors ? [...people.keys()].map(person) : []), ...missing];
     const all = [...d.nodes, ...hubs].map((n) => {
       const old = before.get(n.id);
       return Object.assign(old ?? { x: (Math.random() - 0.5) * 400, y: (Math.random() - 0.5) * 400 }, n, { degree: 0 }) as Node;
@@ -143,6 +163,7 @@
     const pair = (a: string, b: string) => (a < b ? `${a}\n${b}` : `${b}\n${a}`);
     const coauthors = new Map(d.authors.map(([a, b, names]) => [pair(a, b), names]));
     if (s.cites) d.cites.forEach(([a, b]) => add(a, b, 'cites', { self: coauthors.get(pair(a, b)) }));
+    missing.forEach((m) => m.ghost.cited_by?.forEach((id) => add(id, m.id, 'missing')));
     if (s.authors) people.forEach((ids, name) => ids.forEach((id) => add(id, `author:${name}`, 'authors')));
     if (s.institutions) d.institutions.forEach((p) => Object.entries(p.papers).forEach(([id, names]) => add(id, place(p).id, 'institutions', { names })));
     if (s.similar) d.similar.filter(([, , sc]) => sc >= threshold).forEach(([a, b, score]) => add(a, b, 'similar', { score }));
@@ -151,10 +172,11 @@
     list.forEach((e) => pairs.set(pair(e.source.id, e.target.id), [...(pairs.get(pair(e.source.id, e.target.id)) ?? []), e]));
     pairs.forEach((group) => group.forEach((e, i) => (e.bend = (i - (group.length - 1) / 2) * 22)));
     // Citations last, so they are drawn on top.
-    const order: Record<Kind, number> = { similar: 0, institutions: 1, authors: 2, cites: 3 };
+    const order: Record<Kind, number> = { similar: 0, institutions: 1, authors: 2, missing: 3, cites: 4 };
     list.sort((a, b) => order[a.kind] - order[b.kind]);
     list.forEach((e) => (e.source.degree++, e.target.degree++));
     nodes = lonely ? all.filter((n) => n.degree > 0) : all;
+    alone = all.filter((n) => n.degree === 0 && !hub(n) && !n.ghost);
     edges = list;
     groups = grouped(nodes, edges);
     between = betweenness(nodes, edges);
@@ -165,13 +187,15 @@
       .force(
         'link',
         forceLink<Node, Edge>(edges)
-          .distance((e) => ({ authors: 26, cites: 60, institutions: 32, similar: 50 })[e.kind])
+          .distance((e) => ({ authors: 26, cites: 60, missing: 60, institutions: 32, similar: 50 })[e.kind])
           // People and places pull hard, citations (which tie nearly everything together) loosely: groups clump.
-          .strength((e) => ({ authors: 0.8, cites: 0.12, institutions: 0.6, similar: 0.3 })[e.kind]),
+          .strength((e) => ({ authors: 0.8, cites: 0.12, missing: 0.12, institutions: 0.6, similar: 0.3 })[e.kind]),
       )
       .force('charge', forceManyBody().strength(-140).distanceMax(450))
-      .force('x', forceX(0).strength(0.04))
-      .force('y', forceY(0).strength(0.04))
+      // Papers no link reaches go round the edge, so they don't look part of the network.
+      .force('x', forceX<Node>(0).strength((n) => (n.degree ? 0.04 : 0)))
+      .force('y', forceY<Node>(0).strength((n) => (n.degree ? 0.04 : 0)))
+      .force('ring', forceRadial<Node>(80 + 30 * Math.sqrt(nodes.filter((n) => n.degree).length), 0, 0).strength((n) => (n.degree ? 0 : 0.5)))
       .force('collide', forceCollide<Node>().radius((n) => radius(n) + 3))
       .on('tick', draw);
     // The first layout is worked out at once, so the map appears settled; later changes animate gently.
@@ -220,11 +244,11 @@
         if (w !== s) score.set(w, score.get(w)! + (share.get(w) ?? 0));
       }
     }
-    return new Map([...score].filter(([n]) => !hub(n)).map(([n, v]) => [n.id, v]));
+    return new Map([...score].filter(([n]) => !hub(n) && !n.ghost).map(([n, v]) => [n.id, v]));
   }
 
   // Label propagation: each node takes the label most of its neighbours have, until none changes. Authors and
-  // institutions shown as hubs tie their papers together too. Sets each paper's `group`, biggest group first.
+  // institutions shown as hubs, and missing papers, tie their papers together too. Sets each paper's `group`, biggest group first.
   function grouped(ns: Node[], es: Edge[]): { name: string; size: number }[] {
     const near = new Map<Node, Node[]>(ns.map((n) => [n, []]));
     es.forEach((e) => (near.get(e.source)?.push(e.target), near.get(e.target)?.push(e.source)));
@@ -241,7 +265,7 @@
       }
     }
     const members = new Map<number, Node[]>();
-    ns.filter((n) => !hub(n)).forEach((n) => members.set(label.get(n)!, [...(members.get(label.get(n)!) ?? []), n]));
+    ns.filter((n) => !hub(n) && !n.ghost).forEach((n) => members.set(label.get(n)!, [...(members.get(label.get(n)!) ?? []), n]));
     // Groups of two or more get a colour, as many as the palette has; the rest stay grey.
     const big = [...members.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length).slice(0, palette.length);
     ns.forEach((n) => (n.group = undefined));
@@ -291,8 +315,9 @@
   // The number a continuous colour shows for a node; null leaves it grey. Counts that span orders of magnitude
   // are compared by their logarithm.
   function measure(n: Node, by: ColorBy): number | null {
+    // The h-index belongs to the authors, so it colours their diamonds alone.
     if (n.person) return by === 'hindex' ? (data?.people?.[n.person] ?? null) : null;
-    if (hub(n)) return null;
+    if (hub(n) || n.ghost || by === 'hindex') return null;
     switch (by) {
       case 'year':
         return n.year;
@@ -302,8 +327,6 @@
         return n.cited_by == null || !n.year ? null : Math.log1p(n.cited_by / Math.max(1, thisYear - n.year + 1));
       case 'cited':
         return cited.get(n.id) || null;
-      case 'hindex':
-        return n.h_index ?? null;
       case 'central':
         return rank.get(n.id) ?? null;
       case 'bridges':
@@ -316,9 +339,8 @@
   const range = $derived.by(() => {
     void [between, rank, cited];
     const by = colorBy;
-    const values = (data?.nodes ?? []).map((n) => measure(n as Node, by)).filter((v): v is number => v != null);
-    const extra = by === 'hindex' ? Object.values(data?.people ?? {}) : [];
-    const sorted = [...values, ...extra].sort((a, b) => a - b);
+    const values = by === 'hindex' ? Object.values(data?.people ?? {}) : (data?.nodes ?? []).map((n) => measure(n as Node, by)).filter((v): v is number => v != null);
+    const sorted = [...values].sort((a, b) => a - b);
     const at = (q: number) => sorted[Math.round(q * (sorted.length - 1))];
     return sorted.length ? { lo: at(0.05), hi: at(0.95), known: values.length } : { lo: 0, hi: 1, known: 0 };
   });
@@ -335,6 +357,7 @@
   const READ: Record<string, [string, string]> = { notes: ['your notes', '#4fb06d'], summary: ['a summary only', '#b5d98a'] };
 
   function color(n: Node): string {
+    if (n.ghost) return css('--card');
     switch (colorBy) {
       case 'group':
         return n.group === undefined ? css('--faint') : palette[n.group];
@@ -378,20 +401,21 @@
     const focus = selected ?? (hovered && 'degree' in hovered ? hovered : null);
     const near = focus ? linked(focus) : null;
     const lit = (n: Node) => !near || n === focus || near.has(n);
-    const kinds: Record<Kind, string> = { cites: css('--accent'), authors: css('--warning'), institutions: css('--title'), similar: css('--ready') };
+    const kinds: Record<Kind, string> = { cites: css('--accent'), missing: css('--faint'), authors: css('--warning'), institutions: css('--title'), similar: css('--ready') };
     for (const e of edges) {
       const on = !focus || e.source === focus || e.target === focus;
-      ctx.globalAlpha = e === hovered ? 1 : on ? (focus ? 0.9 : e.kind === 'similar' ? 0.7 : e.kind === 'cites' ? 0.5 : 0.35) : 0.06;
+      const arrowed = e.kind === 'cites' || e.kind === 'missing';
+      ctx.globalAlpha = e === hovered ? 1 : on ? (focus ? 0.9 : e.kind === 'similar' ? 0.7 : arrowed ? 0.5 : 0.35) : 0.06;
       ctx.strokeStyle = kinds[e.kind];
       const width = e.kind === 'similar' ? 1 + 6 * Math.max(0, (e.score ?? 0) - 0.6) : e.kind === 'cites' ? 1.5 : 1.2;
       ctx.lineWidth = (width / Math.sqrt(view.k)) * (e === hovered ? 2 : 1);
-      ctx.setLineDash(e.kind === 'similar' ? [4, 4] : []);
+      ctx.setLineDash(e.kind === 'similar' || e.kind === 'missing' ? [4, 4] : []);
       const [ax, ay, cx, cy, bx, by] = curve(e);
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.quadraticCurveTo(cx, cy, bx, by);
       ctx.stroke();
-      if (e.kind === 'cites' && (on || !focus)) {
+      if (arrowed && (on || !focus)) {
         // Heads stay clear even where the lines are faint: the direction is the point of a citation.
         ctx.globalAlpha = Math.min(1, ctx.globalAlpha * 2);
         arrow(ctx, e);
@@ -414,9 +438,9 @@
       // Hubs stay hollow, but for authors coloured by their h-index.
       ctx.fillStyle = hub(n) && measure(n, colorBy) == null ? css('--card') : color(n);
       ctx.fill();
-      if (hub(n)) {
+      if (hub(n) || n.ghost) {
         ctx.lineWidth = 2 / view.k;
-        ctx.strokeStyle = n.place ? kinds.institutions : kinds.authors;
+        ctx.strokeStyle = n.place ? kinds.institutions : n.person ? kinds.authors : kinds.missing;
         ctx.stroke();
       }
       if (n === focus || n === hovered) {
@@ -498,20 +522,34 @@
     return null;
   }
 
+  // Why no link shown reaches a paper.
+  function why(n: Node): string {
+    if (!n.refs) return n.ids ? "Its references aren't looked up yet: the server does that in the background, or `carrel refs " + n.id + '`.' : "No DOI or arXiv id, so its references can't be looked up: add one to the entry.";
+    const shared = (data?.missing ?? []).filter((m) => m.cited_by?.includes(n.id)).length;
+    const cites = (data?.cites ?? []).some(([a, b]) => a === n.id || b === n.id);
+    if (cites) return 'Its citations are hidden: show Citations.';
+    return `It cites none of the papers shown and none cite it.${shared ? ` It shares ${shared} reference${shared > 1 ? 's' : ''} the library lacks with them: show Missing.` : ''}`;
+  }
+
   function describe(h: Node | Edge): string {
+    if ('degree' in h && h.ghost) {
+      return `<b>${esc(h.title)}</b><br><span>${esc([h.authors, h.venue, h.year].filter(Boolean).join(' · '))}</span><br><span>Not in your library; cited by ${h.ghost.cited_by?.length} of the papers shown</span>`;
+    }
     if ('degree' in h && hub(h)) {
       return `<b>${esc(h.title)}</b><br><span>${esc([h.place?.country, `${h.degree} papers`].filter(Boolean).join(' · '))}</span>`;
     }
     if ('degree' in h) {
       const p = app.papers[h.id];
       const counts = [h.cited_by != null && `cited ${h.cited_by.toLocaleString()} times`, h.h_index != null && `authors' h-index up to ${h.h_index}`].filter(Boolean).join(' · ');
-      return `<b>${esc(h.title)}</b><br><span>${esc([h.authors, h.venue, h.year].filter(Boolean).join(' · '))}</span>${counts ? `<br><span>${esc(counts)}</span>` : ''}${p?.keywords.length ? `<br><span class="k">${esc(p.keywords.slice(0, 5).join(', '))}</span>` : ''}`;
+      const lonely = h.degree === 0 ? `<br><span>${esc(why(h))}</span>` : '';
+      return `<b>${esc(h.title)}</b><br><span>${esc([h.authors, h.venue, h.year].filter(Boolean).join(' · '))}</span>${counts ? `<br><span>${esc(counts)}</span>` : ''}${p?.keywords.length ? `<br><span class="k">${esc(p.keywords.slice(0, 5).join(', '))}</span>` : ''}${lonely}`;
     }
     const [a, b] = [label(h.source), label(h.target)];
     if (h.kind === 'cites') {
       const self = h.self ? `<br><span>A self-citation: both are by ${h.self.map(esc).join(', ')}</span>` : '';
       return `<b>${esc(a)}</b> cites <b>${esc(b)}</b><br><span>${esc(h.target.title)}</span>${self}`;
     }
+    if (h.kind === 'missing') return `<b>${esc(a)}</b> cites <b>${esc(b)}</b>, not in your library<br><span>${esc(h.target.title)}</span>`;
     if (h.kind === 'institutions') return `<b>${esc(a)}</b> from <b>${esc(h.target.title)}</b>:<br>${h.names!.map(esc).join('<br>')}`;
     if (h.kind === 'similar') return `<b>${esc(a)}</b> and <b>${esc(b)}</b> are alike: ${h.score!.toFixed(2)}`;
     return `<b>${esc(a)}</b> by <b>${esc(h.target.title)}</b><br><span>${esc(h.source.title)}</span>`;
@@ -602,6 +640,18 @@
     return () => themes.disconnect();
   });
 
+  // The papers alone, counted by why, for the "Linked only" tooltip.
+  const reasons = $derived.by(() => {
+    const n = (f: (p: Node) => boolean) => alone.filter(f).length;
+    const lines = [
+      [n((p) => !p.refs && !!p.ids), "references not looked up yet"],
+      [n((p) => !p.ids && !p.refs), 'no DOI or arXiv id to look references up by'],
+      [n((p) => !!p.refs), 'cite none of the others, none cite them'],
+    ] as const;
+    const text = lines.filter(([c]) => c).map(([c, why]) => `${c}: ${why}`);
+    return text.length ? `Papers no link shown reaches:\n${text.join('\n')}\nHover one with this off to see why` : 'Hide papers no link shown reaches';
+  });
+
   const counts = $derived(
     data ? { cites: data.cites.length, authors: new Set(data.authors.flatMap(([, , names]) => names)).size, institutions: data.institutions.length, similar: data.similar.filter(([, , s]) => s >= alike).length } : null,
   );
@@ -614,6 +664,10 @@
       {#each app.projects as p}<option value={p.name}>{p.name}</option>{/each}
     </select>
     <label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={show.cites} class="accent-[var(--accent)]" /><span class="h-0.5 w-4 rounded bg-accent"></span>Citations {#if counts}<span class="text-xs text-faint">{counts.cites}</span>{/if}</label>
+    <label class="flex cursor-pointer items-center gap-1.5" title="Papers the library lacks that several of those shown cite, as grey rings: they may tie together papers nothing else links">
+      <input type="checkbox" bind:checked={show.missing} class="accent-[var(--accent)]" /><span class="size-2.5 rounded-full border-2 border-faint"></span>Missing
+      {#if show.missing}<input type="range" min="2" max="10" step="1" bind:value={often} class="w-16 accent-[var(--accent)]" /><span class="w-12 text-xs text-faint tabular-nums">cited ≥{often}×</span>{/if}
+    </label>
     <label class="flex cursor-pointer items-center gap-1.5" title="Authors two or more papers share, as diamonds"><input type="checkbox" bind:checked={show.authors} class="accent-[var(--accent)]" /><span class="size-2 rotate-45 border-2 border-warning"></span>Authors {#if counts}<span class="text-xs text-faint">{counts.authors}</span>{/if}</label>
     <label class="flex cursor-pointer items-center gap-1.5" title={counts?.institutions === 0 ? 'None looked up yet: `carrel refs --all` asks OpenAlex where the authors worked' : 'Institutions two or more papers come from, as squares'}>
       <input type="checkbox" bind:checked={show.institutions} class="accent-[var(--accent)]" /><span class="size-2.5 rounded-sm border-2 border-title"></span>Institutions {#if counts}<span class="text-xs text-faint">{counts.institutions}</span>{/if}
@@ -622,7 +676,7 @@
       <input type="checkbox" bind:checked={show.similar} class="accent-[var(--accent)]" /><span class="h-0.5 w-4 border-t-2 border-dashed border-ready"></span>Alike
       {#if show.similar}<input type="range" min="0.5" max="0.95" step="0.01" bind:value={alike} class="w-20 accent-[var(--ready)]" /><span class="w-8 text-xs text-faint tabular-nums">≥{alike.toFixed(2)}</span>{/if}
     </label>
-    <label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" bind:checked={hideLonely} class="accent-[var(--accent)]" />Linked only</label>
+    <label class="flex cursor-pointer items-center gap-1.5" title={reasons}><input type="checkbox" bind:checked={hideLonely} class="accent-[var(--accent)]" />Linked only {#if alone.length}<span class="text-xs text-faint">{alone.length} alone</span>{/if}</label>
     <label class="ml-auto flex shrink-0 items-center gap-2 text-muted">
       Colour by
       <select bind:value={colorBy} class="h-8 cursor-pointer rounded-lg border bg-card px-2 text-sm text-foreground outline-none">
@@ -642,7 +696,7 @@
       ondblclick={(e) => {
         const w = world(e);
         const h = hit(w.x, w.y);
-        if (h && 'degree' in h && !hub(h)) go(`/paper/${encodeURIComponent(h.id)}`);
+        if (h && 'degree' in h && !hub(h) && !h.ghost) go(`/paper/${encodeURIComponent(h.id)}`);
       }}
       onwheel={wheel}
     ></canvas>
@@ -672,16 +726,25 @@
           <button class="cursor-pointer text-faint hover:text-foreground" onclick={() => ((selected = null), draw())} aria-label="Close"><X class="size-4" /></button>
         </div>
         <div class="mt-3 flex items-center gap-3 text-xs text-muted">
-          <span class="shrink-0">{s.degree} {hub(s) ? 'papers' : 'links'}</span>
+          <span class="shrink-0">{s.degree} {hub(s) || s.ghost ? 'papers' : 'links'}</span>
+          {#if s.ghost}<span>not in your library</span>{/if}
           {#if s.projects.length}<span class="min-w-0 truncate">in {s.projects.join(', ')}</span>{/if}
           {#if s.place?.ror}
             <a href={s.place.ror} target="_blank" rel="noreferrer" class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">ROR<ArrowUpRight class="size-3.5" /></a>
           {:else if s.person}
             <a href="#/people?name={encodeURIComponent(s.person)}" class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">Their papers<ArrowUpRight class="size-3.5" /></a>
+          {:else if s.ghost}
+            {@const g = s.ghost}
+            <button
+              class="ml-auto flex shrink-0 cursor-pointer items-center gap-1 font-medium text-accent hover:underline disabled:opacity-50"
+              disabled={adding}
+              onclick={async () => ((adding = true), (await addSource(g.doi ?? (g.arxiv ? `arXiv:${g.arxiv}` : g.title), false)) && loads++, (adding = false))}
+            >{adding ? 'Adding…' : 'Add to library'}<Plus class="size-3.5" /></button>
           {:else if !s.place}
             <a href={paperHref(s.id)} class="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent hover:underline">Open<ArrowUpRight class="size-3.5" /></a>
           {/if}
         </div>
+        {#if !hub(s) && !s.ghost && s.degree === 0}<div class="mt-2 text-xs text-muted">{why(s)}</div>{/if}
       </div>
     {/if}
 
@@ -709,7 +772,9 @@
           <span>{colorBy === 'year' ? `≥ ${range.hi}` : `${shown(range.hi)} ${high}`}</span>
         </div>
         {#if how}<div class="mt-1 text-faint">{how}</div>{/if}
-        {#if (colorBy === 'citations' || colorBy === 'momentum' || colorBy === 'hindex') && range.known < (data?.nodes.length ?? 0)}
+        {#if colorBy === 'hindex' && !show.authors}
+          <div class="mt-1 text-faint">Show Authors to see them</div>
+        {:else if (colorBy === 'citations' || colorBy === 'momentum') && range.known < (data?.nodes.length ?? 0)}
           <div class="mt-1 flex items-center gap-2 text-faint"><span class="size-2.5 shrink-0 rounded-full bg-faint"></span>not looked up yet: the server does, or <code>carrel refs --all</code></div>
         {/if}
       </div>

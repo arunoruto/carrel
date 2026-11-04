@@ -147,6 +147,9 @@ export interface MapNode {
   h_index?: number | null;
   /** What you wrote about it: `notes`, else `summary`, else nothing. */
   read?: string;
+  /** Whether its references are looked up, and whether it has a DOI or arXiv id to look them up by. */
+  refs?: boolean;
+  ids?: boolean;
 }
 
 export interface LibraryMap {
@@ -158,6 +161,8 @@ export interface LibraryMap {
   similar: [string, string, number][];
   /** Authors' h-index from OpenAlex, by the spellings the author hubs use. */
   people?: Record<string, number>;
+  /** Papers the library lacks that two or more of these cite, with the ones citing them. */
+  missing?: Omit<Reference, 'in_library'>[];
 }
 
 export interface Issue {

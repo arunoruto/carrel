@@ -195,6 +195,11 @@ impl Graph {
         Graph { authors: Authors::new(&docs, people), papers, refs, known, cites, cited_by }
     }
 
+    /// Whether a library paper's references have been looked up.
+    pub fn references_known(&self, id: &str) -> bool {
+        self.refs.contains_key(id)
+    }
+
     /// The library id of a referenced paper.
     pub fn find(&self, r: &Reference) -> Option<&str> {
         r.keys().iter().find_map(|k| self.known.get(k)).map(String::as_str)
