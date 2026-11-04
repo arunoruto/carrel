@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/arunoruto/carrel/compare/v0.7.0...v0.8.0) (2026-11-04)
+
+
+### Features
+
+* colour the map by citations, momentum, authors' h-index, centrality, bridges or your notes ([bbc1753](https://github.com/arunoruto/carrel/commit/bbc1753667ad6a217442ed76f7bc534c41298b4a))
+* **web:** colour the map by group, type, year or citations, picked from a menu ([4b25283](https://github.com/arunoruto/carrel/commit/4b2528319503030139f46f4d789544e475dc8b88))
+* **web:** missing papers and lone papers on the map; h-index on authors alone ([1dab154](https://github.com/arunoruto/carrel/commit/1dab154d5afbb9ccb6b4f5e34dd28986817f5483))
+
 ## [0.7.0](https://github.com/arunoruto/carrel/compare/v0.6.0...v0.7.0) (2026-11-03)
 
 
